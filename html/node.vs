@@ -16,15 +16,17 @@ public enum NodeKind: Equatable {
     case comment
 }
 
-/// A node in the HTML document tree.
+/// A node in the HTML document tree. Everyone reads it; only the parser
+/// and `web/dom` change it, and `web/dom` records each change in its
+/// document's journal, which is how the rest of the engine learns of it.
 public class Node {
     public let Id: int64
-    public var Kind: NodeKind
-    public var TagName: string
-    public var Attributes: [Attribute]
-    public var Text: string
-    public var Children: [Node]
-    public weak var Parent: Node?
+    public internal(set) var Kind: NodeKind
+    public internal(set) var TagName: string
+    public internal(set) var Attributes: [Attribute]
+    public internal(set) var Text: string
+    public internal(set) var Children: [Node]
+    public internal(set) weak var Parent: Node?
 
     public init(kind: NodeKind, tagName: string = "", text: string = "", attributes: [Attribute] = []) {
         self.Id = getNextNodeId()
@@ -53,7 +55,7 @@ public class Node {
     }
 
     /// Sets or updates an attribute.
-    public func SetAttribute(_ name: string, _ value: string) {
+    package func SetAttribute(_ name: string, _ value: string) {
         let lower = toLower(name)
         var i = 0
         while i < Attributes.count {
@@ -67,7 +69,7 @@ public class Node {
     }
 
     /// Removes an attribute, if it has it.
-    public func RemoveAttribute(_ name: string) {
+    package func RemoveAttribute(_ name: string) {
         let lower = toLower(name)
         var i = 0
         while i < Attributes.count {
@@ -140,14 +142,39 @@ public class Node {
 
     // MARK: - Tree Navigation & Mutation
 
-    /// Appends a child node to this node's children.
-    public func AppendChild(_ child: Node) {
+    /// Appends a child node to this node's children, taking it from
+    /// where it was first.
+    package func AppendChild(_ child: Node) {
+        if let old = child.Parent { old.RemoveChild(child) }
         child.Parent = self
         Children.append(child)
     }
 
+    /// Inserts a child before another of this node's children, or last
+    /// where `before` is nil or not a child.
+    package func InsertBefore(_ child: Node, _ before: Node?) {
+        if let old = child.Parent { old.RemoveChild(child) }
+        child.Parent = self
+        if let b = before {
+            var i = 0
+            while i < Children.count {
+                if Children[i].Id == b.Id {
+                    Children.insert(child, at: i)
+                    return
+                }
+                i += 1
+            }
+        }
+        Children.append(child)
+    }
+
+    /// Replaces a text or comment node's text.
+    package func SetText(_ text: string) {
+        Text = text
+    }
+
     /// Removes a child node.
-    public func RemoveChild(_ child: Node) {
+    package func RemoveChild(_ child: Node) {
         var i = 0
         while i < Children.count {
             if Children[i].Id == child.Id {

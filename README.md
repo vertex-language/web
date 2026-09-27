@@ -25,6 +25,7 @@ vsc run bench -- testdata/pages/docs.html
 # The checks, one per stage.
 vsc run check-html
 vsc run check-css
+vsc run check-dom
 vsc run check-cascade
 vsc run check-layout
 vsc run check-page
@@ -40,8 +41,8 @@ vsc run check-deps
 | **`web/html`** | parse | The HTML tokenizer and tree builder, entities, the node tree, and a serializer. |
 | **`web/css`** | parse | CSS syntax: tokens, rules, at-rules, declarations. Typed values and the property table: every longhand the engine knows (`Prop`), values in their units (`Value`, `Length`), shorthands expanded into `Longhand`s, and CSS color syntax (`ParseColor`). |
 | **`web/css/selector`** | parse | Selectors: the parser, the matcher (combinators, attributes, pseudo-classes, `:not()`, `:is()`, `:has()`), specificity, `QuerySelector`. |
-| **`web/dom`** | document | Document positions (`TextPosition`) and the HTML standard's form semantics: text controls, focus order, labels, form data. |
-| **`web/cascade`** | style | The user agent stylesheet, rule sets, the resolver, and `ComputedStyle`: the cascade, inheritance, `em`/`rem`/viewport units, `calc()`, `@media`, and state (`:hover`, `:focus`, `:active`, `:visited`) re-matched without a rebuild. |
+| **`web/dom`** | document | The live document: typed mutation (`SetAttribute`, `AppendChild`, `TextContent`, `ClassList`) and the journal of every change, which is how the engine learns of one. Document positions (`TextPosition`) and the HTML standard's form semantics: text controls, focus order, labels, form data. |
+| **`web/cascade`** | style | The user agent stylesheet, rule sets, the resolver, and `ComputedStyle`: the cascade, inheritance, `em`/`rem`/viewport units, `calc()`, `@media`, and state (`:hover`, `:focus`, `:active`, `:visited`) re-matched without a rebuild. `Invalidate` turns the DOM journal into the subtrees to restyle, by what the selectors mention: a change nothing depends on costs no frame. |
 | **`web/layout`** | layout | The box tree and its layout: block, inline, flex, grid, tables, floats, positioning, scrolling. Hit testing. |
 | **`web/paint`** | paint | The display list for a laid-out tree (`Build`), and its rasterization onto `image/draw` (`Rasterize`). |
 | **`web/edit`** | input | Caret movement and text editing over UTF-8: characters, words, lines. |
@@ -112,12 +113,12 @@ _ = page.Handle(.keyDown(web.Key(Key: "Enter", Code: "Enter")))
 | `NeedsAnimation()`, `Advance(time:)` | The caret blinks: keep frames coming while true. |
 | `ScrollOffset()`, `SetScrollOffset(_:)`, `ScrollTo(_:)`, `ScrollIntoViewIfNeeded(_:)` | Scrolling. |
 | `OnNavigate`, `OnSubmit`, `OnAction`, `OnTitleChanged`, `OnHoverLink` | What the user did. |
-| `IsVisited` | Which links the host has been to, for `:visited`. |
+| `IsVisited`, `VisitedChanged()` | Which links the host has been to, for `:visited`. |
 | `Clipboard` | Where copy and paste go; the host provides it. |
-| `Document`, `Title`, `QuerySelector(_:)`, `ElementAt(_:)`, `BoxFor(_:)`, `RootBox` | The page and its layout. |
+| `Document`, `Title`, `QuerySelector(_:)`, `ElementAt(_:)`, `BoxFor(_:)`, `RootBox` | The page and its layout. `Document` is a `dom.Document`: change the page through it, and the next frame restyles. |
 | `Focus(_:)`, `FocusedElement`, `ValueOf(_:)` | Forms. |
 | `SelectedText()`, `SelectAll()`, `ClearSelection()`, `HasSelection` | Selection. |
-| `SetImage(_:_:)`, `Invalidate()` | Resources the host fetches; a DOM the host edited. |
+| `SetImage(_:_:)` | Resources the host fetches. |
 
 ---
 

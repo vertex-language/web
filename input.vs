@@ -262,7 +262,7 @@ extension Page {
             }
         }
         if let label = dom.Ancestor(node, "label") {
-            if let target = dom.LabelTarget(label, in: Document) {
+            if let target = dom.LabelTarget(label, in: Document?.Tree) {
                 let type = dom.InputType(target)
                 if type == "checkbox" { toggleChecked(target) }
                 else if type == "radio" { check(target) }
@@ -271,12 +271,7 @@ extension Page {
             }
         }
         if let summary = dom.Ancestor(node, "summary"), let details = summary.Parent, details.TagName == "details" {
-            if details.HasAttribute("open") {
-                details.RemoveAttribute("open")
-            } else {
-                details.SetAttribute("open", "")
-            }
-            needsStyle = true
+            _ = Document?.ToggleAttribute(details, "open")
             return .handled
         }
         Focus(nil)
@@ -319,7 +314,7 @@ extension Page {
         if href.hasPrefix("#") {
             let b = [uint8](href.utf8)
             let id = stringOf(b, 1, b.count)
-            if let target = Document?.ElementById(id) {
+            if let target = Document?.Tree.ElementById(id) {
                 ScrollTo(target)
             } else if id.isEmpty || id == "top" {
                 SetScrollOffset(draw.Point(0, 0))
@@ -469,9 +464,10 @@ extension Page {
             }
         }
         if next != current {
-            for o in options { o.RemoveAttribute("selected") }
-            options[next].SetAttribute("selected", "")
-            needsStyle = true
+            if let doc = Document {
+                for o in options { doc.RemoveAttribute(o, "selected") }
+                doc.SetAttribute(options[next], "selected", "")
+            }
         }
         return .handled
     }
@@ -700,27 +696,22 @@ extension Page {
 
     func toggleChecked(_ input: html.Node) {
         if input.HasAttribute("disabled") { return }
-        if input.HasAttribute("checked") {
-            input.RemoveAttribute("checked")
-        } else {
-            input.SetAttribute("checked", "")
-        }
+        _ = Document?.ToggleAttribute(input, "checked")
         Focus(input)
-        needsStyle = true
     }
 
     func check(_ radio: html.Node) {
         if radio.HasAttribute("disabled") { return }
-        if let name = radio.GetAttribute("name"), let doc = Document {
-            for other in doc.ElementsByTagName("input") {
+        guard let doc = Document else { return }
+        if let name = radio.GetAttribute("name") {
+            for other in doc.Tree.ElementsByTagName("input") {
                 if other.Id != radio.Id && other.GetAttribute("name") == name && lower(other.GetAttribute("type") ?? "") == "radio" {
-                    other.RemoveAttribute("checked")
+                    doc.RemoveAttribute(other, "checked")
                 }
             }
         }
-        radio.SetAttribute("checked", "")
+        doc.SetAttribute(radio, "checked", "")
         Focus(radio)
-        needsStyle = true
     }
 
     func resetForm(_ form: html.Node) {

@@ -818,3 +818,15 @@ public func SelectedPart(_ f: layout.Fragment, _ node: html.Node, _ range: (star
     if from >= to { return nil }
     return (from: from, to: to)
 }
+
+/// Whether painting reads an attribute itself, as a checkbox's check
+/// or a field's placeholder. `web/cmd/check-deps` keeps this in step
+/// with the code.
+public func ReadsAttribute(_ name: string) -> bool {
+    switch name {
+    case "alt", "max", "placeholder", "value", "checked":
+        return true
+    default:
+        return false
+    }
+}

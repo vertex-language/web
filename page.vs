@@ -67,7 +67,10 @@ public protocol Clipboard {
 @MainActor
 public final class Page {
     public var Configuration: Config
-    public var Document: html.Document?
+    /// The live document. Change it through its methods (or an
+    /// `Element`'s), which journal what they do: the next frame restyles
+    /// from the journal.
+    public internal(set) var Document: dom.Document?
     /// Where copy and paste go. Nil keeps them inside the page.
     public var Clipboard: Clipboard? = nil
 
@@ -151,7 +154,7 @@ public final class Page {
     }
 
     func load(_ doc: html.Document) {
-        Document = doc
+        Document = dom.Document(doc)
         resolver.Author = cascade.RuleSet()
         fontFaces = []
         images = [:]
@@ -296,7 +299,22 @@ public final class Page {
         return draw.Size(contentWidth, contentHeight)
     }
 
-    public func NeedsRepaint() -> bool { return needsRepaint || needsStyle || needsLayout || needsPaint }
+    public func NeedsRepaint() -> bool {
+        takeJournal()
+        return needsRepaint || needsStyle || needsLayout || needsPaint
+    }
+
+    /// Reads the journal: what the host or the page itself changed in the
+    /// tree since the last frame. Changes nothing depends on -- an
+    /// attribute no rule and no stage reads, a class no rule names --
+    /// are dropped, and cost no frame.
+    func takeJournal() {
+        guard let doc = Document, doc.HasMutations else { return }
+        let records = doc.TakeRecords()
+        if needsStyle { return }
+        let roots = resolver.Invalidate(records, reads: { name in layout.ReadsAttribute(name) || paint.ReadsAttribute(name) })
+        if !roots.isEmpty { needsStyle = true }
+    }
 
     /// Whether the page has something moving on its own -- a blinking
     /// caret -- and wants frames while it does. A host that gets true
@@ -337,14 +355,19 @@ public final class Page {
     /// Called with a link's URL as the pointer moves onto it, and nil off it.
     public func OnHoverLink(_ handler: (string?) -> Void) { onHoverLink = handler }
     /// Asked whether a resolved URL has been visited, for `:visited`.
-    /// Call `Invalidate()` when the answer changes.
+    /// Call `VisitedChanged()` when an answer changes.
     public func IsVisited(_ handler: (string) -> bool) { isVisited = handler; needsStyle = true }
+    /// The host's visited set changed: links are matched again.
+    public func VisitedChanged() {
+        if resolver.UsesVisited { needsStyle = true }
+    }
 
     // MARK: - The pipeline
 
     /// Brings the page up to date: boxes, layout and the display list,
     /// whichever are stale.
     func update() {
+        takeJournal()
         if needsStyle {
             builder.Images = images
             builder.Values = values
@@ -361,7 +384,7 @@ public final class Page {
                 context.Visited = nil
             }
             if let doc = Document {
-                root = builder.Build(doc)
+                root = builder.Build(doc.Tree)
             } else {
                 root = nil
             }
@@ -644,11 +667,6 @@ public final class Page {
         }
         clampScroll()
         needsRepaint = true
-    }
-
-    /// Marks the page as changed: the host edited the DOM.
-    public func Invalidate() {
-        needsStyle = true
     }
 
     /// The text a form control holds now.

@@ -6,6 +6,7 @@ import (
     "web/cascade"
     "web/css"
     "web/css/selector"
+    "web/dom"
     "web/html"
 )
 
@@ -147,8 +148,74 @@ func testStyles() {
     check(mm.Width == .px(20) && mm.Height == .px(5) && mm.MarginTop == .px(6), "min(), max() and clamp() fold (got \(mm.Width) \(mm.Height) \(mm.MarginTop))")
 }
 
+/// The roots a change restyles, as tag#id, for a page with sheet.
+func invalidated(_ sheet: string, _ body: string, _ change: (dom.Document) -> Void) -> [string] {
+    let doc = dom.Document(html.Parse("<body>" + body + "</body>"))
+    let resolver = cascade.StyleResolver(ua: cascade.UserAgentRules())
+    resolver.Author.Add(css.Parse(sheet))
+    change(doc)
+    let roots = resolver.Invalidate(doc.TakeRecords(), reads: { name in name == "src" })
+    var out: [string] = []
+    for r in roots { out.append(r.TagName + "#" + (r.GetAttribute("id") ?? "")) }
+    return out
+}
+
+func testInvalidation() {
+    print("Invalidation")
+    let sheet = ".on { color: red } #hot { color: blue } [data-state=open] { width: 5px } a.big b { color: green } p::after { content: attr(title) }"
+    let body = "<div id=a class=x><p id=p>text</p></div><img id=i><a id=l></a>"
+
+    check(invalidated(sheet, body, { d in d.ElementById("a")!.SetAttribute("data-other", "1") }).isEmpty,
+          "an attribute no rule names restyles nothing")
+    check(invalidated(sheet, body, { d in d.ElementById("a")!.ClassList.Add("unused") }).isEmpty,
+          "a class no rule names restyles nothing")
+    check(invalidated(sheet, body, { d in d.ElementById("a")!.ClassList.Add("on") }) == ["div#a"],
+          "a class a rule names restyles the element")
+    check(invalidated(sheet, body, { d in d.ElementById("a")!.ClassList.Remove("x") }).isEmpty,
+          "removing a class no rule names restyles nothing")
+    check(invalidated(sheet, body, { d in d.ElementById("l")!.ClassList.Add("big") }) == ["a#l"],
+          "a class named in an ancestor compound restyles the element (its subtree follows)")
+    check(invalidated(sheet, body, { d in d.ElementById("a")!.SetAttribute("data-state", "open") }) == ["div#a"],
+          "an attribute a selector names restyles the element")
+    check(invalidated(sheet, body, { d in d.ElementById("p")!.SetAttribute("title", "t") }) == ["p#p"],
+          "an attribute content: attr() reads restyles the element")
+    check(invalidated(sheet, body, { d in d.ElementById("a")!.SetAttribute("style", "color: red") }) == ["div#a"],
+          "inline style restyles the element")
+    check(invalidated(sheet, body, { d in d.ElementById("a")!.SetAttribute("hidden", "") }) == ["div#a"],
+          "a presentational attribute restyles the element")
+    check(invalidated(sheet, body, { d in d.ElementById("i")!.SetAttribute("src", "x.png") }) == ["img#i"],
+          "an attribute a later stage reads restyles the element")
+    check(invalidated(sheet, body, { d in d.ElementById("a")!.SetAttribute("id", "hot") }) == ["div#hot"],
+          "an id a rule names restyles the element")
+    check(invalidated(sheet, body, { d in d.ElementById("a")!.SetAttribute("id", "cold") }).isEmpty,
+          "an id change no rule names on either side restyles nothing")
+    check(invalidated(sheet, body, { d in
+        let a = d.ElementById("a")!
+        a.ClassList.Add("on")
+        a.ClassList.Remove("on")
+    }) == ["div#a"], "a class that came and went is still looked at")
+    check(invalidated(sheet, body, { d in d.ElementById("p")!.TextContent = "other" }) == ["p#p"],
+          "new text restyles the text's element")
+    check(invalidated(sheet, body, { d in d.ElementById("a")!.AppendChild(d.CreateElement("span")) }) == ["div#a"],
+          "a new child restyles its parent")
+    check(invalidated(sheet, body, { d in
+        d.ElementById("a")!.ClassList.Add("on")
+        d.ElementById("a")!.SetAttribute("data-state", "open")
+    }).count == 1, "each element is a root once")
+
+    let siblingSheet = ".on + p { color: red }"
+    check(invalidated(siblingSheet, body, { d in d.ElementById("a")!.ClassList.Add("on") }) == ["body#"],
+          "with sibling selectors, a change restyles from the parent")
+    let hasSheet = "div:has(.on) { color: red }"
+    check(invalidated(hasSheet, body, { d in d.ElementById("p")!.ClassList.Add("on") }) == ["html#"],
+          "with :has(), a change restyles from the top")
+    check(invalidated(":checked { color: red }", "<input id=c type=checkbox>", { d in _ = d.ElementById("c")!.ToggleAttribute("checked") }) == ["input#c"],
+          ":checked makes checked matter")
+}
+
 func main() -> int32 {
     testStyles()
+    testInvalidation()
     if failures == 0 {
         print("ALL CASCADE CHECKS PASSED")
         return 0

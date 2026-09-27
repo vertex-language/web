@@ -149,9 +149,64 @@ func near(_ a: float32, _ b: float32, _ tolerance: float32 = 0.5) -> bool {
     return d < tolerance && d > -tolerance
 }
 
+@MainActor
+func testJournal() {
+    print("The journal drives restyle")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(300, 200))
+    view.LoadHTML("""
+    <style>body { margin: 0 } .base { width: 10px; height: 10px } .wide { width: 50px }
+    #box { position: absolute; left: 100px; top: 100px; margin: 0; width: 20px; height: 20px }</style>
+    <div id=a class=base></div><ul id=list></ul>
+    <input type=checkbox id=box>
+    """)
+    var pixels = [uint8](repeating: 0, count: 300 * 200 * 4)
+    let a = view.QuerySelector("#a")!
+    check(view.BoxFor(a)!.Width == 10, "the element starts 10px wide")
+    view.Draw(into: &pixels, width: 300, height: 200, scale: 1)
+    check(!view.NeedsRepaint(), "a drawn page asks for nothing")
+
+    let doc = view.Document!
+    doc.ElementFor(a).ClassList.Add("wide")
+    check(view.NeedsRepaint(), "a change through the document asks for a frame")
+    check(view.BoxFor(a)!.Width == 50, "and restyles: a class added makes the element 50px wide")
+    view.Draw(into: &pixels, width: 300, height: 200, scale: 1)
+
+    doc.ElementFor(a).SetAttribute("class", "base wide")
+    check(!view.NeedsRepaint(), "a change that changes nothing asks for no frame")
+    doc.ElementFor(a).SetAttribute("data-note", "1")
+    check(!view.NeedsRepaint(), "an attribute nothing reads asks for no frame")
+    doc.ElementFor(a).ClassList.Add("unstyled")
+    check(!view.NeedsRepaint(), "a class no rule names asks for no frame")
+    doc.ElementFor(a).ClassList.Remove("wide")
+    check(view.NeedsRepaint() && view.BoxFor(a)!.Width == 10, "a class a rule names still restyles")
+    view.Draw(into: &pixels, width: 300, height: 200, scale: 1)
+
+    let list = doc.ElementFor(view.QuerySelector("#list")!)
+    let li = doc.CreateElement("li")
+    list.AppendChild(li)
+    doc.ElementFor(li).TextContent = "item"
+    check(view.BoxFor(li) != nil, "an appended element gets a box")
+
+    doc.ElementFor(li).Remove()
+    check(view.BoxFor(li) == nil, "a removed element loses it")
+
+    // The page's own changes go through the journal too.
+    let box = view.QuerySelector("#box")!
+    view.Draw(into: &pixels, width: 300, height: 200, scale: 1)
+    _ = doc.TakeRecords()
+    let p = draw.Point(110, 110)
+    check(view.ElementAt(p)?.Id == box.Id, "the checkbox is where it was put")
+    _ = view.Handle(.pointerDown(web.Pointer(p)))
+    _ = view.Handle(.pointerUp(web.Pointer(p)))
+    check(box.HasAttribute("checked"), "clicking a checkbox checks it")
+    check(doc.HasMutations, "and records the change in the journal")
+}
+
 func main() -> int32 {
     testTextFeatures()
     testPageInput()
+    testJournal()
     if failures == 0 {
         print("ALL PAGE CHECKS PASSED")
         return 0

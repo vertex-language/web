@@ -634,3 +634,16 @@ public final class Layout {
         return moved
     }
 }
+
+/// Whether building or laying out boxes reads an attribute itself, as
+/// an image's source or a cell's span: a change to it rebuilds the
+/// element's boxes. `web/cmd/check-deps` keeps this in step with the
+/// code.
+public func ReadsAttribute(_ name: string) -> bool {
+    switch name {
+    case "src", "colspan", "rowspan", "start", "type", "value", "selected":
+        return true
+    default:
+        return false
+    }
+}

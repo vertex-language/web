@@ -55,6 +55,8 @@ public final class RuleSet {
     var before: [StyleRule] = []
     var after: [StyleRule] = []
     var order: int32 = 0
+    /// What the selectors mention, for turning changes into restyles.
+    let features = Features()
     /// Whether any rule asks about pointer or keyboard state, which is
     /// what makes hovering or focusing worth a style recalculation.
     public var UsesHover: bool = false
@@ -100,12 +102,14 @@ public final class RuleSet {
             }
             if case .url(let u) = d.Value { ImageURLs.append(u) }
         }
+        features.note(decls)
         for text in rule.Selectors {
             let parsed = selector.ParseSelectors(text)
             for sel in parsed {
                 order += 1
                 let r = StyleRule(selector: sel, order: order, declarations: decls, media: media)
                 r.usesState = noteState(sel)
+                features.note(sel)
                 bucket(r)
             }
         }

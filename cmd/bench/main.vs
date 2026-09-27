@@ -77,10 +77,16 @@ func main() -> int32 {
     page.Draw(into: &pixels, width: pw, height: ph, scale: scale)
     print("scroll (raster): \(ms(t.Elapsed()))")
 
-    page.Invalidate()
+    // Changes to the tree, through the journal: one nothing reads, which
+    // costs no frame, and one that restyles.
+    if let doc = page.Document, let body = doc.Tree.ElementsByTagName("body").first {
+        doc.SetAttribute(body, "data-bench", "1")
+        print("an attribute nothing reads: \(page.NeedsRepaint() ? "a frame" : "no frame")")
+        doc.SetAttribute(body, "style", "outline: none")
+    }
     t = time.Instant.Now()
     page.Draw(into: &pixels, width: pw, height: ph, scale: scale)
-    print("invalidate (style, layout, paint, raster): \(ms(t.Elapsed()))")
+    print("inline style change (style, layout, paint, raster): \(ms(t.Elapsed()))")
 
     // The pointer sweeps the page in a grid; each stop may restyle.
     var restyles = 0
