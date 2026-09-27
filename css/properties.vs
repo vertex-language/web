@@ -252,6 +252,12 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
     case "inset":
         guard let four = fourSides(tokens, allowAuto: true) else { return [] }
         set(.top, four[0]); set(.right, four[1]); set(.bottom, four[2]); set(.left, four[3])
+    case "margin-inline", "margin-block", "padding-inline", "padding-block", "inset-inline", "inset-block":
+        // A start and an end, one value for both, in a left-to-right,
+        // top-to-bottom world.
+        let sides = logicalPair(name)
+        guard let two = fourSides(tokens, allowAuto: !name.hasPrefix("padding")) else { return [] }
+        set(sides[0], two[0]); set(sides[1], two[1])
     case "border-width":
         guard let four = fourValues(tokens, parseBorderWidth) else { return [] }
         set(.borderTopWidth, four[0]); set(.borderRightWidth, four[1]); set(.borderBottomWidth, four[2]); set(.borderLeftWidth, four[3])
@@ -403,8 +409,7 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
          "text-size-adjust", "-webkit-text-size-adjust", "-webkit-tap-highlight-color", "touch-action",
          "overscroll-behavior", "scrollbar-width", "scrollbar-color", "list-style-image", "font-kerning",
          "text-align-last", "text-justify", "font-variant-numeric", "font-variant-ligatures",
-         "font-optical-sizing", "color-scheme", "accent-color", "caret-color", "inset-inline",
-         "inset-block", "margin-inline", "margin-block", "padding-inline", "padding-block",
+         "font-optical-sizing", "color-scheme", "accent-color", "caret-color",
          "border-inline", "border-block", "min-inline-size", "max-inline-size", "inline-size", "block-size",
          "place-content", "place-self", "justify-items", "justify-self", "grid", "grid-template",
          "grid-template-areas", "grid-auto-flow", "grid-auto-columns":
@@ -446,6 +451,19 @@ func logicalProp(_ name: string) -> Prop? {
     }
 }
 
+/// The start and end sides a two-sided logical shorthand sets.
+func logicalPair(_ name: string) -> [Prop] {
+    switch name {
+    case "margin-inline": return [.marginLeft, .marginRight]
+    case "margin-block": return [.marginTop, .marginBottom]
+    case "padding-inline": return [.paddingLeft, .paddingRight]
+    case "padding-block": return [.paddingTop, .paddingBottom]
+    case "inset-inline": return [.left, .right]
+    case "inset-block": return [.top, .bottom]
+    default: return []
+    }
+}
+
 /// The longhands a property name stands for, for `inherit` and `initial`.
 func longhandsOf(_ name: string) -> [Prop] {
     if let p = propNames[name] { return [p] }
@@ -464,6 +482,8 @@ func longhandsOf(_ name: string) -> [Prop] {
     case "gap": return [.rowGap, .columnGap]
     case "list-style": return [.listStyleType, .listStylePosition]
     case "text-decoration": return [.textDecorationLine, .textDecorationColor]
+    case "margin-inline", "margin-block", "padding-inline", "padding-block", "inset-inline", "inset-block":
+        return logicalPair(name)
     default:
         if let p = logicalProp(name) { return [p] }
         return []

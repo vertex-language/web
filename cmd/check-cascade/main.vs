@@ -318,6 +318,10 @@ func testEffects() {
     check(e.BackgroundImage!.Gradient!.Stops.count == 2 && e.BackgroundImage!.Gradient!.Stops[0].Position == 0.1, "and its stops after them")
     guard let n = styleOf("<style>div { filter: blur(4px); } div.n { filter: none }</style><div class=n>x</div>", "div") else { return }
     check(n.FilterBlur == 0, "filter: none clears it")
+
+    guard let lg = styleOf("<style>div { --s: 24px; padding-inline: var(--s); margin-block: 3px 5px; padding-block: 7px }</style><div>x</div>", "div") else { check(false, "logical resolves"); return }
+    check(lg.PaddingLeft == .px(24) && lg.PaddingRight == .px(24), "padding-inline sets both sides, through var() (got \(lg.PaddingLeft))")
+    check(lg.MarginTop == .px(3) && lg.MarginBottom == .px(5) && lg.PaddingTop == .px(7), "margin-block's start and end, and padding-block")
 }
 
 func main() -> int32 {
