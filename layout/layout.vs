@@ -339,7 +339,11 @@ public final class Layout {
         let ih = box.IntrinsicHeight
         let edgesW = box.Padding.Horizontal + box.Border.Horizontal
         let edgesH = box.Padding.Vertical + box.Border.Vertical
-        if w == nil && h == nil {
+        if w == nil && h == nil && box.RatioOnly && iw > 0 && cb.Width - box.Margin.Horizontal > edgesW {
+            let inner = cb.Width - box.Margin.Horizontal - edgesW
+            w = inner + edgesW
+            h = inner * ih / iw + edgesH
+        } else if w == nil && h == nil {
             w = iw + edgesW
             h = ih + edgesH
         } else if w == nil {

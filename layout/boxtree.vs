@@ -100,6 +100,9 @@ public final class BoxTreeBuilder {
                 } else if b.Kind == .lineBreak {
                     continue
                 }
+                // float doesn't apply to a flex or grid item: it's an item
+                // like the others.
+                if b.Style.Float != .none { b.Style.Float = .none }
                 parent.AppendChild(b)
             }
             flushInline(&run, into: parent)
@@ -262,6 +265,7 @@ public final class BoxTreeBuilder {
             let size = svg.IntrinsicSize(node)
             box.IntrinsicWidth = size.width
             box.IntrinsicHeight = size.height
+            box.RatioOnly = svg.HasRatioOnly(node)
         case "video", "iframe", "canvas", "embed", "object":
             box = Box(kind: .replaced, style: style, node: node)
             box.Replaced = .placeholder

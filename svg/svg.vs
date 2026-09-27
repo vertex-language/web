@@ -170,6 +170,14 @@ public func Parse(_ root: html.Node) -> Drawing {
 /// The size an <svg> lays out at before CSS: its width and height
 /// attributes in pixels; one of them and the viewBox's proportions; or
 /// 300 by 150, as for any replaced element, shaped by the viewBox.
+/// Whether an <svg> has a ratio from its viewBox but neither a width nor
+/// a height: CSS then sizes it to the room it has, not to 300 by 150.
+public func HasRatioOnly(_ root: html.Node) -> bool {
+    if lengthAttribute(root.GetAttribute("width")) != nil || lengthAttribute(root.GetAttribute("height")) != nil { return false }
+    if let vb = viewBoxOf(root), vb.Width > 0, vb.Height > 0 { return true }
+    return false
+}
+
 public func IntrinsicSize(_ root: html.Node) -> (width: float32, height: float32) {
     let w = lengthAttribute(root.GetAttribute("width"))
     let h = lengthAttribute(root.GetAttribute("height"))

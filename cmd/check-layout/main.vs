@@ -224,6 +224,13 @@ func testFlexLayout() {
     guard let tx = layoutOf("<body style='margin:0'><div style='display:flex;width:400px'><div id=a>short</div><div id=b style='flex:1'>grows</div></div></body>") else { check(false, "layout"); return }
     let ta = tx.rect("a")!
     check(ta.Width > 20 && ta.Width < 60 && near(tx.rect("b")!.Width, 400 - ta.Width), "an item without flex takes its content width (got \(ta.Width))")
+
+    guard let fl = layoutOf("<body style='margin:0'><div style='width:600px'><div id=f style='float:right;display:flex'><div id=a style='width:100px;height:10px'></div><div id=b style='float:right;width:50px;height:10px'></div></div></div></body>") else { check(false, "layout"); return }
+    check(fl.rect("f")!.Width == 150 && fl.rect("b")!.X == 550, "a float inside a flex container is an item like the others (got \(fl.rect("f")!.Width) \(fl.rect("b")!.X))")
+
+    guard let sv = layoutOf("<body style='margin:0'><div style='width:40px;padding:8px;box-sizing:border-box'><svg id=s viewBox='0 0 24 12'></svg></div><div style='width:500px'><svg id=t viewBox='0 0 10 10' width=20></svg></div></body>") else { check(false, "layout"); return }
+    check(sv.rect("s")!.Width == 24 && sv.rect("s")!.Height == 12, "an svg with only a viewBox takes the room it has, at its ratio (got \(sv.rect("s")!.Width)x\(sv.rect("s")!.Height))")
+    check(sv.rect("t")!.Width == 20 && sv.rect("t")!.Height == 20, "and one with a width keeps it")
 }
 
 func testFloats() {
