@@ -364,6 +364,18 @@ func testGrid() {
     guard let au = layoutOf("<body style='margin:0;font-size:16px'><div style='display:grid;grid-template-columns:auto 1fr;width:400px'><div id=k style='white-space:nowrap'>label</div><div id=v style='height:10px'></div></div></body>") else { check(false, "layout"); return }
     let k = au.rect("k")!
     check(k.Width > 20 && k.Width < 60 && near(au.rect("v")!.X, k.Width) && near(au.rect("v")!.Width, 400 - k.Width), "an auto column fits its content and fr takes the rest (got \(k.Width))")
+
+    let longText = "words that would run far wider than the grid if nothing wrapped them at all, on and on"
+    guard let one = layoutOf("<body style='margin:0;font-size:16px'><div style='display:grid;width:200px'><p id=t style='margin:0'>\(longText)</p></div></body>") else { check(false, "layout"); return }
+    check(near(one.rect("t")!.Width, 200) && one.rect("t")!.Height > 30, "one implicit auto column is the grid's width, and its text wraps (got \(one.rect("t")!.Width))")
+    guard let two = layoutOf("<body style='margin:0;font-size:16px'><div style='display:grid;grid-template-columns:auto auto;width:300px'><div id=s>short</div><div id=l>\(longText)</div></div></body>") else { check(false, "layout"); return }
+    let sw = two.rect("s")!.Width
+    let lw = two.rect("l")!.Width
+    check(near(sw + lw, 300, 1) && sw < 150, "two auto columns share the width, the short one keeping to its content (got \(sw) \(lw))")
+    guard let ac = layoutOf("<body style='margin:0'><div id=acc style='display:grid;grid-template-rows:0fr'><div id=panel style='overflow:hidden'><p style='margin:0;height:50px'>hidden</p></div></div><div id=after style='height:5px'></div></body>") else { check(false, "layout"); return }
+    check(ac.rect("panel")!.Height == 0 && ac.rect("after")!.Y == 0, "a 0fr row holding an item that clips collapses to nothing (got \(ac.rect("panel")!.Height))")
+    guard let open = layoutOf("<body style='margin:0'><div style='display:grid;grid-template-rows:1fr'><div id=panel style='overflow:hidden'><p style='margin:0;height:50px'>shown</p></div></div></body>") else { check(false, "layout"); return }
+    check(open.rect("panel")!.Height == 50, "and a 1fr row holds it whole")
 }
 
 func testPositioning() {

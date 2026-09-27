@@ -134,6 +134,8 @@ extension Layout {
         let gaps = columnGap * float32(columnCount > 1 ? columnCount - 1 : 0)
         var widths = [float32](repeating: 0, count: columnCount)
         var frs = [float32](repeating: 0, count: columnCount)
+        // How far each auto track may grow: its max-content width.
+        var limits = [float32](repeating: 0, count: columnCount)
         var totalFr: float32 = 0
         var fixed: float32 = 0
         var c = 0
@@ -146,14 +148,18 @@ extension Layout {
                 frs[c] = f > 0 ? f : 1
                 totalFr += frs[c]
             case .auto:
-                var need: float32 = 0
+                // From its items' min-content widths, and as far as their
+                // max-content widths where there is room (below).
+                var least: float32 = 0
+                var most: float32 = 0
                 for it in items where it.column == c && it.columnSpan == 1 {
                     let w = intrinsicWidths(it.box)
-                    let outer = w.max + it.box.Margin.Horizontal
-                    if outer > need { need = outer }
+                    if w.min + it.box.Margin.Horizontal > least { least = w.min + it.box.Margin.Horizontal }
+                    if w.max + it.box.Margin.Horizontal > most { most = w.max + it.box.Margin.Horizontal }
                 }
-                widths[c] = need
-                fixed += need
+                widths[c] = least
+                limits[c] = most > least ? most : least
+                fixed += least
             case .minmax(let minPx, let maxPx, let maxFr):
                 if maxFr > 0 {
                     frs[c] = maxFr
@@ -173,6 +179,30 @@ extension Layout {
             c += 1
         }
         var free = contentWidth - gaps - fixed
+        // Auto tracks grow toward their max-content widths into the room
+        // there is, equally, each stopping at its limit (grid's "maximize
+        // tracks"); what's left is the fr tracks'.
+        var rounds = 0
+        while free > 0.01 && rounds < 16 {
+            rounds += 1
+            var growing = 0
+            c = 0
+            while c < columnCount {
+                if case .auto = columns[c], widths[c] < limits[c] - 0.01 { growing += 1 }
+                c += 1
+            }
+            if growing == 0 { break }
+            let each = free / float32(growing)
+            c = 0
+            while c < columnCount {
+                if case .auto = columns[c], widths[c] < limits[c] - 0.01 {
+                    let add = each < limits[c] - widths[c] ? each : limits[c] - widths[c]
+                    widths[c] += add
+                    free -= add
+                }
+                c += 1
+            }
+        }
         if totalFr > 0 {
             // Each fr track gets its share, no less than its minimum.
             var share = free > 0 ? free / totalFr : 0
@@ -202,17 +232,17 @@ extension Layout {
                 c += 1
             }
         } else if free > 0 && s.JustifyContent == .flexStart {
-            // Auto tracks with room left take it, in proportion.
-            var autoTotal: float32 = 0
+            // Auto tracks with room still left stretch into it, equally.
+            var autoCount = 0
             c = 0
             while c < columnCount {
-                if case .auto = columns[c] { autoTotal += widths[c] > 0 ? widths[c] : 1 }
+                if case .auto = columns[c] { autoCount += 1 }
                 c += 1
             }
-            if autoTotal > 0 {
+            if autoCount > 0 {
                 c = 0
                 while c < columnCount {
-                    if case .auto = columns[c] { widths[c] += free * (widths[c] > 0 ? widths[c] : 1) / autoTotal }
+                    if case .auto = columns[c] { widths[c] += free / float32(autoCount) }
                     c += 1
                 }
             }
@@ -254,6 +284,12 @@ extension Layout {
                 let track: css.GridTrack = it.row < s.GridRows.count ? s.GridRows[it.row] : s.GridAutoRows
                 var fixedRow = false
                 if case .length = track { fixedRow = true }
+                // A 0fr row takes only its items' minimums: nothing of an
+                // item that clips its overflow (an accordion, closed).
+                if case .fr(let f) = track, f == 0 {
+                    fixedRow = true
+                    if !child.Style.ClipsOverflow && child.OuterHeight > heights[it.row] { heights[it.row] = child.OuterHeight }
+                }
                 if !fixedRow && child.OuterHeight > heights[it.row] { heights[it.row] = child.OuterHeight }
             }
         }
@@ -277,7 +313,9 @@ extension Layout {
             let cellW = columnEnd[it.column + it.columnSpan - 1] - cellX
             let cellH = rowEnd[it.row + it.rowSpan - 1] - cellY
             let align = alignFor(child, container: s)
-            if align == .stretch && child.Style.Height.IsAuto && child.OuterHeight < cellH {
+            // Stretching fills the cell; an item that clips its overflow may
+            // also shrink to it, its automatic minimum being zero.
+            if align == .stretch && child.Style.Height.IsAuto && (child.OuterHeight < cellH || (child.Style.ClipsOverflow && child.OuterHeight > cellH)) {
                 layoutFixed(child, width: child.Width, height: cellH - child.Margin.Vertical, cb: ContainingBlock(width: cellW, height: cellH), flow: flow.root(child))
             }
             var dy: float32 = 0
