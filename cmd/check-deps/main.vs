@@ -35,7 +35,7 @@ func check(_ ok: bool, _ what: string) {
 let stage: [string: int] = [
     "web/html": 0, "web/edit": 0, "web/fetch": 0,
     "web/css": 1, "web/dom": 1,
-    "web/css/selector": 2,
+    "web/css/selector": 2, "web/svg": 2,
     "web/cascade": 3,
     "web/layout": 4,
     "web/paint": 5,

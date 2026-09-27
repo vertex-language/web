@@ -100,6 +100,7 @@ public enum Prop: int32 {
     case borderSpacing
     case tabSize
     case content
+    case fill
 }
 
 /// A unit a length was written in.
@@ -203,7 +204,7 @@ let propNames: [string: Prop] = [
     "overflow-wrap": .overflowWrap, "word-wrap": .overflowWrap, "word-break": .wordBreak, "text-overflow": .textOverflow,
     "list-style-position": .listStylePosition, "cursor": .cursor, "visibility": .visibility,
     "border-collapse": .borderCollapse, "border-spacing": .borderSpacing, "tab-size": .tabSize,
-    "content": .content,
+    "content": .content, "fill": .fill,
 ]
 
 /// Parses a declaration from a stylesheet into the longhands it sets.
@@ -1049,6 +1050,13 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
     case .borderTopColor, .borderRightColor, .borderBottomColor, .borderLeftColor,
          .backgroundColor, .color, .textDecorationColor, .outlineColor:
         if let m = parseColorAt(tokens, 0) { return m.0 }
+        return nil
+    case .fill:
+        // SVG's paint: none, a color, or currentColor; a url() paint
+        // server stands for the color until gradients fill.
+        if kw == "none" { return .none }
+        if let m = parseColorAt(tokens, 0) { return m.0 }
+        if !tokens.isEmpty && tokens[0].Kind == .url { return .currentColor }
         return nil
     case .borderTopLeftRadius, .borderTopRightRadius, .borderBottomRightRadius, .borderBottomLeftRadius:
         return parseLengthValue(t, allowAuto: false)

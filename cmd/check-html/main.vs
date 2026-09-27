@@ -183,7 +183,27 @@ func testHTML() {
     check(rendered.utf8.count > 0, "Render produced non-empty HTML string")
 }
 
+func testEncodings() {
+    print("Encodings")
+    let latin: [uint8] = [70, 114, 97, 110, 0xE7, 97, 105, 115, 32, 0x80]
+    check(html.DetectEncoding(latin, contentType: "text/html; charset=ISO-8859-1") == "windows-1252", "iso-8859-1 in the Content-Type is windows-1252")
+    check(html.Decode(latin, contentType: "text/html; charset=ISO-8859-1") == "Fran\u{E7}ais \u{20AC}", "windows-1252 decodes, 0x80 as the euro sign")
+    let meta = [uint8]("<!doctype html><meta charset=\"windows-1252\"><p>caf".utf8) + [0xE9]
+    check(html.DetectEncoding(meta) == "windows-1252", "a <meta charset> in the first bytes")
+    check(html.Decode(meta).hasSuffix("caf\u{E9}"), "and decoded by it")
+    let equiv = [uint8]("<meta http-equiv=Content-Type content='text/html; charset=latin1'>".utf8)
+    check(html.DetectEncoding(equiv) == "windows-1252", "a <meta http-equiv=content-type>")
+    check(html.DetectEncoding(meta, contentType: "text/html; charset=utf-8") == "utf-8", "the HTTP charset wins over the <meta>")
+    let bom: [uint8] = [0xEF, 0xBB, 0xBF, 104, 105]
+    check(html.DetectEncoding(bom, contentType: "text/html; charset=latin1") == "utf-8" && html.Decode(bom) == "hi", "a UTF-8 byte order mark wins, and is dropped")
+    let utf16: [uint8] = [0xFF, 0xFE, 104, 0, 0x3D, 0xD8, 0x00, 0xDE]
+    check(html.Decode(utf16) == "h\u{1F600}", "UTF-16LE with a surrogate pair")
+    check(html.DetectEncoding([uint8]("<p>plain".utf8)) == "utf-8", "UTF-8 when nothing says otherwise")
+    check(html.EncodingForLabel(" Latin1 ") == "windows-1252" && html.EncodingForLabel("shift_jis") == nil, "labels, and one not supported")
+}
+
 func main() -> int32 {
+    testEncodings()
     testTreeBuilding()
     testHTML()
 

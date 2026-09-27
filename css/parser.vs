@@ -21,38 +21,10 @@ public class Parser {
 
         while current.Kind != TokenKind.eof {
             if current.Kind == TokenKind.atKeyword {
-                let name = current.Value
+                if let at = parseAtRule() { atRules.append(at) }
+            } else if current.Kind == TokenKind.closeBrace {
+                // A stray '}' closes nothing: skip it.
                 advance()
-                // Collect params until '{' or ';'
-                var paramTokens: [Token] = []
-                while current.Kind != TokenKind.openBrace && current.Kind != TokenKind.semicolon && current.Kind != TokenKind.eof {
-                    paramTokens.append(current)
-                    advance()
-                }
-                let params = Serialize(paramTokens)
-                if current.Kind == TokenKind.openBrace {
-                    advance() // skip '{'
-                    let lowerName = toLower(name)
-                    if lowerName == "font-face" || lowerName == "page" || lowerName == "counter-style" || lowerName == "font-feature-values" || lowerName == "property" {
-                        // A block of declarations, not of rules.
-                        let decls = parseDeclarationBlock()
-                        atRules.append(AtRule(name: name, params: trimString(params), rules: [], declarations: decls))
-                        continue
-                    }
-                    var innerRules: [Rule] = []
-                    while current.Kind != TokenKind.closeBrace && current.Kind != TokenKind.eof {
-                        if let rule = parseRule() {
-                            innerRules.append(rule)
-                        }
-                    }
-                    if current.Kind == TokenKind.closeBrace {
-                        advance()
-                    }
-                    atRules.append(AtRule(name: name, params: trimString(params), rules: innerRules))
-                } else if current.Kind == TokenKind.semicolon {
-                    advance()
-                    atRules.append(AtRule(name: name, params: trimString(params), rules: []))
-                }
             } else {
                 if let rule = parseRule() {
                     rules.append(rule)
@@ -61,6 +33,48 @@ public class Parser {
         }
 
         return StyleSheet(rules: rules, atRules: atRules)
+    }
+
+    /// Parses an at-rule, current at its keyword: a statement ending in
+    /// ';', a block of declarations (@font-face), or a block of rules
+    /// and at-rules (@media, @supports, @layer, @container), nested as
+    /// deep as the sheet nests them.
+    func parseAtRule() -> AtRule? {
+        let name = current.Value
+        advance()
+        var paramTokens: [Token] = []
+        while current.Kind != TokenKind.openBrace && current.Kind != TokenKind.semicolon && current.Kind != TokenKind.eof && current.Kind != TokenKind.closeBrace {
+            paramTokens.append(current)
+            advance()
+        }
+        let params = trimString(Serialize(paramTokens))
+        if current.Kind == TokenKind.semicolon {
+            advance()
+            return AtRule(name: name, params: params, rules: [])
+        }
+        if current.Kind != TokenKind.openBrace {
+            return AtRule(name: name, params: params, rules: [])
+        }
+        advance() // skip '{'
+        let lowerName = toLower(name)
+        if lowerName == "font-face" || lowerName == "page" || lowerName == "counter-style" || lowerName == "font-feature-values" || lowerName == "property" || lowerName == "position-try" {
+            // A block of declarations, not of rules.
+            let decls = parseDeclarationBlock()
+            return AtRule(name: name, params: params, rules: [], declarations: decls)
+        }
+        var innerRules: [Rule] = []
+        var innerAtRules: [AtRule] = []
+        while current.Kind != TokenKind.closeBrace && current.Kind != TokenKind.eof {
+            if current.Kind == TokenKind.atKeyword {
+                if let at = parseAtRule() { innerAtRules.append(at) }
+            } else if let rule = parseRule() {
+                innerRules.append(rule)
+            }
+        }
+        if current.Kind == TokenKind.closeBrace {
+            advance()
+        }
+        return AtRule(name: name, params: params, rules: innerRules, atRules: innerAtRules)
     }
 
     /// Parses a single CSS rule (selectors + declaration block).

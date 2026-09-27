@@ -24,20 +24,31 @@ final class StyleRule {
     /// Where the rule stands in its origin's sheets: later wins ties.
     let Order: int32
     let Declarations: [css.Longhand]
+    /// Custom properties the rule declares.
+    let Customs: [CustomDecl]
+    /// Declarations using var(), parsed per element once substituted.
+    let Pending: [css.Declaration]
     /// The media query the rule is under, or "" for none.
-    let Media: string
+    let Media: [string]
+    /// The cascade layer's rank: later layers beat earlier ones, and
+    /// rules in no layer beat every layer (Unlayered).
     var enabled: bool = true
     /// Whether the selector asks about hover, focus or the press: its
     /// match can change without the tree changing.
     var usesState: bool = false
 
-    init(selector sel: selector.ComplexSelector, order: int32, declarations: [css.Longhand], media: string) {
+    let Layer: int32
+
+    init(selector sel: selector.ComplexSelector, order: int32, declarations: SplitDecls, media: [string], layer: int32) {
         Selector = sel
         let sp = sel.Specificity()
         Specificity = int32(sp.0) * 65536 + int32(sp.1) * 256 + int32(sp.2)
         Order = order
-        Declarations = declarations
+        Declarations = declarations.longhands
+        Customs = declarations.customs
+        Pending = declarations.pending
         Media = media
+        Layer = layer
     }
 }
 
@@ -45,16 +56,18 @@ final class StyleRule {
 /// asks for, so that an element is tested against the rules that could
 /// match it and not against every rule on the page.
 public final class RuleSet {
-    var byId: [string: [StyleRule]] = [:]
-    var byClass: [string: [StyleRule]] = [:]
-    var byTag: [string: [StyleRule]] = [:]
-    var universal: [StyleRule] = []
+    /// The rules on elements, by what their rightmost compound asks for.
+    let main = Buckets()
     var all: [StyleRule] = []
-    /// Rules on ::before and ::after, kept apart: they match an element's
-    /// generated content, not the element.
-    var before: [StyleRule] = []
-    var after: [StyleRule] = []
+    /// Rules on ::before and ::after, kept apart and bucketed the same
+    /// way: they match an element's generated content, not the element.
+    let before = Buckets()
+    let after = Buckets()
     var order: int32 = 0
+    /// Cascade layers by name ("outer.inner"), ranked in the order they
+    /// are first named.
+    var layers: [string: int32] = [:]
+    var anonymousLayers = 0
     /// What the selectors mention, for turning changes into restyles.
     let features = Features()
     /// Whether any rule asks about pointer or keyboard state, which is
@@ -66,6 +79,8 @@ public final class RuleSet {
     /// Whether any rule depends on the viewport: a media query, or a
     /// length in vw or vh, which a resize has to recompute.
     public var UsesViewport: bool = false
+    /// Whether any rule declares a custom property or uses var().
+    public var UsesCustomProperties: bool = false
     /// The URLs of background images the rules name, for loading.
     public var ImageURLs: [string] = []
     var mediaWidth: float32 = -1
@@ -76,25 +91,69 @@ public final class RuleSet {
     public var IsEmpty: bool { return all.isEmpty }
 
     /// Adds a stylesheet's rules, including those under @media.
-    public func Add(_ sheet: css.StyleSheet) {
+    /// Adds a stylesheet's rules. `media` is a query the whole sheet is
+    /// under, as a <link media> or <style media> puts it.
+    public func Add(_ sheet: css.StyleSheet, media: string = "") {
+        let m: [string] = media.isEmpty ? [] : [css.lower(media)]
         for rule in sheet.Rules {
-            add(rule, media: "")
+            add(rule, media: m, layer: Unlayered)
         }
-        for at in sheet.AtRules {
-            if at.Name == "media" {
-                for rule in at.Rules {
-                    add(rule, media: css.lower(at.Params))
+        addAtRules(sheet.AtRules, media: m, layer: "")
+    }
+
+    /// The rules of at-rules, as deep as they nest: @media's under its
+    /// query (with those around it), @supports' where its condition
+    /// holds, and @layer's in their layer. @container, @keyframes and
+    /// the rest aren't read yet.
+    func addAtRules(_ ats: [css.AtRule], media: [string], layer: string) {
+        for at in ats {
+            switch at.Name {
+            case "media":
+                let m = media + [css.lower(at.Params)]
+                let rank = layer.isEmpty ? Unlayered : layerRank(layer)
+                for rule in at.Rules { add(rule, media: m, layer: rank) }
+                addAtRules(at.AtRules, media: m, layer: layer)
+            case "supports":
+                if !SupportsCondition(at.Params) { continue }
+                let rank = layer.isEmpty ? Unlayered : layerRank(layer)
+                for rule in at.Rules { add(rule, media: media, layer: rank) }
+                addAtRules(at.AtRules, media: media, layer: layer)
+            case "layer":
+                let names = at.Params.split(separator: ",").map { trimSpaces(string($0)) }.filter { !$0.isEmpty }
+                if at.Rules.isEmpty && at.AtRules.isEmpty {
+                    // `@layer a, b;` sets the order the layers stand in.
+                    for n in names { _ = layerRank(layer.isEmpty ? n : layer + "." + n) }
+                    continue
                 }
+                var name = names.first ?? ""
+                if name.isEmpty {
+                    anonymousLayers += 1
+                    name = "\u{1}\(anonymousLayers)"
+                }
+                let full = layer.isEmpty ? name : layer + "." + name
+                let rank = layerRank(full)
+                for rule in at.Rules { add(rule, media: media, layer: rank) }
+                addAtRules(at.AtRules, media: media, layer: full)
+            default:
+                continue
             }
         }
     }
 
-    func add(_ rule: css.Rule, media: string) {
-        var decls: [css.Longhand] = []
-        for d in rule.Declarations {
-            decls.append(contentsOf: css.Longhands(d))
-        }
-        if decls.isEmpty { return }
+    /// A layer's rank, given on first mention: the order layers are
+    /// named in is the order they stand in.
+    func layerRank(_ name: string) -> int32 {
+        if let r = layers[name] { return r }
+        let r = int32(layers.count)
+        layers[name] = r
+        return r
+    }
+
+    func add(_ rule: css.Rule, media: [string], layer: int32) {
+        let split = SplitDecls(rule.Declarations)
+        if split.isEmpty { return }
+        let decls = split.longhands
+        if !split.customs.isEmpty || !split.pending.isEmpty { UsesCustomProperties = true }
         if !media.isEmpty { UsesViewport = true }
         for d in decls {
             if case .length(_, let unit) = d.Value {
@@ -107,7 +166,7 @@ public final class RuleSet {
             let parsed = selector.ParseSelectors(text)
             for sel in parsed {
                 order += 1
-                let r = StyleRule(selector: sel, order: order, declarations: decls, media: media)
+                let r = StyleRule(selector: sel, order: order, declarations: split, media: media, layer: layer)
                 r.usesState = noteState(sel)
                 features.note(sel)
                 bucket(r)
@@ -134,9 +193,57 @@ public final class RuleSet {
         all.append(r)
         let last = r.Selector.Compounds[r.Selector.Compounds.count - 1].Part
         if let pe = last.PseudoElement {
-            if pe == "before" { before.append(r) } else if pe == "after" { after.append(r) }
+            if pe == "before" { before.add(r) } else if pe == "after" { after.add(r) }
             return
         }
+        main.add(r)
+    }
+
+    /// Re-evaluates every @media rule for a viewport.
+    func setViewport(_ width: float32, _ height: float32) {
+        if width == mediaWidth && height == mediaHeight { return }
+        mediaWidth = width
+        mediaHeight = height
+        for r in all {
+            if !r.Media.isEmpty {
+                var on = true
+                for q in r.Media where on { on = mediaMatches(q, width: width, height: height) }
+                r.enabled = on
+            }
+        }
+    }
+
+    /// The rules that could match an element, by its tag, id, classes
+    /// and attributes.
+    func candidates(_ node: html.Node, into out: inout [StyleRule]) {
+        main.candidates(node, into: &out)
+    }
+}
+
+/// Rules bucketed by what their rightmost compound asks for -- an id, a
+/// class, a tag, an attribute, :root -- so that an element is tested
+/// against the rules that could match it and not against every rule on
+/// the page. Only what asks for none of these is tested everywhere.
+/// A class: a struct in a property is copied whole on every change, and
+/// these hold thousands of rules.
+final class Buckets {
+    var byId: [string: [StyleRule]] = [:]
+    var byClass: [string: [StyleRule]] = [:]
+    var byTag: [string: [StyleRule]] = [:]
+    var byAttribute: [string: [StyleRule]] = [:]
+    var root: [StyleRule] = []
+    var universal: [StyleRule] = []
+    var count = 0
+
+    init() {}
+
+    var isEmpty: bool { return count == 0 }
+
+    func add(_ r: StyleRule) {
+        count += 1
+        let last = r.Selector.Compounds[r.Selector.Compounds.count - 1].Part
+        // Read, append, write back: vsc copies the whole table for a
+        // dict[key, default: []].append (vsc_TODO).
         if let id = last.Id {
             var list = byId[id] ?? []
             list.append(r)
@@ -149,37 +256,39 @@ public final class RuleSet {
             var list = byTag[tag] ?? []
             list.append(r)
             byTag[tag] = list
+        } else if !last.Attributes.isEmpty {
+            let name = css.lower(last.Attributes[0].Name)
+            var list = byAttribute[name] ?? []
+            list.append(r)
+            byAttribute[name] = list
+        } else if last.Pseudos.contains(where: { p in p.Name == "root" }) {
+            root.append(r)
         } else {
             universal.append(r)
         }
     }
 
-    /// Re-evaluates every @media rule for a viewport.
-    func setViewport(_ width: float32, _ height: float32) {
-        if width == mediaWidth && height == mediaHeight { return }
-        mediaWidth = width
-        mediaHeight = height
-        for r in all {
-            if !r.Media.isEmpty {
-                r.enabled = mediaMatches(r.Media, width: width, height: height)
-            }
-        }
-    }
-
-    /// The rules that could match an element, by its tag, id and classes.
     func candidates(_ node: html.Node, into out: inout [StyleRule]) {
         for r in universal { if r.enabled { out.append(r) } }
+        if node.Parent == nil || node.Parent?.Kind == html.NodeKind.document {
+            for r in root { if r.enabled { out.append(r) } }
+        }
         if let list = byTag[node.TagName] {
             for r in list { if r.enabled { out.append(r) } }
         }
-        if let id = node.IdAttr() {
-            if let list = byId[id] {
-                for r in list { if r.enabled { out.append(r) } }
-            }
+        if !byId.isEmpty, let id = node.IdAttr(), let list = byId[id] {
+            for r in list { if r.enabled { out.append(r) } }
         }
-        if node.HasAttribute("class") {
+        if !byClass.isEmpty && node.HasAttribute("class") {
             for cls in node.Classes() {
                 if let list = byClass[cls] {
+                    for r in list { if r.enabled { out.append(r) } }
+                }
+            }
+        }
+        if !byAttribute.isEmpty {
+            for a in node.Attributes {
+                if let list = byAttribute[a.Name] {
                     for r in list { if r.enabled { out.append(r) } }
                 }
             }
@@ -234,48 +343,175 @@ func mediaClauseMatches(_ clause: string, width: float32, height: float32) -> bo
     return result
 }
 
+/// One media feature in parentheses: `min-width: 40em`, the range
+/// syntax of Media Queries 4 (`width >= 768px`, `400px <= width < 800px`),
+/// or a feature on its own (`hover`). The page is on a screen with a
+/// fine pointer that hovers, in light mode, with no forced colors, no
+/// script, and motion allowed.
 func mediaFeature(_ text: string, width: float32, height: float32) -> bool {
-    var name = text
+    let t = trimSpaces(text)
+    if t.contains("<") || t.contains(">") || (t.contains("=") && !t.contains(":")) {
+        return mediaRange(t, width: width, height: height)
+    }
+    var name = t
     var value = ""
-    let b = [uint8](text.utf8)
+    let b = [uint8](t.utf8)
     var i = 0
     while i < b.count && b[i] != 58 { i += 1 }
     if i < b.count {
         name = trimSpaces(stringOf(b, 0, i))
-        value = trimSpaces(stringOf(b, i + 1, b.count))
-    } else {
-        name = trimSpaces(text)
+        value = css.lower(trimSpaces(stringOf(b, i + 1, b.count)))
     }
-    let vb = [uint8](value.utf8)
-    let number = css.parseNumber(vb, 0, vb.count)
-    var px = number
-    if endsWith(value, "em") || endsWith(value, "rem") { px = number * 16 }
+    name = css.lower(name)
     switch name {
-    case "min-width": return width >= px
-    case "max-width": return width <= px
-    case "min-height": return height >= px
-    case "max-height": return height <= px
-    case "width": return width == px
+    case "min-width": return mediaLength(value).map { width >= $0 } ?? false
+    case "max-width": return mediaLength(value).map { width <= $0 } ?? false
+    case "min-height": return mediaLength(value).map { height >= $0 } ?? false
+    case "max-height": return mediaLength(value).map { height <= $0 } ?? false
+    case "width": return value.isEmpty ? width > 0 : (mediaLength(value).map { width == $0 } ?? false)
+    case "height": return value.isEmpty ? height > 0 : (mediaLength(value).map { height == $0 } ?? false)
     case "orientation": return value == (width >= height ? "landscape" : "portrait")
     case "prefers-color-scheme": return value == "light"
-    case "prefers-reduced-motion": return value == "no-preference"
-    case "hover": return value == "hover"
-    case "pointer": return value == "fine"
-    case "min-resolution", "max-resolution", "resolution", "-webkit-min-device-pixel-ratio": return true
-    case "color", "min-color", "display-mode", "forced-colors", "scripting": return name != "scripting" || value == "none"
+    case "prefers-reduced-motion", "prefers-reduced-transparency", "prefers-reduced-data", "prefers-contrast":
+        return value == "no-preference"
+    case "hover", "any-hover": return value.isEmpty || value == "hover"
+    case "pointer", "any-pointer": return value.isEmpty || value == "fine"
+    case "forced-colors", "inverted-colors": return value == "none"
+    case "scripting": return value == "none"
+    case "display-mode": return value == "browser"
+    case "update": return value.isEmpty || value == "fast"
+    case "dynamic-range", "video-dynamic-range": return value == "standard"
+    case "color-gamut": return value == "srgb"
+    case "color", "min-color": return true
+    case "monochrome", "grid": return value == "0"
+    case "min-resolution", "max-resolution", "resolution", "-webkit-min-device-pixel-ratio", "-webkit-max-device-pixel-ratio", "min--moz-device-pixel-ratio": return true
     default: return false
     }
 }
 
-/// The candidate sorted by specificity then order, so that later,
-/// more specific rules apply last and win.
+/// The range syntax: `width >= 768px`, `768px <= width`, and the two-
+/// sided `400px <= width < 800px`.
+func mediaRange(_ text: string, width: float32, height: float32) -> bool {
+    // Split into operands and operators.
+    var parts: [string] = []
+    var ops: [string] = []
+    let b = [uint8](text.utf8)
+    var start = 0
+    var i = 0
+    var depth = 0
+    while i < b.count {
+        let c = b[i]
+        if c == 40 { depth += 1 }
+        if c == 41 { depth -= 1 }
+        if depth == 0 && (c == 60 || c == 62 || c == 61) {
+            parts.append(trimSpaces(stringOf(b, start, i)))
+            var op = stringOf(b, i, i + 1)
+            if i + 1 < b.count && b[i + 1] == 61 && c != 61 {
+                op += "="
+                i += 1
+            }
+            ops.append(op)
+            start = i + 1
+        }
+        i += 1
+    }
+    parts.append(trimSpaces(stringOf(b, start, b.count)))
+    if parts.count != ops.count + 1 || ops.isEmpty { return false }
+    var k = 0
+    while k < ops.count {
+        let left = parts[k]
+        let right = parts[k + 1]
+        guard let l = operand(left, width: width, height: height), let r = operand(right, width: width, height: height) else { return false }
+        var ok = false
+        switch ops[k] {
+        case "<": ok = l < r
+        case "<=": ok = l <= r
+        case ">": ok = l > r
+        case ">=": ok = l >= r
+        case "=": ok = l == r
+        default: ok = false
+        }
+        if !ok { return false }
+        k += 1
+    }
+    return true
+}
+
+func operand(_ s: string, width: float32, height: float32) -> float32? {
+    switch css.lower(s) {
+    case "width": return width
+    case "height": return height
+    case "aspect-ratio": return height > 0 ? width / height : 0
+    default: return mediaLength(s)
+    }
+}
+
+/// A length in a media query, in CSS pixels: px, em and rem (16px, as
+/// media queries measure against the initial font size), a bare number,
+/// or calc() of those added and subtracted.
+func mediaLength(_ text: string) -> float32? {
+    let t = trimSpaces(text)
+    let b = [uint8](t.utf8)
+    if b.isEmpty { return nil }
+    if t.hasPrefix("calc(") && t.hasSuffix(")") {
+        return calcSum(stringOf(b, 5, b.count - 1))
+    }
+    var end = 0
+    while end < b.count && ((b[end] >= 48 && b[end] <= 57) || b[end] == 46 || b[end] == 45 || b[end] == 43) { end += 1 }
+    if end == 0 { return nil }
+    let n = css.parseNumber(b, 0, end)
+    let unit = css.lower(stringOf(b, end, b.count))
+    switch unit {
+    case "", "px": return n
+    case "em", "rem": return n * 16
+    case "vw", "vh", "vmin", "vmax": return nil
+    case "pt": return n * 4 / 3
+    case "cm": return n * 96 / 2.54
+    case "mm": return n * 96 / 25.4
+    case "in": return n * 96
+    case "ch", "ex": return n * 8
+    default: return nil
+    }
+}
+
+/// `48rem - .02px`: terms added and subtracted, left to right.
+func calcSum(_ text: string) -> float32? {
+    let b = [uint8](text.utf8)
+    var total: float32 = 0
+    var sign: float32 = 1
+    var i = 0
+    while i < b.count {
+        while i < b.count && b[i] == 32 { i += 1 }
+        if i >= b.count { break }
+        if (b[i] == 43 || b[i] == 45) && i + 1 < b.count && b[i + 1] == 32 {
+            sign = b[i] == 45 ? -1 : 1
+            i += 1
+            continue
+        }
+        let start = i
+        while i < b.count && b[i] != 32 { i += 1 }
+        guard let v = mediaLength(stringOf(b, start, i)) else { return nil }
+        total += sign * v
+        sign = 1
+    }
+    return total
+}
+
+/// The layer rank of rules in no layer: above every layer.
+let Unlayered: int32 = 1 << 30
+
+/// The candidates sorted by layer, then specificity, then order, so that
+/// later, more specific rules apply last and win. (For !important
+/// declarations layers should stand in the reverse order; they don't
+/// yet.)
 func sortRules(_ rules: inout [StyleRule]) {
     var i = 1
     while i < rules.count {
         let r = rules[i]
         var j = i - 1
-        while j >= 0 && (rules[j].Specificity > r.Specificity ||
-                         (rules[j].Specificity == r.Specificity && rules[j].Order > r.Order)) {
+        while j >= 0 && (rules[j].Layer > r.Layer ||
+                         (rules[j].Layer == r.Layer && rules[j].Specificity > r.Specificity) ||
+                         (rules[j].Layer == r.Layer && rules[j].Specificity == r.Specificity && rules[j].Order > r.Order)) {
             rules[j + 1] = rules[j]
             j -= 1
         }
@@ -292,7 +528,7 @@ public final class StyleResolver {
     public var ViewportWidth: float32 = 800
     public var ViewportHeight: float32 = 600
     public var RootFontSize: float32 = 16
-    var inlineByText: [string: [css.Longhand]] = [:]
+    var inlineByText: [string: SplitDecls] = [:]
     var scratch: [StyleRule] = []
     var matchedScratch: [StyleRule] = []
     var declScratch: [css.Longhand] = []
@@ -329,11 +565,17 @@ public final class StyleResolver {
     /// Whether any rule generates content before or after elements.
     public var HasPseudoElements: bool { return !UA.before.isEmpty || !UA.after.isEmpty || !Author.before.isEmpty || !Author.after.isEmpty }
 
+
     /// The style of an element's ::before or ::after, or nil where no
     /// rule gives it content.
     public func ResolvePseudo(_ node: html.Node, _ which: string, parent: ComputedStyle, context: selector.MatchContext) -> ComputedStyle? {
-        let uaList = which == "before" ? UA.before : UA.after
-        let authorList = which == "before" ? Author.before : Author.after
+        let uaBuckets = which == "before" ? UA.before : UA.after
+        let authorBuckets = which == "before" ? Author.before : Author.after
+        if uaBuckets.isEmpty && authorBuckets.isEmpty { return nil }
+        var uaList: [StyleRule] = []
+        uaBuckets.candidates(node, into: &uaList)
+        var authorList: [StyleRule] = []
+        authorBuckets.candidates(node, into: &authorList)
         if uaList.isEmpty && authorList.isEmpty { return nil }
         var matched: [StyleRule] = []
         for r in uaList where r.enabled {
@@ -350,12 +592,23 @@ public final class StyleResolver {
         sortRules(&matched)
         let style = ComputedStyle(inheriting: parent)
         let ctx = ApplyContext(parent: parent, rootFontSize: RootFontSize, viewportWidth: ViewportWidth, viewportHeight: ViewportHeight)
+        var customs: [CustomDecl] = []
+        for r in matched {
+            for c in r.Customs where !c.important { customs.append(c) }
+        }
+        for r in matched {
+            for c in r.Customs where c.important { customs.append(c) }
+        }
+        style.customs = customScope(customs, parent: parent.customs)
+        let scope = style.customs
         var declarations: [css.Longhand] = []
         for r in matched {
             for d in r.Declarations where !d.Important { declarations.append(d) }
+            for p in r.Pending where !p.Important { declarations.append(contentsOf: expand(p, scope)) }
         }
         for r in matched {
             for d in r.Declarations where d.Important { declarations.append(d) }
+            for p in r.Pending where p.Important { declarations.append(contentsOf: expand(p, scope)) }
         }
         for d in declarations where d.Prop == .fontSize { apply(d, style, ctx) }
         for d in declarations where d.Prop != .fontSize { apply(d, style, ctx) }
@@ -409,19 +662,38 @@ public final class StyleResolver {
             if m { matched.append(r) }
         }
         sortRules(&matched)
-        for r in matched {
-            for d in r.Declarations where !d.Important { declarations.append(d) }
+
+        var inline = SplitDecls()
+        if let text = node.GetAttribute("style") {
+            inline = inlineDeclarations(node, text)
         }
 
-        var inlineDecls: [css.Longhand] = []
-        if let text = node.GetAttribute("style") {
-            inlineDecls = inlineDeclarations(node, text)
-            for d in inlineDecls where !d.Important { declarations.append(d) }
+        // Custom properties first, in cascade order: what var() in the
+        // element's declarations reads.
+        var customs: [CustomDecl] = []
+        for r in matched {
+            for c in r.Customs where !c.important { customs.append(c) }
         }
+        for c in inline.customs where !c.important { customs.append(c) }
+        for r in matched {
+            for c in r.Customs where c.important { customs.append(c) }
+        }
+        for c in inline.customs where c.important { customs.append(c) }
+        style.customs = customScope(customs, parent: base.customs)
+        let scope = style.customs
+
+        for r in matched {
+            for d in r.Declarations where !d.Important { declarations.append(d) }
+            for p in r.Pending where !p.Important { declarations.append(contentsOf: expand(p, scope)) }
+        }
+        for d in inline.longhands where !d.Important { declarations.append(d) }
+        for p in inline.pending where !p.Important { declarations.append(contentsOf: expand(p, scope)) }
         for r in matched {
             for d in r.Declarations where d.Important { declarations.append(d) }
+            for p in r.Pending where p.Important { declarations.append(contentsOf: expand(p, scope)) }
         }
-        for d in inlineDecls where d.Important { declarations.append(d) }
+        for d in inline.longhands where d.Important { declarations.append(d) }
+        for p in inline.pending where p.Important { declarations.append(contentsOf: expand(p, scope)) }
         for r in uaImportant {
             for d in r.Declarations where d.Important { declarations.append(d) }
         }
@@ -453,15 +725,12 @@ public final class StyleResolver {
         return parent
     }
 
-    func inlineDeclarations(_ node: html.Node, _ text: string) -> [css.Longhand] {
+    func inlineDeclarations(_ node: html.Node, _ text: string) -> SplitDecls {
         // By text: pages repeat the same style attribute on many elements.
         if let cached = inlineByText[text] {
             return cached
         }
-        var decls: [css.Longhand] = []
-        for d in css.ParseDeclarations(text) {
-            decls.append(contentsOf: css.Longhands(d))
-        }
+        let decls = SplitDecls(css.ParseDeclarations(text))
         inlineByText[text] = decls
         return decls
     }
@@ -674,6 +943,8 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
             made.Size = old.Size
             made.PositionX = old.PositionX
             made.PositionY = old.PositionY
+            made.OffsetX = old.OffsetX
+            made.OffsetY = old.OffsetY
             layer = made
         }
         s.BackgroundImage = layer
@@ -701,28 +972,11 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
     case .backgroundPosition:
         if let k = keywordOf(v) {
             var layer = s.BackgroundImage ?? BackgroundImage(url: "")
-            var xs: [float32] = []
-            var ys: [float32] = []
-            var free: [float32] = []
-            for word in words(k) {
-                switch word {
-                case "left": xs.append(0)
-                case "right": xs.append(1)
-                case "top": ys.append(0)
-                case "bottom": ys.append(1)
-                case "center": free.append(0.5)
-                default:
-                    let b = [uint8](word.utf8)
-                    if !b.isEmpty && b[b.count - 1] == 37 { free.append(css.parseNumber(b, 0, b.count - 1) / 100) }
-                    else { free.append(0) }
-                }
-            }
-            var all = xs + free
-            if xs.isEmpty && !free.isEmpty { all = free }
-            layer.PositionX = xs.first ?? (free.count > 0 ? free[0] : 0)
-            layer.PositionY = ys.first ?? (free.count > 1 ? free[1] : (free.count == 1 && !xs.isEmpty ? free[0] : (free.count == 1 && xs.isEmpty ? 0.5 : 0)))
-            if xs.isEmpty && ys.isEmpty && free.count == 1 { layer.PositionY = 0.5 }
-            _ = all
+            let p = backgroundPosition(words(k), s)
+            layer.PositionX = p.fx
+            layer.OffsetX = p.ox
+            layer.PositionY = p.fy
+            layer.OffsetY = p.oy
             s.BackgroundImage = layer
         }
     case .opacity:
@@ -743,6 +997,16 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
         }
     case .outlineWidth: if let p = pixels(v, s, ctx) { s.OutlineWidth = p }
     case .outlineColor: s.OutlineColor = colorOf(v)
+    case .fill:
+        s.FillNone = false
+        s.FillCurrent = false
+        if case .none = v {
+            s.FillNone = true
+        } else if case .currentColor = v {
+            s.FillCurrent = true
+        } else if let c = colorOf(v) {
+            s.Fill = c
+        }
     case .verticalAlign:
         if let k = keywordOf(v) {
             switch k {
@@ -1020,6 +1284,81 @@ func pixels(_ v: css.Value, _ s: ComputedStyle, _ ctx: ApplyContext) -> float32?
     }
 }
 
+/// A background position's words -- keywords, percentages, lengths, and
+/// `right 10px`-style edge offsets -- as each axis's fraction of the free
+/// space and offset in pixels. One value is x unless it's top or bottom;
+/// what's left out is centered.
+func backgroundPosition(_ w: [string], _ s: ComputedStyle) -> (fx: float32, ox: float32, fy: float32, oy: float32) {
+    // Each item: which axis a keyword ties it to (0 either, 1 x, 2 y),
+    // its fraction and its offset.
+    var items: [(axis: int, f: float32, o: float32)] = []
+    var i = 0
+    while i < w.count {
+        let word = w[i]
+        var item: (axis: int, f: float32, o: float32)
+        switch word {
+        case "left": item = (axis: 1, f: 0, o: 0)
+        case "right": item = (axis: 1, f: 1, o: 0)
+        case "top": item = (axis: 2, f: 0, o: 0)
+        case "bottom": item = (axis: 2, f: 1, o: 0)
+        case "center": item = (axis: 0, f: 0.5, o: 0)
+        default:
+            item = (axis: 0, f: 0, o: 0)
+            let b = [uint8](word.utf8)
+            if !b.isEmpty && b[b.count - 1] == 37 {
+                item.f = css.parseNumber(b, 0, b.count - 1) / 100
+            } else {
+                item.o = positionLength(word, s)
+            }
+        }
+        // An edge keyword and the length after it: an offset from that edge.
+        if item.axis != 0 && i + 1 < w.count && isPositionAmount(w[i + 1]) {
+            let next = [uint8](w[i + 1].utf8)
+            let fromFar = item.f == 1
+            if next[next.count - 1] == 37 {
+                let pct = css.parseNumber(next, 0, next.count - 1) / 100
+                item.f = fromFar ? 1 - pct : pct
+            } else {
+                let len = positionLength(w[i + 1], s)
+                item.o = fromFar ? -len : len
+            }
+            i += 1
+        }
+        items.append(item)
+        i += 1
+    }
+    var x: (f: float32, o: float32)? = nil
+    var y: (f: float32, o: float32)? = nil
+    for it in items where it.axis == 1 && x == nil { x = (f: it.f, o: it.o) }
+    for it in items where it.axis == 2 && y == nil { y = (f: it.f, o: it.o) }
+    for it in items where it.axis == 0 {
+        if x == nil { x = (f: it.f, o: it.o) } else if y == nil { y = (f: it.f, o: it.o) }
+    }
+    let rx = x ?? (f: 0.5, o: 0)
+    let ry = y ?? (f: 0.5, o: 0)
+    return (fx: rx.f, ox: rx.o, fy: ry.f, oy: ry.o)
+}
+
+func isPositionAmount(_ word: string) -> bool {
+    guard let c = word.utf8.first else { return false }
+    return (c >= 48 && c <= 57) || c == 45 || c == 43 || c == 46
+}
+
+/// A length in a position: px, em, rem; 0 for what isn't one.
+func positionLength(_ word: string, _ s: ComputedStyle) -> float32 {
+    let b = [uint8](word.utf8)
+    var end = 0
+    while end < b.count && ((b[end] >= 48 && b[end] <= 57) || b[end] == 45 || b[end] == 43 || b[end] == 46) { end += 1 }
+    if end == 0 { return 0 }
+    let n = css.parseNumber(b, 0, end)
+    switch css.lower(css.stringOf(b, end, b.count)) {
+    case "", "px": return n
+    case "em": return n * s.FontSize
+    case "rem": return n * 16
+    default: return n
+    }
+}
+
 func nonNegative(_ l: css.Length) -> css.Length {
     switch l {
     case .px(let v): return v < 0 ? .px(0) : l
@@ -1153,6 +1492,8 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
             dst.Size = src.Size
             dst.PositionX = src.PositionX
             dst.PositionY = src.PositionY
+            dst.OffsetX = src.OffsetX
+            dst.OffsetY = src.OffsetY
             b.BackgroundImage = dst
         } else if p != .backgroundImage {
             if let src = a.BackgroundImage, b.BackgroundImage == nil {
@@ -1213,6 +1554,10 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .borderSpacing: b.BorderSpacing = a.BorderSpacing
     case .tabSize: b.TabSize = a.TabSize
     case .content: b.Content = a.Content
+    case .fill:
+        b.Fill = a.Fill
+        b.FillCurrent = a.FillCurrent
+        b.FillNone = a.FillNone
     }
 }
 

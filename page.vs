@@ -150,7 +150,14 @@ public final class Page {
     /// refers to.
     public func LoadFile(_ path: string) throws {
         let bytes = try fs.ReadFile(fs.Path(path))
-        LoadHTML(stringOf(bytes, 0, bytes.count), baseURL: fetch.Directory(of: path))
+        LoadBytes(bytes, baseURL: fetch.Directory(of: path))
+    }
+
+    /// Shows an HTML page from its bytes, decoded as the HTML standard
+    /// says: by a byte order mark, the Content-Type's charset, a <meta
+    /// charset>, or as UTF-8.
+    public func LoadBytes(_ bytes: [uint8], contentType: string? = nil, baseURL: string? = nil) {
+        LoadHTML(html.Decode(bytes, contentType: contentType), baseURL: baseURL)
     }
 
     func load(_ doc: html.Document) {
@@ -169,24 +176,16 @@ public final class Page {
         hovered = nil
         pressed = nil
         scroll = draw.Point(0, 0)
-        for head in doc.ElementsByTagName("head") {
-            for child in head.Children where child.Kind == html.NodeKind.element {
-                if child.TagName == "style" {
-                    addSheet(css.Parse(child.InnerText()))
-                } else if child.TagName == "link" {
-                    let rel = lower(child.GetAttribute("rel") ?? "")
-                    if rel == "stylesheet", let href = child.GetAttribute("href") {
-                        if let bytes = Configuration.Fetcher.Fetch(Resolve(href)) {
-                            addSheet(css.Parse(stringOf(bytes, 0, bytes.count)))
-                        }
-                    }
-                }
-            }
-        }
-        // Styles in the body count too, as browsers allow.
-        for body in doc.ElementsByTagName("body") {
-            for style in dom.Descendants(body, tag: "style") {
-                addSheet(css.Parse(style.InnerText()))
+        // Stylesheets in document order, in the head or the body: a page
+        // may link a component's sheet beside the component.
+        var sheets: [html.Node] = []
+        collectSheets(doc.Root, &sheets)
+        for node in sheets {
+            let media = node.GetAttribute("media") ?? ""
+            if node.TagName == "style" {
+                addSheet(css.Parse(node.InnerText()), media: media)
+            } else if let href = node.GetAttribute("href"), let bytes = Configuration.Fetcher.Fetch(Resolve(href)) {
+                addSheet(css.Parse(stringOf(bytes, 0, bytes.count)), media: media)
             }
         }
         var wanted: [string] = []
@@ -211,18 +210,18 @@ public final class Page {
 
     /// Adds a stylesheet: its rules, and the fonts its @font-face rules
     /// name, registered from the files they point at.
-    func addSheet(_ sheet: css.StyleSheet, depth: int = 0) {
+    func addSheet(_ sheet: css.StyleSheet, media: string = "", depth: int = 0) {
         // @import brings another sheet in first, as it precedes the rules.
         if depth < 8 {
             for at in sheet.AtRules where at.Name == "import" {
                 let url = importURL(at.Params)
                 if url.isEmpty { continue }
                 if let bytes = Configuration.Fetcher.Fetch(Resolve(url)) {
-                    addSheet(css.Parse(stringOf(bytes, 0, bytes.count)), depth: depth + 1)
+                    addSheet(css.Parse(stringOf(bytes, 0, bytes.count)), media: media, depth: depth + 1)
                 }
             }
         }
-        resolver.Author.Add(sheet)
+        resolver.Author.Add(sheet, media: media)
         for at in sheet.AtRules where at.Name == "font-face" {
             var family = ""
             var sources: [string] = []
@@ -705,6 +704,21 @@ public final class Page {
     func showCaret() {
         caretVisible = true
         caretPhase = -1
+    }
+}
+
+/// The <style> elements and <link rel=stylesheet> elements under a
+/// node, in document order; not those inside <template>.
+func collectSheets(_ node: html.Node, _ out: inout [html.Node]) {
+    for c in node.Children where c.Kind == html.NodeKind.element {
+        if c.TagName == "template" { continue }
+        if c.TagName == "style" {
+            out.append(c)
+        } else if c.TagName == "link" {
+            let rel = " " + lower(c.GetAttribute("rel") ?? "") + " "
+            if rel.contains(" stylesheet ") && !rel.contains(" alternate ") && c.GetAttribute("href") != nil { out.append(c) }
+        }
+        collectSheets(c, &out)
     }
 }
 

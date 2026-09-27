@@ -5,6 +5,7 @@ import (
     "text/font"
     "web/cascade"
     "web/html"
+    "web/svg"
 )
 
 /// What kind of box a layout box is.
@@ -36,6 +37,8 @@ public enum ReplacedKind: Equatable {
     case select
     case progress
     case placeholder
+    /// An inline <svg>, drawn from its shapes (web/svg).
+    case svg
 }
 
 /// A box in the layout tree: an element, a run of text, or an anonymous
@@ -72,6 +75,8 @@ public final class Box {
     public var Marker: string = ""
     /// A replaced box's own size, before CSS: an image's pixels, a
     /// control's default.
+    /// An <svg> box's shapes.
+    public var Vector: svg.Drawing? = nil
     public var IntrinsicWidth: float32 = 0
     public var IntrinsicHeight: float32 = 0
     /// The image a replaced image box shows, once loaded.

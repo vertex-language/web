@@ -293,6 +293,10 @@ public struct BackgroundImage {
     /// Position as fractions of the free space: 0 left/top, 0.5 centre, 1 right/bottom.
     public var PositionX: float32
     public var PositionY: float32
+    /// Then moved by lengths, in CSS pixels: `0 -261px` is a sprite's
+    /// slice 261 pixels down; `right 10px` is 10 pixels in from the right.
+    public var OffsetX: float32 = 0
+    public var OffsetY: float32 = 0
 
     public init(url: string) {
         URL = url

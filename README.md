@@ -19,6 +19,11 @@ check program, so a stage can be tested and read on its own.
 # Render a page to a PNG, no window.
 vsc run snapshot -- testdata/pages/home.html out.png 900 700 2
 
+# Render a site the ui browser recorded (browser --record site/ https://...),
+# offline, and ask what is at a point or matches a selector, and why.
+vsc run snapshot -- --archive site/ out.png 1000 716
+vsc run inspect -- --archive site/ 400,300 'tree:header' 4
+
 # Time the stages on a page.
 vsc run bench -- testdata/pages/docs.html
 
@@ -29,6 +34,8 @@ vsc run check-dom
 vsc run check-cascade
 vsc run check-layout
 vsc run check-page
+vsc run check-fetch
+vsc run check-svg
 vsc run check-deps
 ```
 
@@ -38,15 +45,16 @@ vsc run check-deps
 
 | Package | Stage | What it is |
 | :--- | :--- | :--- |
-| **`web/html`** | parse | The HTML tokenizer and tree builder, entities, the node tree, and a serializer. |
-| **`web/css`** | parse | CSS syntax: tokens, rules, at-rules, declarations. Typed values and the property table: every longhand the engine knows (`Prop`), values in their units (`Value`, `Length`), shorthands expanded into `Longhand`s, and CSS color syntax (`ParseColor`). |
+| **`web/html`** | parse | The HTML tokenizer and tree builder, entities, the node tree, and a serializer. Character encodings as the HTML standard detects them (a byte order mark, the HTTP charset, `<meta charset>`), decoded from UTF-8, UTF-16 and windows-1252 (`Decode`). |
+| **`web/css`** | parse | CSS syntax: tokens, rules, at-rules nested as deep as sheets nest them, declarations. `Coverage` says what a sheet declares and what the engine applies, by name. Typed values and the property table: every longhand the engine knows (`Prop`), values in their units (`Value`, `Length`), shorthands expanded into `Longhand`s, and CSS color syntax (`ParseColor`). |
 | **`web/css/selector`** | parse | Selectors: the parser, the matcher (combinators, attributes, pseudo-classes, `:not()`, `:is()`, `:has()`), specificity, `QuerySelector`. |
 | **`web/dom`** | document | The live document: typed mutation (`SetAttribute`, `AppendChild`, `TextContent`, `ClassList`) and the journal of every change, which is how the engine learns of one. Document positions (`TextPosition`) and the HTML standard's form semantics: text controls, focus order, labels, form data. |
-| **`web/cascade`** | style | The user agent stylesheet, rule sets, the resolver, and `ComputedStyle`: the cascade, inheritance, `em`/`rem`/viewport units, `calc()`, `@media`, and state (`:hover`, `:focus`, `:active`, `:visited`) re-matched without a rebuild. `Invalidate` turns the DOM journal into the subtrees to restyle, by what the selectors mention: a change nothing depends on costs no frame. |
+| **`web/cascade`** | style | The user agent stylesheet, rule sets, the resolver, and `ComputedStyle`: the cascade, inheritance, `em`/`rem`/viewport units, `calc()`, custom properties and `var()`, `@media` (with the range syntax), `@supports`, `@layer`, and state (`:hover`, `:focus`, `:active`, `:visited`) re-matched without a rebuild. `Invalidate` turns the DOM journal into the subtrees to restyle, by what the selectors mention: a change nothing depends on costs no frame. |
+| **`web/svg`** | paint | Inline SVG: `<path>` (every command, arcs too), basic shapes, `<g>` and transforms, fills (`currentColor`, fill-rule, opacity) and the viewBox, drawn with `image/draw`'s paths. No strokes, `<use>`, clipping or text yet. |
 | **`web/layout`** | layout | The box tree and its layout: block, inline, flex, grid, tables, floats, positioning, scrolling. Hit testing. |
 | **`web/paint`** | paint | The display list for a laid-out tree (`Build`), and its rasterization onto `image/draw` (`Rasterize`). |
 | **`web/edit`** | input | Caret movement and text editing over UTF-8: characters, words, lines. |
-| **`web/fetch`** | resources | URLs resolved against a base, and a `Fetcher` that answers their bytes: files by default, or a host's handler. |
+| **`web/fetch`** | resources | URLs resolved against a base (through `net/url`), and a `Fetcher` that answers their bytes: files by default, or a host's handler. An `Archive` is a page and its resources recorded to a folder, shown again offline. |
 | **`web`** | the page | `Page`: loads a document and its resources, runs the stages whose inputs changed, takes input (`Input`) in its own coordinates, and draws into pixels. |
 
 Dependencies point down the pipeline, and nothing here imports `ui/`.

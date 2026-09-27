@@ -75,6 +75,17 @@ extension Layout {
         if items.isEmpty && box.Marker.isEmpty {
             return 0
         }
+        // Only empty inline elements, with no margins, padding or borders
+        // across: a line with no text or other content is no line (CSS 2.1
+        // section 9.4.2), and takes no height. A <span></span> or a custom
+        // element holding only a script lays out as nothing.
+        var phantom = box.Marker.isEmpty
+        for it in items where phantom {
+            if !(it.kind == .open || it.kind == .close) || it.width != 0 { phantom = false }
+        }
+        if phantom {
+            return 0
+        }
 
         let indent = box.Style.TextIndent.Or(0, base: contentWidth)
         var y: float32 = 0

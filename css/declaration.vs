@@ -11,7 +11,9 @@ public struct Declaration {
     public var Tokens: [Token]
 
     public init(property: string, value: string, important: bool = false, tokens: [Token] = []) {
-        self.Property = toLower(property)
+        // Custom property names keep their case: --Accent and --accent
+        // are two properties.
+        self.Property = property.hasPrefix("--") ? property : toLower(property)
         self.Value = value
         self.Important = important
         self.Tokens = tokens

@@ -213,9 +213,107 @@ func testInvalidation() {
           ":checked makes checked matter")
 }
 
+func testCustomProperties() {
+    print("Custom properties and var()")
+    let sheet = """
+    <style>
+      :root { --fg: rgb(1, 2, 3); --gap: 12px; --pad: var(--gap); --Case: 7px; --a: var(--b); --b: var(--a); }
+      .card { color: var(--fg); padding: var(--pad) 4px; margin-left: var(--missing, 9px); }
+      .inner { --fg: rgb(4, 5, 6); }
+      .later { width: var(--gap); width: 30px; }
+      .earlier { width: 30px; width: var(--gap); }
+      .cycle { width: 10px; width: var(--a); }
+      .none { margin-top: 5px; margin-top: var(--nothing); }
+      .case { margin-top: var(--Case); margin-bottom: var(--case, 1px); }
+      .imp { width: var(--gap) !important; }
+      .border { border: 2px solid var(--fg); }
+    </style>
+    """
+    let card = styleOf(sheet + "<div class=card>x</div>", ".card")
+    check(card?.Color == draw.Color(1, 2, 3), "var() reads a custom property the root declares")
+    check(card?.PaddingTop == Length.px(12) && card?.PaddingRight == Length.px(4), "var() inside a shorthand, through another custom property")
+    check(card?.MarginLeft == Length.px(9), "a missing custom property takes the fallback")
+    let inner = styleOf(sheet + "<div class=card><p class='inner card'>x</p></div>", "p")
+    check(inner?.Color == draw.Color(4, 5, 6), "an element's own custom property hides its parent's")
+    let child = styleOf(sheet + "<div class=inner><span class=card>x</span></div>", "span")
+    check(child?.Color == draw.Color(4, 5, 6), "custom properties inherit")
+    check(styleOf(sheet + "<div class=later>x</div>", ".later")?.Width == Length.px(30), "a later plain declaration wins over an earlier var() one")
+    check(styleOf(sheet + "<div class=earlier>x</div>", ".earlier")?.Width == Length.px(12), "a later var() declaration wins over an earlier plain one")
+    check(styleOf(sheet + "<div class=cycle>x</div>", ".cycle")?.Width == Length.auto, "a var() cycle makes the declaration unset")
+    check(styleOf(sheet + "<div class=none>x</div>", ".none")?.MarginTop == Length.px(0), "a reference to nothing without a fallback is unset")
+    let c = styleOf(sheet + "<div class=case>x</div>", ".case")
+    check(c?.MarginTop == Length.px(7) && c?.MarginBottom == Length.px(1), "custom property names are case-sensitive")
+    check(styleOf(sheet + "<div class=imp style='width: 1px'>x</div>", ".imp")?.Width == Length.px(12), "!important with var() beats the style attribute")
+    check(styleOf(sheet + "<div style='--gap: 3px; width: var(--gap)'>x</div>", "div")?.Width == Length.px(3), "the style attribute declares and reads custom properties")
+    let b = styleOf(sheet + "<div class=border>x</div>", ".border")
+    check(b?.BorderTopColor == draw.Color(1, 2, 3) && b?.BorderTopWidth == 2, "var() inside the border shorthand")
+}
+
+func testMediaQueries() {
+    print("Media queries")
+    func width(_ query: string) -> Length? {
+        return styleOf("<style>div { width: 1px } @media \(query) { div { width: 2px } }</style><div>x</div>", "div")?.Width
+    }
+    // styleOf's viewport is 800 by 600.
+    let yes = ["(width >= 768px)", "(width>=48rem)", "(min-width: 40em)", "screen and (width <= calc(64rem - .02px))",
+               "(400px <= width < 900px)", "(height > 500px)", "(hover: hover)", "(prefers-reduced-motion: no-preference)",
+               "(forced-colors: none)", "not print", "(max-width: 400px), (min-width: 700px)", "(aspect-ratio > 1)"]
+    let no = ["(width >= 1012px)", "(width<768px)", "(forced-colors: active)", "(prefers-color-scheme: dark)",
+              "(prefers-reduced-motion: reduce)", "print", "(900px <= width)", "(prefers-contrast: more)", "(scripting: enabled)"]
+    for q in yes { check(width(q) == Length.px(2), "@media \(q) holds") }
+    for q in no { check(width(q) == Length.px(1), "@media \(q) doesn't") }
+}
+
+func testAtRules() {
+    print("@supports, @layer and nesting")
+    func width(_ css: string) -> Length? {
+        return styleOf("<style>" + css + "</style><div class=d>x</div>", "div")?.Width
+    }
+    check(width("div { width: 1px } @supports (display: flex) { div { width: 2px } }") == Length.px(2), "@supports holds for a declaration the engine parses")
+    check(width("div { width: 1px } @supports (display: nonsense-value) { div { width: 2px } }") == Length.px(1), "and not for one it doesn't")
+    check(width("div { width: 1px } @supports not (frobnicate: 1) { div { width: 2px } }") == Length.px(2), "not")
+    check(width("div { width: 1px } @supports (display: flex) and (color: red) { div { width: 2px } }") == Length.px(2), "and")
+    check(width("div { width: 1px } @supports (frob: 1) or (color: red) { div { width: 2px } }") == Length.px(2), "or")
+    check(width("div { width: 1px } @supports ((display: flex) and (not (frob: 1))) { div { width: 2px } }") == Length.px(2), "nested parentheses")
+    check(width("div { width: 1px } @supports selector(:has(a)) { div { width: 2px } }") == Length.px(2), "selector() of a pseudo-class the matcher knows")
+    check(width("div { width: 1px } @supports selector(:popover-open) { div { width: 2px } }") == Length.px(1), "selector() of one it doesn't")
+    check(width("div { width: 1px } @supports (--x: y) { div { width: 2px } }") == Length.px(2), "a custom property is always supported")
+
+    check(width("@layer base { .d { width: 5px } } div { width: 1px }") == Length.px(1), "an unlayered rule beats a layered one, however specific")
+    check(width("@layer a, b; @layer b { div { width: 2px } } @layer a { div { width: 1px } }") == Length.px(2), "@layer a, b; sets the order: b beats a")
+    check(width("@layer a { div { width: 1px } } @layer b { div { width: 2px } }") == Length.px(2), "a later layer beats an earlier one")
+    check(width("@layer a { .d { width: 3px } div { width: 1px } }") == Length.px(3), "within a layer, specificity decides")
+    check(width("@layer base { @media (min-width: 100px) { div { width: 4px } } }") == Length.px(4), "@media inside @layer")
+    check(width("@media (min-width: 100px) { @media (max-width: 200px) { div { width: 4px } } div { width: 6px } }") == Length.px(6), "nested @media needs both queries")
+    check(width("@supports (display: grid) { @media (min-width: 100px) { div { width: 7px } } }") == Length.px(7), "@media inside @supports")
+    check(width("@layer outer { @layer inner { div { width: 8px } } }") == Length.px(8), "a layer inside a layer")
+}
+
+func testBackgroundPosition() {
+    print("background-position")
+    func pos(_ value: string) -> (float32, float32, float32, float32)? {
+        guard let b = styleOf("<style>div { background: url(x.png) " + value + " }</style><div>x</div>", "div")?.BackgroundImage else { return nil }
+        return (b.PositionX, b.OffsetX, b.PositionY, b.OffsetY)
+    }
+    func same(_ v: (float32, float32, float32, float32)?, _ want: (float32, float32, float32, float32)) -> bool {
+        guard let v = v else { return false }
+        return v.0 == want.0 && v.1 == want.1 && v.2 == want.2 && v.3 == want.3
+    }
+    check(same(pos("0 -261px repeat-x"), (0, 0, 0, -261)), "lengths: a sprite's slice (0 -261px)")
+    check(same(pos("center"), (0.5, 0, 0.5, 0)), "center alone is both")
+    check(same(pos("top"), (0.5, 0, 0, 0)), "top alone centers x")
+    check(same(pos("right 10px bottom 5px"), (1, -10, 1, -5)), "edge offsets")
+    check(same(pos("25% 2em"), (0.25, 0, 0, 32)), "a percentage and an em length")
+    check(same(pos("bottom left"), (0, 0, 1, 0)), "keywords in either order")
+}
+
 func main() -> int32 {
     testStyles()
     testInvalidation()
+    testCustomProperties()
+    testMediaQueries()
+    testAtRules()
+    testBackgroundPosition()
     if failures == 0 {
         print("ALL CASCADE CHECKS PASSED")
         return 0

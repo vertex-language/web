@@ -8,6 +8,7 @@ import (
     "web/dom"
     "web/html"
     "web/layout"
+    "web/svg"
 )
 
 public enum PaintKind: Equatable {
@@ -18,6 +19,8 @@ public enum PaintKind: Equatable {
     case gradient
     case clip
     case unclip
+    /// An <svg>'s shapes, fitted to Rect.
+    case vector
 }
 
 /// One thing to paint, in CSS pixels on the page: a filled rectangle, a
@@ -44,6 +47,11 @@ public struct PaintItem {
     public var RepeatX: bool
     public var RepeatY: bool
     public var Gradient: draw.LinearGradient?
+    /// An <svg>'s shapes; Color is its current color, and Fill what its
+    /// CSS fill resolved to (nil for the default, black).
+    public var Vector: svg.Drawing?
+    public var Fill: draw.Color?
+    public var FillNone: bool
 
     init(_ kind: PaintKind) {
         Kind = kind
@@ -63,6 +71,9 @@ public struct PaintItem {
         RepeatX = false
         RepeatY = false
         Gradient = nil
+        Vector = nil
+        Fill = nil
+        FillNone = false
     }
 
     static func fill(_ r: draw.Rect, _ c: draw.Color, _ radii: draw.Radii) -> PaintItem {
@@ -404,8 +415,8 @@ final class DisplayListBuilder {
                 case .auto:
                     break
                 }
-                let ox = paddingBox.X + (paddingBox.Width - tw) * bg.PositionX
-                let oy = paddingBox.Y + (paddingBox.Height - th) * bg.PositionY
+                let ox = paddingBox.X + (paddingBox.Width - tw) * bg.PositionX + bg.OffsetX
+                let oy = paddingBox.Y + (paddingBox.Height - th) * bg.PositionY + bg.OffsetY
                 items.append(.tiles(paddingBox, img, tileWidth: tw, tileHeight: th, originX: ox, originY: oy,
                                     repeatX: bg.RepeatX, repeatY: bg.RepeatY, opacity: opacity, radii: radii.Inset(box.Border)))
             }
@@ -645,8 +656,21 @@ final class DisplayListBuilder {
                 items.append(.fill(draw.Rect(x, y, box.Width * fraction, box.Height), color(draw.Color(0, 117, 255)), draw.Radii(all: box.Height / 2)))
             }
         case .placeholder:
-            let rect = draw.Rect(x, y, box.Width, box.Height)
-            items.append(.fill(rect, color(draw.Color(235, 235, 235)), draw.Radii.zero))
+            // Video, canvas, iframe and the rest draw nothing until they
+            // have something to show, as a browser's do before loading.
+            break
+        case .svg:
+            guard let v = box.Vector, !v.IsEmpty else { break }
+            let st = box.Style
+            var item = PaintItem(.vector)
+            item.Rect = draw.Rect(x + box.Padding.Left + box.Border.Left, y + box.Padding.Top + box.Border.Top,
+                                  box.Width - box.Padding.Left - box.Padding.Right - box.Border.Left - box.Border.Right,
+                                  box.Height - box.Padding.Top - box.Padding.Bottom - box.Border.Top - box.Border.Bottom)
+            item.Vector = v
+            item.Color = color(st.Color)
+            item.FillNone = st.FillNone
+            if st.FillCurrent { item.Fill = color(st.Color) } else if st.Fill != draw.Color(0, 0, 0) { item.Fill = color(st.Fill) }
+            items.append(item)
         case .none:
             break
         }
@@ -789,6 +813,11 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
             if let saved = clips.popLast() {
                 canvas.Clip = saved
             }
+        case .vector:
+            guard let v = item.Vector else { continue }
+            let r = item.Rect
+            v.Render(on: canvas, into: draw.Rect(r.X * scale + dx, r.Y * scale + dy, r.Width * scale, r.Height * scale),
+                     scale: scale, currentColor: item.Color, fill: item.Fill, fillNone: item.FillNone)
         }
     }
 }

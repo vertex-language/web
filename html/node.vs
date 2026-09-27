@@ -27,6 +27,9 @@ public class Node {
     public internal(set) var Text: string
     public internal(set) var Children: [Node]
     public internal(set) weak var Parent: Node?
+    /// The class attribute's words, parsed on first use: selectors ask
+    /// about classes far more often than classes change.
+    var classCache: [string]? = nil
 
     public init(kind: NodeKind, tagName: string = "", text: string = "", attributes: [Attribute] = []) {
         self.Id = getNextNodeId()
@@ -43,8 +46,17 @@ public class Node {
     /// Looks up an attribute value by name. Names are lowercase as the
     /// parser stores them, and a name asked for in any case is found.
     public func GetAttribute(_ name: string) -> string? {
-        let lower = toLower(name)
+        // Names asked for are nearly always lowercase already.
         var i = 0
+        while i < Attributes.count {
+            if Attributes[i].Name == name {
+                return Attributes[i].Value
+            }
+            i += 1
+        }
+        let lower = toLower(name)
+        if lower == name { return nil }
+        i = 0
         while i < Attributes.count {
             if Attributes[i].Name == lower {
                 return Attributes[i].Value
@@ -57,6 +69,7 @@ public class Node {
     /// Sets or updates an attribute.
     package func SetAttribute(_ name: string, _ value: string) {
         let lower = toLower(name)
+        if lower == "class" { classCache = nil }
         var i = 0
         while i < Attributes.count {
             if Attributes[i].Name == lower {
@@ -71,6 +84,7 @@ public class Node {
     /// Removes an attribute, if it has it.
     package func RemoveAttribute(_ name: string) {
         let lower = toLower(name)
+        if lower == "class" { classCache = nil }
         var i = 0
         while i < Attributes.count {
             if Attributes[i].Name == lower {
@@ -93,50 +107,25 @@ public class Node {
 
     /// All class names specified on this element.
     public func Classes() -> [string] {
-        guard let classAttr = GetAttribute("class") else {
-            return []
-        }
+        if let cached = classCache { return cached }
         var list: [string] = []
-        var current: [uint8] = []
-        for b in classAttr.utf8 {
-            if b == 32 || b == 9 || b == 10 || b == 13 { // whitespace
-                if !current.isEmpty {
-                    list.append(stringFromBytes(current, from: 0, to: current.count))
-                    current = []
-                }
-            } else {
-                current.append(b)
+        if let classAttr = GetAttribute("class") {
+            let b = [uint8](classAttr.utf8)
+            var k = 0
+            while k < b.count {
+                while k < b.count && isWhitespace(b[k]) { k += 1 }
+                let start = k
+                while k < b.count && !isWhitespace(b[k]) { k += 1 }
+                if k > start { list.append(stringFromBytes(b, from: start, to: k)) }
             }
         }
-        if !current.isEmpty {
-            list.append(stringFromBytes(current, from: 0, to: current.count))
-        }
+        classCache = list
         return list
     }
 
     /// Returns true if this element contains the specified class.
     public func HasClass(_ className: string) -> bool {
-        guard let classAttr = GetAttribute("class") else { return false }
-        if classAttr == className { return true }
-        // A word of the attribute, without making the words.
-        let b = [uint8](classAttr.utf8)
-        let want = [uint8](className.utf8)
-        if want.isEmpty { return false }
-        var i = 0
-        while i < b.count {
-            while i < b.count && isWhitespace(b[i]) { i += 1 }
-            let start = i
-            while i < b.count && !isWhitespace(b[i]) { i += 1 }
-            if i - start == want.count {
-                var k = 0
-                var same = true
-                while k < want.count {
-                    if b[start + k] != want[k] { same = false; break }
-                    k += 1
-                }
-                if same { return true }
-            }
-        }
+        for c in Classes() where c == className { return true }
         return false
     }
 

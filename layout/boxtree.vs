@@ -6,6 +6,7 @@ import (
     "web/css"
     "web/css/selector"
     "web/html"
+    "web/svg"
 )
 
 /// What the box tree builder needs from the view: styles, the page's
@@ -254,7 +255,14 @@ public final class BoxTreeBuilder {
             box.Replaced = .progress
             box.IntrinsicWidth = 160
             box.IntrinsicHeight = 16
-        case "video", "iframe", "canvas", "embed", "object", "svg":
+        case "svg":
+            box = Box(kind: .replaced, style: style, node: node)
+            box.Replaced = .svg
+            box.Vector = svg.Parse(node)
+            let size = svg.IntrinsicSize(node)
+            box.IntrinsicWidth = size.width
+            box.IntrinsicHeight = size.height
+        case "video", "iframe", "canvas", "embed", "object":
             box = Box(kind: .replaced, style: style, node: node)
             box.Replaced = .placeholder
             box.IntrinsicWidth = 300

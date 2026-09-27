@@ -31,12 +31,16 @@ public struct AtRule {
     public var Params: string
     public var Rules: [Rule]
     public var Declarations: [Declaration]
+    /// At-rules inside this one's block, in order: `@media` inside
+    /// `@layer`, `@supports` inside `@media`.
+    public var AtRules: [AtRule]
 
-    public init(name: string, params: string, rules: [Rule], declarations: [Declaration] = []) {
+    public init(name: string, params: string, rules: [Rule], declarations: [Declaration] = [], atRules: [AtRule] = []) {
         self.Name = toLower(name)
         self.Params = params
         self.Rules = rules
         self.Declarations = declarations
+        self.AtRules = atRules
     }
 }
 

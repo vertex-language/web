@@ -113,8 +113,15 @@ public final class ComputedStyle {
     /// The `content` of a pseudo-element, as its parts: text, or
     /// "\u{1}name" for attr(name). Nil is none.
     public var Content: [string]? = nil
+    /// SVG's fill, which inherits: a color, the element's color
+    /// (currentColor, kept as that), or none.
+    public var Fill: draw.Color = draw.Color(0, 0, 0)
+    public var FillCurrent: bool = false
+    public var FillNone: bool = false
 
     var face: font.Face? = nil
+    /// The custom properties the element sees (vars.vs); they inherit.
+    var customs: CustomScope? = nil
 
     public init() {}
 
@@ -142,6 +149,10 @@ public final class ComputedStyle {
         BorderCollapse = parent.BorderCollapse
         BorderSpacing = parent.BorderSpacing
         TabSize = parent.TabSize
+        customs = parent.customs
+        Fill = parent.Fill
+        FillCurrent = parent.FillCurrent
+        FillNone = parent.FillNone
         face = nil
     }
 
