@@ -82,6 +82,8 @@ public final class Box {
     /// A replaced box with a ratio but no size of its own (an <svg> with
     /// only a viewBox): its automatic width is the room it has.
     public var RatioOnly: bool = false
+    /// A field's ::placeholder style, for the text shown while it's empty.
+    public var PlaceholderStyle: cascade.ComputedStyle? = nil
     /// The image a replaced image box shows, once loaded.
     public var Image: draw.Image? = nil
     /// The baseline of the box's first line, from its top, for aligning

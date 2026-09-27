@@ -63,6 +63,8 @@ public final class RuleSet {
     /// way: they match an element's generated content, not the element.
     let before = Buckets()
     let after = Buckets()
+    /// Rules on a field's ::placeholder text.
+    let placeholder = Buckets()
     var order: int32 = 0
     /// Cascade layers by name ("outer.inner"), ranked in the order they
     /// are first named.
@@ -193,7 +195,7 @@ public final class RuleSet {
         all.append(r)
         let last = r.Selector.Compounds[r.Selector.Compounds.count - 1].Part
         if let pe = last.PseudoElement {
-            if pe == "before" { before.add(r) } else if pe == "after" { after.add(r) }
+            if pe == "before" { before.add(r) } else if pe == "after" { after.add(r) } else if pe == "placeholder" { placeholder.add(r) }
             return
         }
         main.add(r)
@@ -569,8 +571,8 @@ public final class StyleResolver {
     /// The style of an element's ::before or ::after, or nil where no
     /// rule gives it content.
     public func ResolvePseudo(_ node: html.Node, _ which: string, parent: ComputedStyle, context: selector.MatchContext) -> ComputedStyle? {
-        let uaBuckets = which == "before" ? UA.before : UA.after
-        let authorBuckets = which == "before" ? Author.before : Author.after
+        let uaBuckets = which == "before" ? UA.before : (which == "after" ? UA.after : UA.placeholder)
+        let authorBuckets = which == "before" ? Author.before : (which == "after" ? Author.after : Author.placeholder)
         if uaBuckets.isEmpty && authorBuckets.isEmpty { return nil }
         var uaList: [StyleRule] = []
         uaBuckets.candidates(node, into: &uaList)
@@ -612,7 +614,9 @@ public final class StyleResolver {
         }
         for d in declarations where d.Prop == .fontSize { apply(d, style, ctx) }
         for d in declarations where d.Prop != .fontSize { apply(d, style, ctx) }
-        guard style.Content != nil else { return nil }
+        // ::before and ::after exist only with content; ::placeholder
+        // is the field's own.
+        if which != "placeholder" && style.Content == nil { return nil }
         finish(style, node: node, root: false)
         return style
     }

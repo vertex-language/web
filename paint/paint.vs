@@ -633,8 +633,15 @@ final class DisplayListBuilder {
                     }
                 }
             } else if let placeholder = box.Node?.GetAttribute("placeholder"), !placeholder.isEmpty {
-                let run = face.Shape(placeholder)
-                items.append(.text(textX, textY, run, color(draw.Color(117, 117, 117)), 0))
+                // As ::placeholder styles it: its color, and its opacity.
+                let ps = box.PlaceholderStyle
+                let shown = ps?.Opacity ?? 1
+                if shown > 0 {
+                    let run = face.Shape(placeholder)
+                    var c = color(ps?.Color ?? draw.Color(117, 117, 117))
+                    if shown < 1 { c = c.Faded(shown) }
+                    items.append(.text(textX, textY, run, c, 0))
+                }
             }
             if isFocused && caretVisible && (value.isEmpty || box.Replaced == .textInput) {
                 items.append(.fill(draw.Rect(caretX, textY - face.Ascent, 1, face.Ascent + face.Descent), color(s.Color), draw.Radii.zero))

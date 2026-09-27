@@ -155,6 +155,29 @@ func testPageInput() {
     check(pixelAt(px3b, 200, 55, 25) == red, "and the one after its text, at its left")
     check(pixelAt(px3b, 200, 10, 50) == red && pixelAt(px3b, 200, 10, 70) == draw.Color.white, "a ::before's gradient paints, and not at opacity 0")
     check(countDark(px3b, 200, draw.IRect(0, 80, 60, 20)) > 5, "text after a leading absolute box paints")
+
+    // ::placeholder: the UA's grey, an author's color, or hidden.
+    let view4 = web.Page()
+    view4.SetViewportSize(draw.Size(200, 100))
+    view4.LoadHTML("<body style='margin:0'><style>.r::placeholder{color:red}.h::placeholder{opacity:0}</style><input placeholder='MMMMMM' style='display:block;border:0;padding:0;height:20px;font-size:16px'><input class=r placeholder='MMMMMM' style='display:block;border:0;padding:0;height:20px;font-size:16px'><input class=h placeholder='MMMMMM' style='display:block;border:0;padding:0;height:20px;font-size:16px'></body>")
+    var px4 = [uint8](repeating: 0, count: 200 * 100 * 4)
+    view4.Draw(into: &px4, width: 200, height: 100, scale: 1)
+    func inks(_ y: int32, _ want: (draw.Color) -> bool) -> int {
+        var n = 0
+        var yy = y
+        while yy < y + 20 {
+            var x: int32 = 0
+            while x < 80 {
+                if want(pixelAt(px4, 200, x, yy)) { n += 1 }
+                x += 1
+            }
+            yy += 1
+        }
+        return n
+    }
+    check(inks(0, { c in c.R < 200 && c.R == c.G && c.G == c.B }) > 10, "a placeholder is grey by default")
+    check(inks(20, { c in c.R > 200 && c.G < 150 }) > 10, "::placeholder sets its color")
+    check(inks(40, { c in c.R < 250 }) == 0, "and opacity: 0 hides it")
 }
 
 func near(_ a: float32, _ b: float32, _ tolerance: float32 = 0.5) -> bool {

@@ -238,6 +238,9 @@ public final class BoxTreeBuilder {
             default:
                 box.Replaced = .textInput
                 box.Text = Values[node.Id] ?? (node.GetAttribute("value") ?? "")
+                if node.HasAttribute("placeholder") {
+                    box.PlaceholderStyle = resolver.ResolvePseudo(node, "placeholder", parent: style, context: context)
+                }
                 box.IntrinsicWidth = 150
                 box.IntrinsicHeight = 24
             }
@@ -245,6 +248,9 @@ public final class BoxTreeBuilder {
             box = Box(kind: .replaced, style: style, node: node)
             box.Replaced = .textArea
             box.Text = Values[node.Id] ?? node.InnerText()
+            if node.HasAttribute("placeholder") {
+                box.PlaceholderStyle = resolver.ResolvePseudo(node, "placeholder", parent: style, context: context)
+            }
             box.IntrinsicWidth = 200
             box.IntrinsicHeight = 60
         case "select":
