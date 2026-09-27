@@ -201,7 +201,10 @@ func parseComplexSelector(_ selStr: string) -> ComplexSelector? {
         var part = SelectorPart()
         var readAny = false
 
-        while pos < len && !isSpace(bytes[pos]) && bytes[pos] != 62 && bytes[pos] != 43 && bytes[pos] != 126 && bytes[pos] != 44 {
+        // A comma can still be here, inside quotes the list's split
+        // kept whole: like any stray byte, it's skipped below.
+        let compoundStart = pos
+        while pos < len && !isSpace(bytes[pos]) && bytes[pos] != 62 && bytes[pos] != 43 && bytes[pos] != 126 {
             let b = bytes[pos]
 
             if b == 35 { // '#' ID
@@ -271,6 +274,8 @@ func parseComplexSelector(_ selStr: string) -> ComplexSelector? {
         if readAny {
             compounds.append(CompoundSelector(part: part, combinator: Combinator.descendant))
         }
+        // Whatever happens, the parse moves on.
+        if pos == compoundStart { pos += 1 }
     }
 
     if compounds.isEmpty {

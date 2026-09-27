@@ -245,6 +245,9 @@ func testPseudoClasses() {
     same(ids("a:link"), "link", ":link wants an href")
     same(ids("li::before"), "", "a pseudo-element matches no element")
     same(ids("LI.x"), "ac", "tag names are matched case-insensitively")
+    // Junk -- a page's HTML read as CSS -- ends; it doesn't loop.
+    _ = selector.ParseSelectors("<link href=\"a,b\"> p 'x,y' ,z")
+    check(selector.ParseSelectors("a\"q,r\" b").count == 1, "a comma in quotes outside brackets ends the parse, not loops it")
 
     let ctx = selector.MatchContext()
     let sels = selector.ParseSelectors("li:hover")

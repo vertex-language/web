@@ -160,9 +160,10 @@ public class Scanner {
                     attrVal = Unescape(stringFromBytes(src, from: valStart, to: pos))
                     if pos < len && src[pos] == 39 { pos += 1 }
                 } else {
-                    // Unquoted value
+                    // Unquoted value: to whitespace or '>', slashes and
+                    // all (href=https://example.com/).
                     let valStart = pos
-                    while pos < len && src[pos] != 62 && src[pos] != 47 && !isWhitespace(src[pos]) {
+                    while pos < len && src[pos] != 62 && !isWhitespace(src[pos]) {
                         pos += 1
                     }
                     attrVal = Unescape(stringFromBytes(src, from: valStart, to: pos))

@@ -51,6 +51,11 @@ func testTreeBuilding() {
         check(div.GetAttribute("class") == "x" && div.Attributes[0].Name == "class", "attribute names are lowercased")
         check(div.GetAttribute("data-id") == "7", "unquoted attribute values")
     }
+    let links = html.Parse("<link href=https://example.com/a.css rel=stylesheet><img src=/x.png/>")
+    if let link = links.ElementsByTagName("link").first, let img = links.ElementsByTagName("img").first {
+        check(link.GetAttribute("href") == "https://example.com/a.css" && link.GetAttribute("rel") == "stylesheet", "an unquoted URL keeps its slashes (got \(link.GetAttribute("href") ?? ""))")
+        check(img.GetAttribute("src") == "/x.png/", "even one before the tag's end")
+    }
     let table = html.Parse("<table><tr><td>a<td>b<tr><td>c</table>")
     check(table.ElementsByTagName("tr").count == 2 && table.ElementsByTagName("td").count == 3, "cells and rows close each other")
     let full = html.Parse("<!DOCTYPE html><html><head><meta charset=utf-8></head><body><p>x</p></body></html>")
