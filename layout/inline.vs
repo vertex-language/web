@@ -15,6 +15,9 @@ enum ItemKind: Equatable {
     case lineBreak
     case newline
     case float
+    /// An absolutely positioned box in the text: it takes no room, and
+    /// where the line has got to is its static position.
+    case positioned
 }
 
 /// One thing inline layout places: a word, a space, the start or end of
@@ -255,6 +258,9 @@ extension Layout {
             case .open, .close:
                 lineItems.append(item)
                 lineWidth += item.width
+            case .positioned:
+                item.box.X = box.ContentX + lineWidth
+                item.box.Y = box.ContentY + y
             case .lineBreak, .newline:
                 lineItems.append(item)
                 finishLine(forced: true)
@@ -274,6 +280,15 @@ extension Layout {
                       into items: inout [Item], pendingSpace: inout Bool) {
         let positionedAncestor = flow.positioned
         for child in box.Children {
+            if child.Kind != .text && (child.Style.Position == .absolute || child.Style.Position == .fixed) {
+                // Whatever kind of box it was made: laid out against its
+                // containing block later, from where the text had got to.
+                child.X = 0
+                child.Y = 0
+                positionedAncestor.Positioned.append(child)
+                items.append(Item(kind: .positioned, box: child, owner: owner))
+                continue
+            }
             if child.Style.Float != .none && child.Kind != .text {
                 // A float in the text, whatever kind of box: laid out
                 // now, placed when the line it is in is known.
@@ -287,12 +302,6 @@ extension Layout {
                 textItems(child, owner: owner, decoration: decoration, decorationColor: decorationColor,
                           into: &items, pendingSpace: &pendingSpace)
             case .inline:
-                if child.Style.Position == .absolute || child.Style.Position == .fixed {
-                    child.X = 0
-                    child.Y = 0
-                    positionedAncestor.Positioned.append(child)
-                    continue
-                }
                 resolveEdges(child, cbWidth: cb.Width)
                 var openItem = Item(kind: .open, box: child, owner: child)
                 openItem.width = child.Margin.Left + child.Border.Left + child.Padding.Left
@@ -305,12 +314,6 @@ extension Layout {
                 closeItem.width = child.Margin.Right + child.Border.Right + child.Padding.Right
                 items.append(closeItem)
             case .inlineBlock, .replaced:
-                if child.Style.Position == .absolute || child.Style.Position == .fixed {
-                    child.X = 0
-                    child.Y = 0
-                    positionedAncestor.Positioned.append(child)
-                    continue
-                }
                 layoutAtomic(child, cb: cb, flow: flow)
                 var item = Item(kind: .atomic, box: child, owner: owner)
                 item.width = child.OuterWidth
@@ -508,7 +511,7 @@ extension Layout {
                     emitSpan(open[idx], endX: x, isLast: true)
                     open.remove(at: idx)
                 }
-            case .lineBreak, .newline, .float:
+            case .lineBreak, .newline, .float, .positioned:
                 break
             }
         }

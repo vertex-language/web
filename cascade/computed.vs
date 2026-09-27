@@ -53,11 +53,16 @@ public final class ComputedStyle {
     public var BorderBottomColor: draw.Color? = nil
     public var BorderLeftColor: draw.Color? = nil
     public var BorderRadius: draw.Radii = draw.Radii.zero
+    /// Corners given in percentages, of the box's size: resolved by
+    /// Radii(width:height:) once it's known.
+    public var BorderRadiusPercent: draw.Radii = draw.Radii.zero
 
     // Painting.
     public var BackgroundColor: draw.Color = draw.Color.transparent
     public var BackgroundImage: BackgroundImage? = nil
     public var Opacity: float32 = 1
+    /// filter: blur()'s radius, in CSS pixels; 0 for none.
+    public var FilterBlur: float32 = 0
     public var OverflowX: Overflow = .visible
     public var OverflowY: Overflow = .visible
     public var Shadows: [Shadow] = []
@@ -194,7 +199,20 @@ public final class ComputedStyle {
     public var IsOutOfFlow: bool { return Position == .absolute || Position == .fixed || Float != .none }
     public var IsFlexContainer: bool { return Display == .flex || Display == .inlineFlex }
     public var IsGridContainer: bool { return Display == .grid || Display == .inlineGrid }
-    public var HasBorderRadius: bool { return !BorderRadius.IsZero }
+    public var HasBorderRadius: bool { return !BorderRadius.IsZero || !BorderRadiusPercent.IsZero }
+
+    /// The corners' radii for a box of this size. A percentage takes the
+    /// shorter side's share, round corners standing in for elliptical ones.
+    public func Radii(width: float32, height: float32) -> draw.Radii {
+        if BorderRadiusPercent.IsZero { return BorderRadius }
+        let side = width < height ? width : height
+        let p = BorderRadiusPercent
+        let b = BorderRadius
+        return draw.Radii(p.TopLeft > 0 ? p.TopLeft * side / 100 : b.TopLeft,
+                          p.TopRight > 0 ? p.TopRight * side / 100 : b.TopRight,
+                          p.BottomRight > 0 ? p.BottomRight * side / 100 : b.BottomRight,
+                          p.BottomLeft > 0 ? p.BottomLeft * side / 100 : b.BottomLeft)
+    }
 
     /// Whether the box clips or scrolls what overflows it.
     public var ClipsOverflow: bool { return OverflowX.Clips || OverflowY.Clips }

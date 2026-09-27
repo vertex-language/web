@@ -54,6 +54,7 @@ public enum Prop: int32 {
     case overflowX
     case overflowY
     case boxShadow
+    case filter
     case outlineWidth
     case outlineColor
     case verticalAlign
@@ -187,7 +188,7 @@ let propNames: [string: Prop] = [
     "border-bottom-right-radius": .borderBottomRightRadius, "border-bottom-left-radius": .borderBottomLeftRadius,
     "background-color": .backgroundColor, "background-image": .backgroundImage, "opacity": .opacity,
     "background-repeat": .backgroundRepeat, "background-size": .backgroundSize, "background-position": .backgroundPosition,
-    "overflow-x": .overflowX, "overflow-y": .overflowY, "box-shadow": .boxShadow,
+    "overflow-x": .overflowX, "overflow-y": .overflowY, "box-shadow": .boxShadow, "filter": .filter, "-webkit-filter": .filter,
     "outline-width": .outlineWidth, "outline-color": .outlineColor,
     "vertical-align": .verticalAlign, "text-decoration-line": .textDecorationLine,
     "text-decoration-color": .textDecorationColor,
@@ -1089,6 +1090,23 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
         return parseOverflow(t)
     case .boxShadow:
         return parseShadows(tokens)
+    case .filter:
+        // Only blur() is drawn; the other filter functions are dropped.
+        if kw == "none" { return Value.none }
+        var i = 0
+        while i < tokens.count {
+            if tokens[i].Kind == .function && lower(tokens[i].Value) == "blur" {
+                let end = closeParen(tokens, from: i + 1)
+                var j = i + 1
+                while j < end {
+                    if let v = parseLengthValue(tokens[j], allowAuto: false) { return v }
+                    j += 1
+                }
+                return .length(0, .px)
+            }
+            i += 1
+        }
+        return nil
     case .verticalAlign:
         switch kw {
         case "baseline", "middle", "top", "bottom", "text-top", "text-bottom", "sub", "super": return .keyword(kw)
@@ -1320,8 +1338,16 @@ func parseGradient(_ tokens: [Token], _ start: int, _ end: int) -> draw.LinearGr
         else if dx > 0 { angle = dy > 0 ? 135 : 45 }
         else { angle = dy > 0 ? 225 : 315 }
         firstStop = 1
-    } else if head.count >= 1 && head[0].Kind == .ident && (lower(head[0].Value) == "circle" || lower(head[0].Value) == "ellipse" || lower(head[0].Value) == "at" || lower(head[0].Value) == "closest-side" || lower(head[0].Value) == "farthest-corner") {
-        firstStop = 1
+    }
+    let radial = start > 0 && tokens[start - 1].Kind == .function && lower(tokens[start - 1].Value).hasSuffix("radial-gradient")
+    var shape: draw.RadialShape? = nil
+    if radial {
+        var r = draw.RadialShape()
+        if let (parsed, isHead) = parseRadialHead(head) {
+            r = parsed
+            if isHead { firstStop = 1 }
+        }
+        shape = r
     }
     var stops: [draw.GradientStop] = []
     var positions: [float32] = []
@@ -1370,7 +1396,73 @@ func parseGradient(_ tokens: [Token], _ start: int, _ end: int) -> draw.LinearGr
         if stops[i3].Position < stops[i3 - 1].Position { stops[i3].Position = stops[i3 - 1].Position }
         i3 += 1
     }
-    return draw.LinearGradient(angle: angle, stops: stops)
+    var g = draw.LinearGradient(angle: angle, stops: stops)
+    g.Radial = shape
+    return g
+}
+
+/// A radial gradient's first argument -- its shape, size and `at`
+/// position -- or nil with isHead false where it's already a stop.
+func parseRadialHead(_ head: [Token]) -> (draw.RadialShape, bool)? {
+    var r = draw.RadialShape()
+    if head.isEmpty { return nil }
+    if parseColorAt(head, 0) != nil { return (r, false) }
+    var sizes: [float32] = []
+    var k = 0
+    while k < head.count {
+        let t = head[k]
+        let word = t.Kind == .ident ? lower(t.Value) : ""
+        if word == "at" {
+            // One or two positions: keywords, percentages or lengths.
+            var xs: [Token] = []
+            var j = k + 1
+            while j < head.count { xs.append(head[j]); j += 1 }
+            var axis = 0
+            var m = 0
+            while m < xs.count && m < 2 {
+                let p = xs[m]
+                let kw = p.Kind == .ident ? lower(p.Value) : ""
+                var frac: float32 = -1
+                var px: float32 = 0
+                var isY = axis == 1
+                switch kw {
+                case "left": frac = 0; isY = false
+                case "right": frac = 1; isY = false
+                case "top": frac = 0; isY = true
+                case "bottom": frac = 1; isY = true
+                case "center": frac = 0.5
+                default:
+                    if p.Kind == .percentage { frac = p.NumberVal / 100 }
+                    else if p.Kind == .number && p.NumberVal == 0 { frac = 0 }
+                    else if p.Kind == .dimension && p.Unit == "px" { frac = 0; px = p.NumberVal }
+                }
+                if frac >= 0 {
+                    if isY { r.CenterY = frac; r.OffsetY = px } else { r.CenterX = frac; r.OffsetX = px }
+                    axis = isY ? 0 : 1
+                }
+                m += 1
+            }
+            break
+        }
+        switch word {
+        case "circle": r.Circle = true
+        case "ellipse": r.Circle = false
+        case "closest-side": r.Extent = .closestSide
+        case "closest-corner": r.Extent = .closestCorner
+        case "farthest-side": r.Extent = .farthestSide
+        case "farthest-corner": r.Extent = .farthestCorner
+        default:
+            if t.Kind == .dimension && t.Unit == "px" { sizes.append(t.NumberVal) }
+        }
+        k += 1
+    }
+    if !sizes.isEmpty {
+        r.Extent = .sized
+        r.SizeX = sizes[0]
+        r.SizeY = sizes.count > 1 ? sizes[1] : sizes[0]
+        if sizes.count == 1 { r.Circle = true }
+    }
+    return (r, true)
 }
 
 func parseBackgroundSize(_ tokens: [Token]) -> Value? {

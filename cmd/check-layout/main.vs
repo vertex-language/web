@@ -397,6 +397,10 @@ func testPositioning() {
     let rel = l.box("rel")!
     check(rel.Positioned.count == 2, "the positioned ancestor keeps its positioned boxes")
 
+    guard let il = layoutOf("<body style='margin:0;font-size:16px'><div id=p style='position:relative;width:200px'>one<i id=after style='position:absolute;left:50px;top:0;width:5px;height:5px'></i></div><div id=q style='position:relative;width:200px'><i id=first style='position:absolute;right:0;top:0;width:5px;height:5px'></i>two</div></body>") else { check(false, "layout"); return }
+    check(il.rect("after")!.X == 50 && il.box("p")!.Lines.count == 1, "an absolute box after text takes its insets and no room in the line (got \(il.rect("after")!.X))")
+    check(il.box("q")!.Lines.count == 1 && il.rect("first")!.X == 195, "one before the text leaves it inline content (got \(il.box("q")!.Lines.count) lines)")
+
     guard let r = layoutOf("<body style='margin:0'><div id=a style='height:10px'></div><div id=b style='position:relative;top:5px;left:8px;height:10px'></div><div id=c style='height:10px'></div></body>") else { check(false, "layout"); return }
     let b = r.box("b")!
     check(b.OffsetX == 8 && b.OffsetY == 5, "relative offsets are kept aside (got \(b.OffsetX) \(b.OffsetY))")

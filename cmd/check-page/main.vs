@@ -142,6 +142,19 @@ func testPageInput() {
     var px2 = [uint8](repeating: 0, count: 200 * 200 * 4)
     view2.Draw(into: &px2, width: 200, height: 200, scale: 2)
     check(pixelAt(px2, 200, 19, 19) == draw.Color(255, 0, 0) && pixelAt(px2, 200, 21, 21) == draw.Color.white, "at 2x a 10px box is 20 pixels")
+
+    // Positioned boxes paint, whatever holds them, and opacity reaches
+    // gradients.
+    let view3 = web.Page()
+    view3.SetViewportSize(draw.Size(200, 100))
+    view3.LoadHTML("<body style='margin:0;font-size:16px'><style>.p:before{content:'';position:absolute;inset:0;background:linear-gradient(red,red)}.h:before{opacity:0}</style><div style='position:relative;height:20px'><div>x</div><i style='position:absolute;left:50px;top:0;width:10px;height:10px;background:red'></i></div><div style='position:relative;height:20px'>y<i style='position:absolute;left:50px;top:0;width:10px;height:10px;background:red'></i></div><div class=p style='position:relative;width:20px;height:20px'></div><div class='p h' style='position:relative;width:20px;height:20px'></div><div style='height:20px'><i style='position:absolute;left:150px;width:1px;height:1px'></i>zzzz</div></body>")
+    var px3b = [uint8](repeating: 0, count: 200 * 100 * 4)
+    view3.Draw(into: &px3b, width: 200, height: 100, scale: 1)
+    let red = draw.Color(255, 0, 0)
+    check(pixelAt(px3b, 200, 55, 5) == red, "a relative block paints the absolute box beside its blocks")
+    check(pixelAt(px3b, 200, 55, 25) == red, "and the one after its text, at its left")
+    check(pixelAt(px3b, 200, 10, 50) == red && pixelAt(px3b, 200, 10, 70) == draw.Color.white, "a ::before's gradient paints, and not at opacity 0")
+    check(countDark(px3b, 200, draw.IRect(0, 80, 60, 20)) > 5, "text after a leading absolute box paints")
 }
 
 func near(_ a: float32, _ b: float32, _ tolerance: float32 = 0.5) -> bool {

@@ -143,8 +143,12 @@ public final class Box {
 
     /// Whether the children flow as lines rather than blocks.
     public var HasInlineChildren: bool {
-        if Children.isEmpty { return false }
-        return Children[0].IsInlineLevel
+        // Floats and positioned boxes go with either; the first box in
+        // the flow says which it is.
+        for c in Children where c.Kind == .text || !c.Style.IsOutOfFlow {
+            return c.IsInlineLevel
+        }
+        return false
     }
 
     public func AppendChild(_ child: Box) {

@@ -21,6 +21,11 @@ public enum PaintKind: Equatable {
     case unclip
     /// An <svg>'s shapes, fitted to Rect.
     case vector
+    /// What follows, to the matching unlayer, is painted apart, then
+    /// blurred by Blur and put back: filter: blur(). Rect is the box
+    /// the filter is on.
+    case layer
+    case unlayer
 }
 
 /// One thing to paint, in CSS pixels on the page: a filled rectangle, a
@@ -52,6 +57,8 @@ public struct PaintItem {
     public var Vector: svg.Drawing?
     public var Fill: draw.Color?
     public var FillNone: bool
+    /// A layer's blur radius, in CSS pixels.
+    public var Blur: float32
 
     init(_ kind: PaintKind) {
         Kind = kind
@@ -74,6 +81,7 @@ public struct PaintItem {
         Vector = nil
         Fill = nil
         FillNone = false
+        Blur = 0
     }
 
     static func fill(_ r: draw.Rect, _ c: draw.Color, _ radii: draw.Radii) -> PaintItem {
@@ -241,10 +249,19 @@ final class DisplayListBuilder {
     func paintBox(_ box: layout.Box, x parentX: float32, y parentY: float32, skipBackground: Int) {
         let s = box.Style
         if s.Visibility != .visible && !hasVisibleDescendant(box) { return }
+        // Nothing of a fully transparent box or its content shows.
+        if s.Opacity <= 0 { return }
         let x = parentX + box.X + box.OffsetX
         let y = parentY + box.Y + box.OffsetY
         let savedOpacity = opacity
         if s.Opacity < 1 { opacity = opacity * s.Opacity }
+        let blurred = s.FilterBlur > 0
+        if blurred {
+            var layer = PaintItem(.layer)
+            layer.Rect = draw.Rect(x, y, box.Width, box.Height)
+            layer.Blur = s.FilterBlur
+            items.append(layer)
+        }
         let clips = s.ClipsOverflow
         if clips {
             paintBackgroundAndBorderIfVisible(box, x: x, y: y, skipBackground: skipBackground)
@@ -282,8 +299,9 @@ final class DisplayListBuilder {
             let w = s.OutlineWidth
             let ring = draw.Rect(x - w, y - w, box.Width + 2 * w, box.Height + 2 * w)
             let c = color(s.OutlineColor ?? draw.Color(0, 95, 204))
-            items.append(.border(ring, draw.Edges(all: w), [c, c, c, c], s.BorderRadius.IsZero ? draw.Radii.zero : draw.Radii(all: s.BorderRadius.TopLeft + w)))
+            items.append(.border(ring, draw.Edges(all: w), [c, c, c, c], !s.HasBorderRadius ? draw.Radii.zero : draw.Radii(all: s.Radii(width: box.Width, height: box.Height).TopLeft + w)))
         }
+        if blurred { items.append(PaintItem(.unlayer)) }
         opacity = savedOpacity
     }
 
@@ -332,7 +350,13 @@ final class DisplayListBuilder {
                 if phase == .floats { paintBox(child, x: sx, y: sy, skipBackground: skipBackground) }
                 continue
             }
-            if child.Style.ClipsOverflow || child.Style.Opacity < 1 {
+            if child.Style.IsPositioned {
+                // A relative or sticky box paints as a whole, with what
+                // is positioned against it, after the in-flow content.
+                if phase == .inlineContent { paintBox(child, x: sx, y: sy, skipBackground: skipBackground) }
+                continue
+            }
+            if child.Style.ClipsOverflow || child.Style.Opacity < 1 || child.Style.FilterBlur > 0 {
                 // A clipping or translucent box paints as a whole, in
                 // the phase its background would go in.
                 if phase == .blockBackgrounds { paintBox(child, x: sx, y: sy, skipBackground: skipBackground) }
@@ -370,7 +394,7 @@ final class DisplayListBuilder {
     func paintBackgroundAndBorder(_ box: layout.Box, x: float32, y: float32) {
         let s = box.Style
         let rect = draw.Rect(x, y, box.Width, box.Height)
-        var radii = s.BorderRadius
+        var radii = s.Radii(width: box.Width, height: box.Height)
         if !radii.IsZero { radii = radii.Fitted(box.Width, box.Height) }
         // Shadows go under the box: each drawn as rings from the blur's
         // outer edge inward, which fades like a blur near enough.
@@ -392,7 +416,14 @@ final class DisplayListBuilder {
         }
         if let bg = s.BackgroundImage {
             let paddingBox = draw.Rect(x + box.Border.Left, y + box.Border.Top, box.PaddingBoxWidth, box.PaddingBoxHeight)
-            if let g = bg.Gradient {
+            if var g = bg.Gradient {
+                if opacity < 1 {
+                    var i = 0
+                    while i < g.Stops.count {
+                        g.Stops[i].Color = color(g.Stops[i].Color)
+                        i += 1
+                    }
+                }
                 items.append(.gradient(paddingBox, g, radii.Inset(box.Border)))
             } else if !bg.URL.isEmpty, let img = images[bg.URL], img.Width > 0 && img.Height > 0 {
                 var tw = float32(img.Width)
@@ -618,7 +649,7 @@ final class DisplayListBuilder {
             items.append(PaintItem.unclip)
         case .checkbox, .radio:
             let checked = box.Node?.HasAttribute("checked") ?? false
-            let radius = box.Replaced == .radio ? box.Width / 2 : s.BorderRadius.TopLeft
+            let radius = box.Replaced == .radio ? box.Width / 2 : s.Radii(width: box.Width, height: box.Height).TopLeft
             let rect = draw.Rect(x, y, box.Width, box.Height)
             if checked {
                 let accent = color(draw.Color(0, 117, 255))
@@ -705,6 +736,13 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
         let x1 = draw.RoundToInt((r.X + r.Width) * scale + dx)
         let y1 = draw.RoundToInt((r.Y + r.Height) * scale + dy)
         return draw.IRect(x0, y0, x1 - x0, y1 - y0)
+    }
+    var layers: [draw.Layer?] = []
+    var layerCanvases: [draw.Canvas] = []
+    var layerBlurs: [float32] = []
+    func inflate(_ r: draw.IRect, _ by: float32) -> draw.IRect {
+        let d = int32(by + 0.5)
+        return draw.IRect(r.X - d, r.Y - d, r.Width + 2 * d, r.Height + 2 * d)
     }
     for item in items {
         switch item.Kind {
@@ -805,7 +843,38 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
         case .gradient:
             let dr = device(item.Rect)
             if dr.IsEmpty { continue }
-            if let g = item.Gradient { canvas.FillGradient(dr, radii: item.Radii.Scaled(scale), g) }
+            if var g = item.Gradient {
+                if let r = g.Radial { g.Radial = r.Scaled(scale) }
+                canvas.FillGradient(dr, radii: item.Radii.Scaled(scale), g)
+            }
+        case .layer:
+            // The box and as far as its blur reaches, within reach of
+            // what shows.
+            let reach = item.Blur * scale * 3
+            let bounds = inflate(device(item.Rect), reach)
+            let area = bounds.Intersect(inflate(canvas.Clip, reach))
+            if area.IsEmpty {
+                layers.append(nil)
+                layerCanvases.append(canvas)
+                // Nothing of it can show: paint into an empty clip.
+                canvas.Clip = draw.IRect(0, 0, 0, 0)
+                continue
+            }
+            let layer = draw.Layer(area)
+            layers.append(layer)
+            layerCanvases.append(canvas)
+            layerBlurs.append(item.Blur * scale)
+            canvas = layer.Canvas
+        case .unlayer:
+            guard let parent = layerCanvases.popLast() else { continue }
+            let made = layers.popLast() ?? nil
+            canvas = parent
+            if let layer = made {
+                let sigma = layerBlurs.popLast() ?? 0
+                layer.Blur(sigma)
+                layer.Composite(onto: canvas)
+                layer.Free()
+            }
         case .clip:
             clips.append(canvas.Clip)
             canvas.ClipTo(device(item.Rect))

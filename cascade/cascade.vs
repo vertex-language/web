@@ -926,10 +926,18 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
     case .borderRightColor: s.BorderRightColor = colorOf(v)
     case .borderBottomColor: s.BorderBottomColor = colorOf(v)
     case .borderLeftColor: s.BorderLeftColor = colorOf(v)
-    case .borderTopLeftRadius: if let p = pixels(v, s, ctx) { s.BorderRadius.TopLeft = p }
-    case .borderTopRightRadius: if let p = pixels(v, s, ctx) { s.BorderRadius.TopRight = p }
-    case .borderBottomRightRadius: if let p = pixels(v, s, ctx) { s.BorderRadius.BottomRight = p }
-    case .borderBottomLeftRadius: if let p = pixels(v, s, ctx) { s.BorderRadius.BottomLeft = p }
+    case .borderTopLeftRadius:
+        if case .length(let n, .percent) = v { s.BorderRadiusPercent.TopLeft = n; s.BorderRadius.TopLeft = 0 }
+        else if let p = pixels(v, s, ctx) { s.BorderRadius.TopLeft = p; s.BorderRadiusPercent.TopLeft = 0 }
+    case .borderTopRightRadius:
+        if case .length(let n, .percent) = v { s.BorderRadiusPercent.TopRight = n; s.BorderRadius.TopRight = 0 }
+        else if let p = pixels(v, s, ctx) { s.BorderRadius.TopRight = p; s.BorderRadiusPercent.TopRight = 0 }
+    case .borderBottomRightRadius:
+        if case .length(let n, .percent) = v { s.BorderRadiusPercent.BottomRight = n; s.BorderRadius.BottomRight = 0 }
+        else if let p = pixels(v, s, ctx) { s.BorderRadius.BottomRight = p; s.BorderRadiusPercent.BottomRight = 0 }
+    case .borderBottomLeftRadius:
+        if case .length(let n, .percent) = v { s.BorderRadiusPercent.BottomLeft = n; s.BorderRadius.BottomLeft = 0 }
+        else if let p = pixels(v, s, ctx) { s.BorderRadius.BottomLeft = p; s.BorderRadiusPercent.BottomLeft = 0 }
     case .backgroundColor:
         if case .currentColor = v { s.BackgroundColor = s.Color }
         else if let c = colorOf(v) { s.BackgroundColor = c }
@@ -981,6 +989,8 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
         }
     case .opacity:
         if case .number(let n) = v { s.Opacity = n < 0 ? 0 : (n > 1 ? 1 : n) }
+    case .filter:
+        if case .none = v { s.FilterBlur = 0 } else if let r = pixels(v, s, ctx), r > 0 { s.FilterBlur = r } else { s.FilterBlur = 0 }
     case .overflowX: if let k = keywordOf(v) { s.OverflowX = overflowOf(k) }
     case .overflowY: if let k = keywordOf(v) { s.OverflowY = overflowOf(k) }
     case .boxShadow:
@@ -1479,10 +1489,10 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .borderRightColor: b.BorderRightColor = a.BorderRightColor
     case .borderBottomColor: b.BorderBottomColor = a.BorderBottomColor
     case .borderLeftColor: b.BorderLeftColor = a.BorderLeftColor
-    case .borderTopLeftRadius: b.BorderRadius.TopLeft = a.BorderRadius.TopLeft
-    case .borderTopRightRadius: b.BorderRadius.TopRight = a.BorderRadius.TopRight
-    case .borderBottomRightRadius: b.BorderRadius.BottomRight = a.BorderRadius.BottomRight
-    case .borderBottomLeftRadius: b.BorderRadius.BottomLeft = a.BorderRadius.BottomLeft
+    case .borderTopLeftRadius: b.BorderRadius.TopLeft = a.BorderRadius.TopLeft; b.BorderRadiusPercent.TopLeft = a.BorderRadiusPercent.TopLeft
+    case .borderTopRightRadius: b.BorderRadius.TopRight = a.BorderRadius.TopRight; b.BorderRadiusPercent.TopRight = a.BorderRadiusPercent.TopRight
+    case .borderBottomRightRadius: b.BorderRadius.BottomRight = a.BorderRadius.BottomRight; b.BorderRadiusPercent.BottomRight = a.BorderRadiusPercent.BottomRight
+    case .borderBottomLeftRadius: b.BorderRadius.BottomLeft = a.BorderRadius.BottomLeft; b.BorderRadiusPercent.BottomLeft = a.BorderRadiusPercent.BottomLeft
     case .backgroundColor: b.BackgroundColor = a.BackgroundColor
     case .backgroundImage: b.BackgroundImage = a.BackgroundImage
     case .backgroundRepeat, .backgroundSize, .backgroundPosition:
@@ -1505,6 +1515,7 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
             }
         }
     case .opacity: b.Opacity = a.Opacity
+    case .filter: b.FilterBlur = a.FilterBlur
     case .overflowX: b.OverflowX = a.OverflowX
     case .overflowY: b.OverflowY = a.OverflowY
     case .boxShadow: b.Shadows = a.Shadows

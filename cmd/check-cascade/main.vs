@@ -307,6 +307,19 @@ func testBackgroundPosition() {
     check(same(pos("bottom left"), (0, 0, 1, 0)), "keywords in either order")
 }
 
+func testEffects() {
+    print("Effects")
+    guard let e = styleOf("<style>div { filter: brightness(2) blur(1em); border-radius: 50% 4px; background: radial-gradient(circle at 0 100%, red 10%, blue 60%) }</style><div>x</div>", "div") else { check(false, "effects resolve"); return }
+    check(e.FilterBlur == 16, "filter: blur() in em, among other functions (got \(e.FilterBlur))")
+    let r = e.Radii(width: 200, height: 100)
+    check(r.TopLeft == 50 && r.TopRight == 4 && r.BottomRight == 50, "border-radius percentages resolve against the box (got \(r.TopLeft) \(r.TopRight))")
+    guard let shape = e.BackgroundImage?.Gradient?.Radial else { check(false, "radial-gradient has a shape"); return }
+    check(shape.Circle && shape.CenterX == 0 && shape.CenterY == 1, "radial-gradient's shape and position")
+    check(e.BackgroundImage!.Gradient!.Stops.count == 2 && e.BackgroundImage!.Gradient!.Stops[0].Position == 0.1, "and its stops after them")
+    guard let n = styleOf("<style>div { filter: blur(4px); } div.n { filter: none }</style><div class=n>x</div>", "div") else { return }
+    check(n.FilterBlur == 0, "filter: none clears it")
+}
+
 func main() -> int32 {
     testStyles()
     testInvalidation()
@@ -314,6 +327,7 @@ func main() -> int32 {
     testMediaQueries()
     testAtRules()
     testBackgroundPosition()
+    testEffects()
     if failures == 0 {
         print("ALL CASCADE CHECKS PASSED")
         return 0
