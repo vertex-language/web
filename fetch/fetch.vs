@@ -1,20 +1,32 @@
 package fetch
 
-import "fs"
+import (
+    "fs"
+    "net/url"
+)
 
 // Resources a page refers to: URLs resolved against the page's base,
 // and their bytes. Files are read from disk; any other scheme needs a
 // handler from the host.
 
-/// A URL made absolute against a base: absolute URLs, data: URLs, rooted
-/// paths and fragments are left alone.
-public func Resolve(_ url: string, against base: string) -> string {
-    if url.isEmpty { return base }
-    if url.hasPrefix("#") { return url }
-    if url.contains("://") || url.hasPrefix("data:") || url.hasPrefix("/") || url.hasPrefix("about:") { return url }
-    if base.isEmpty { return url }
-    if base.hasSuffix("/") { return base + url }
-    return base + "/" + url
+/// A URL made absolute against a base, as RFC 3986 resolves a reference
+/// (net/url): `/x` is rooted at the base's host, `//host/x` takes its
+/// scheme, `../x` climbs, `?q` keeps its path. A base with no scheme is
+/// a file path, and resolves the same way. A fragment alone is left for
+/// the page to scroll to, and what doesn't parse is left as it is.
+public func Resolve(_ reference: string, against base: string) -> string {
+    if reference.isEmpty { return base }
+    if reference.hasPrefix("#") || base.isEmpty { return reference }
+    guard let r = try? url.Parse(reference) else { return reference }
+    if r.IsAbsolute { return r.String() }
+    guard let b = try? url.Parse(base) else { return reference }
+    return b.ResolveReference(r).String()
+}
+
+/// The scheme of a URL, lowercase, or "" for a path.
+public func Scheme(_ address: string) -> string {
+    guard let u = try? url.Parse(address) else { return "" }
+    return u.Scheme
 }
 
 /// The folder a file path is in, with its trailing slash; "" for a bare
@@ -26,13 +38,12 @@ public func Directory(of path: string) -> string {
     return i >= 0 ? stringOf(b, 0, i + 1) : ""
 }
 
-/// A file URL's path, or the path itself.
-public func FilePath(_ url: string) -> string {
-    if url.hasPrefix("file://") {
-        let b = [uint8](url.utf8)
-        return stringOf(b, 7, b.count)
+/// A file URL's path, its escapes decoded, or the path itself.
+public func FilePath(_ address: string) -> string {
+    if address.hasPrefix("file:"), let u = try? url.Parse(address) {
+        return url.PathUnescape(u.Path)
     }
-    return url
+    return address
 }
 
 /// Answers the bytes of a resource by its resolved URL.
