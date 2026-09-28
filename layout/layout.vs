@@ -82,6 +82,16 @@ public final class Layout {
         return v + box.Padding.Vertical + box.Border.Vertical
     }
 
+    /// The border-box height aspect-ratio gives a box of its width, or
+    /// nil where it has no ratio. The ratio is of the box-sizing box.
+    func heightFromRatio(_ box: Box) -> float32? {
+        let r = box.Style.AspectRatio
+        if r <= 0 { return nil }
+        if box.Style.BoxSizing == .borderBox { return box.Width / r }
+        let inner = box.Width - box.Padding.Horizontal - box.Border.Horizontal
+        return (inner > 0 ? inner : 0) / r + box.Padding.Vertical + box.Border.Vertical
+    }
+
     /// Clamps a border-box width to min-width and max-width.
     func clampWidth(_ box: Box, _ width: float32, cbWidth: float32) -> float32 {
         var w = width
@@ -155,16 +165,23 @@ public final class Layout {
         // A height given up front is what the children's percentages
         // measure against.
         let givenHeight = heightFromStyle(box, s.Height, cbHeight: cb.Height)
+        var ratioHeight: float32? = nil
+        if givenHeight == nil { ratioHeight = heightFromRatio(box) }
         box.DefiniteInnerHeight = nil
-        if let g = givenHeight {
+        var definite = givenHeight
+        if definite == nil { definite = ratioHeight }
+        if let g = definite {
             box.DefiniteInnerHeight = clampHeight(box, g, cbHeight: cb.Height) - box.Padding.Vertical - box.Border.Vertical
         }
         let contentHeight = layoutContent(box, flow: box.IsFormattingRoot ? flow.root(box) : (s.IsPositioned ? flow.positionedBy(box) : flow))
 
-        // Height: given, or the content's.
+        // Height: given, or the content's, or the ratio's where the
+        // content fits in it.
         var h = contentHeight + box.Padding.Vertical + box.Border.Vertical
         if let given = givenHeight {
             h = given
+        } else if let r = ratioHeight {
+            if r > h { h = r }
         }
         box.Height = clampHeight(box, h, cbHeight: cb.Height)
         box.ContentHeight = contentHeight
@@ -352,7 +369,11 @@ public final class Layout {
             w = (ih > 0 ? inner * iw / ih : iw) + edgesW
         } else if h == nil {
             let inner = w! - edgesW
-            h = (iw > 0 ? inner * ih / iw : ih) + edgesH
+            if s.AspectRatio > 0 {
+                h = inner / s.AspectRatio + edgesH
+            } else {
+                h = (iw > 0 ? inner * ih / iw : ih) + edgesH
+            }
         }
         box.Width = clampWidth(box, w!, cbWidth: cb.Width)
         if box.Replaced == .image && iw > 0 && ih > 0 && box.Width != w! && s.Height.IsAuto {
@@ -389,11 +410,19 @@ public final class Layout {
             box.Width = clampWidth(box, w, cbWidth: cb.Width)
         }
         let givenHeight = heightFromStyle(box, s.Height, cbHeight: cb.Height)
+        var ratioHeight: float32? = nil
+        if givenHeight == nil { ratioHeight = heightFromRatio(box) }
         box.DefiniteInnerHeight = nil
-        if let g = givenHeight { box.DefiniteInnerHeight = g - box.Padding.Vertical - box.Border.Vertical }
+        var definite = givenHeight
+        if definite == nil { definite = ratioHeight }
+        if let g = definite { box.DefiniteInnerHeight = g - box.Padding.Vertical - box.Border.Vertical }
         let contentHeight = layoutContent(box, flow: flow.root(box))
         var h = contentHeight + box.Padding.Vertical + box.Border.Vertical
-        if let given = givenHeight { h = given }
+        if let given = givenHeight {
+            h = given
+        } else if let r = ratioHeight {
+            if r > h { h = r }
+        }
         box.Height = clampHeight(box, h, cbHeight: cb.Height)
         box.ContentHeight = contentHeight
         // The baseline is the last line's, unless overflow hides it.

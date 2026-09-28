@@ -144,6 +144,8 @@ func testStyles() {
     check(calc.Width == .calc(-20, 100), "calc() of a percentage and pixels stays a calc (got \(calc.Width))")
     check(calc.MarginLeft == .px(12), "calc() of em and px resolves (got \(calc.MarginLeft))")
     check(calc.Height == .px(14) && calc.PaddingTop == .px(4) && calc.PaddingLeft == .percent(25), "calc() multiplies and divides (got \(calc.Height) \(calc.PaddingTop) \(calc.PaddingLeft))")
+    let carousel = styleOf("<div style='--n: 3; --g: 16px; --cols: 12; width: calc(var(--n)*(100% - (var(--cols) - 1)*var(--g))/var(--cols) + (var(--n) - 1)*var(--g)); height: calc(-1 * (2px + 3px))'>x</div>", "div")!
+    check(carousel.Width == .calc(-12, 25) && carousel.Height == .px(-5), "calc() multiplies and divides sums in parentheses (got \(carousel.Width) \(carousel.Height))")
     let mm = styleOf("<div style='width: min(30px, 20px); height: max(1px, 5px); margin-top: clamp(4px, 9px, 6px)'>x</div>", "div")!
     check(mm.Width == .px(20) && mm.Height == .px(5) && mm.MarginTop == .px(6), "min(), max() and clamp() fold (got \(mm.Width) \(mm.Height) \(mm.MarginTop))")
 }

@@ -76,6 +76,9 @@ public enum Prop: int32 {
     case gridTemplateColumns
     case gridTemplateRows
     case gridAutoRows
+    case gridAutoColumns
+    case gridAutoFlow
+    case aspectRatio
     case gridColumn
     case gridRow
     case color
@@ -197,7 +200,7 @@ let propNames: [string: Prop] = [
     "flex-grow": .flexGrow, "flex-shrink": .flexShrink, "flex-basis": .flexBasis, "order": .order,
     "row-gap": .rowGap, "column-gap": .columnGap, "table-layout": .tableLayout,
     "grid-template-columns": .gridTemplateColumns, "grid-template-rows": .gridTemplateRows,
-    "grid-auto-rows": .gridAutoRows, "grid-column": .gridColumn, "grid-row": .gridRow,
+    "grid-auto-rows": .gridAutoRows, "grid-auto-columns": .gridAutoColumns, "grid-auto-flow": .gridAutoFlow, "aspect-ratio": .aspectRatio, "grid-column": .gridColumn, "grid-row": .gridRow,
     "color": .color, "font-family": .fontFamily, "font-size": .fontSize, "font-weight": .fontWeight,
     "font-style": .fontStyle, "line-height": .lineHeight, "text-align": .textAlign,
     "text-transform": .textTransform, "text-indent": .textIndent, "letter-spacing": .letterSpacing,
@@ -400,7 +403,7 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
          "grid-area",
          "user-select", "pointer-events", "appearance", "-webkit-appearance", "resize", "scroll-behavior",
          "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing", "filter", "backdrop-filter",
-         "clip-path", "object-fit", "aspect-ratio", "will-change", "contain", "isolation",
+         "clip-path", "object-fit", "will-change", "contain", "isolation",
          "hyphens", "direction",
          "unicode-bidi", "writing-mode", "columns", "column-count", "column-width", "caption-side",
          "empty-cells", "speak", "orphans", "widows", "page-break-before", "page-break-after",
@@ -412,7 +415,7 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
          "font-optical-sizing", "color-scheme", "accent-color", "caret-color",
          "border-inline", "border-block", "min-inline-size", "max-inline-size", "inline-size", "block-size",
          "place-content", "place-self", "justify-items", "justify-self", "grid", "grid-template",
-         "grid-template-areas", "grid-auto-flow", "grid-auto-columns":
+         "grid-template-areas":
         break
     default:
         // margin-inline-start and friends, in a left-to-right, top-to-bottom world.
@@ -578,84 +581,131 @@ func parseCalc(_ tokens: [Token], _ start: int, _ end: int) -> Value? {
 }
 
 func calcSum(_ tokens: [Token], _ start: int, _ end: int, _ terms: inout [CalcTerm], sign: float32) -> bool {
-    var i = start
-    var currentSign = sign
-    while i < end {
-        let t = tokens[i]
-        if t.Kind == .delim && (t.Value == "+" || t.Value == "-") {
-            currentSign = t.Value == "-" ? -sign : sign
-            i += 1
-            continue
-        }
-        // A product: a term, times or divided by numbers.
-        var factor: float32 = 1
-        var term: CalcTerm? = nil
-        var j = i
-        var first = true
-        while j < end {
-            let u = tokens[j]
-            if !first && u.Kind == .delim && (u.Value == "+" || u.Value == "-") { break }
-            if u.Kind == .delim && (u.Value == "*" || u.Value == "/") {
-                let divide = u.Value == "/"
-                j += 1
-                if j < end && tokens[j].Kind == .number {
-                    let n = tokens[j].NumberVal
-                    if divide { if n != 0 { factor /= n } } else { factor *= n }
-                    j += 1
-                    continue
-                }
-                return false
-            }
-            if u.Kind == .function || u.Kind == .openParen {
-                let close = closeParen(tokens, from: j + 1)
-                var inner: [CalcTerm] = []
-                if u.Kind == .function && (lower(u.Value) == "min" || lower(u.Value) == "max" || lower(u.Value) == "clamp") {
-                    if let folded = foldMinMax(lower(u.Value), tokens, j + 1, close) {
-                        term = folded
-                    } else {
-                        return false
-                    }
-                } else if calcSum(tokens, j + 1, close, &inner, sign: 1) && inner.count == 1 {
-                    term = inner[0]
-                } else if calcSum(tokens, j + 1, close, &inner, sign: 1) {
-                    // A nested sum: spread its terms.
-                    for t2 in inner { terms.append(CalcTerm(Number: t2.Number * currentSign, Unit: t2.Unit)) }
-                    j = close + 1
-                    first = false
-                    term = nil
-                    if j >= end { return true }
-                    continue
-                } else {
-                    return false
-                }
-                j = close + 1
-                first = false
-                continue
-            }
-            if u.Kind == .dimension, let parsed = parseLengthValue(u, allowAuto: false), case .length(let n, let unit) = parsed {
-                term = CalcTerm(Number: n, Unit: unit)
-            } else if u.Kind == .percentage {
-                term = CalcTerm(Number: u.NumberVal, Unit: .percent)
-            } else if u.Kind == .number {
-                if term == nil && j + 1 < end && tokens[j + 1].Kind == .delim && tokens[j + 1].Value == "*" {
-                    factor *= u.NumberVal
-                    j += 2
-                    first = false
-                    continue
-                }
-                term = CalcTerm(Number: u.NumberVal, Unit: nil)
-            } else {
-                return false
-            }
-            j += 1
-            first = false
-        }
-        if let t = term {
-            terms.append(CalcTerm(Number: t.Number * factor * currentSign, Unit: t.Unit))
-        }
-        i = j
-    }
+    var p = start
+    guard let sum = calcExpr(tokens, &p, end), p == end else { return false }
+    for t in sum { terms.append(CalcTerm(Number: t.Number * sign, Unit: t.Unit)) }
     return true
+}
+
+// calc() as the grammar has it: sums of products of values, where a
+// product has a plain number on one side and a quotient a plain number
+// below. Each part is a sum of terms, one per unit.
+
+/// A sum: products joined by + and -.
+func calcExpr(_ tokens: [Token], _ p: inout int, _ end: int) -> [CalcTerm]? {
+    guard var sum = calcProduct(tokens, &p, end) else { return nil }
+    while p < end {
+        let t = tokens[p]
+        if t.Kind == .delim && (t.Value == "+" || t.Value == "-") {
+            let negate = t.Value == "-"
+            p += 1
+            guard let rhs = calcProduct(tokens, &p, end) else { return nil }
+            sum = calcAdd(sum, negate ? calcScale(rhs, -1) : rhs)
+        } else if (t.Kind == .number || t.Kind == .dimension || t.Kind == .percentage) && t.NumberVal < 0 {
+            // "a -1px", its space lost to the tokens: a sum still.
+            guard let rhs = calcProduct(tokens, &p, end) else { return nil }
+            sum = calcAdd(sum, rhs)
+        } else {
+            return nil
+        }
+    }
+    return sum
+}
+
+/// A product: values joined by * and /.
+func calcProduct(_ tokens: [Token], _ p: inout int, _ end: int) -> [CalcTerm]? {
+    guard var value = calcValueTerm(tokens, &p, end) else { return nil }
+    while p < end && tokens[p].Kind == .delim && (tokens[p].Value == "*" || tokens[p].Value == "/") {
+        let divide = tokens[p].Value == "/"
+        p += 1
+        guard let rhs = calcValueTerm(tokens, &p, end) else { return nil }
+        if divide {
+            guard let n = calcPlainNumber(rhs), n != 0 else { return nil }
+            value = calcScale(value, 1 / n)
+        } else if let n = calcPlainNumber(value) {
+            value = calcScale(rhs, n)
+        } else if let n = calcPlainNumber(rhs) {
+            value = calcScale(value, n)
+        } else {
+            return nil
+        }
+    }
+    return value
+}
+
+/// One value: a number, length or percentage, a parenthesized or
+/// nested calc(), or min(), max() or clamp().
+func calcValueTerm(_ tokens: [Token], _ p: inout int, _ end: int) -> [CalcTerm]? {
+    if p >= end { return nil }
+    let t = tokens[p]
+    if t.Kind == .delim && (t.Value == "-" || t.Value == "+") {
+        p += 1
+        guard let v = calcValueTerm(tokens, &p, end) else { return nil }
+        return t.Value == "-" ? calcScale(v, -1) : v
+    }
+    if t.Kind == .number {
+        p += 1
+        return [CalcTerm(Number: t.NumberVal, Unit: nil)]
+    }
+    if t.Kind == .percentage {
+        p += 1
+        return [CalcTerm(Number: t.NumberVal, Unit: .percent)]
+    }
+    if t.Kind == .dimension {
+        guard let parsed = parseLengthValue(t, allowAuto: false), case .length(let n, let unit) = parsed else { return nil }
+        p += 1
+        return [CalcTerm(Number: n, Unit: unit)]
+    }
+    if t.Kind == .openParen || t.Kind == .function {
+        let close = closeParen(tokens, from: p + 1)
+        let name = t.Kind == .function ? lower(t.Value) : ""
+        if name == "min" || name == "max" || name == "clamp" {
+            guard let folded = foldMinMax(name, tokens, p + 1, close) else { return nil }
+            p = close + 1
+            return [folded]
+        }
+        if t.Kind == .function && name != "calc" && name != "-webkit-calc" { return nil }
+        var q = p + 1
+        guard let inner = calcExpr(tokens, &q, close), q == close else { return nil }
+        p = close + 1
+        return inner
+    }
+    return nil
+}
+
+/// The number a sum is when it has no units, or nil.
+func calcPlainNumber(_ v: [CalcTerm]) -> float32? {
+    var n: float32 = 0
+    for t in v {
+        if t.Unit != nil { return nil }
+        n += t.Number
+    }
+    return n
+}
+
+func calcScale(_ v: [CalcTerm], _ k: float32) -> [CalcTerm] {
+    var out: [CalcTerm] = []
+    for t in v { out.append(CalcTerm(Number: t.Number * k, Unit: t.Unit)) }
+    return out
+}
+
+/// Two sums as one, like units added together.
+func calcAdd(_ a: [CalcTerm], _ b: [CalcTerm]) -> [CalcTerm] {
+    var out = a
+    for t in b {
+        var merged = false
+        var i = 0
+        while i < out.count {
+            if out[i].Unit == t.Unit {
+                out[i].Number += t.Number
+                merged = true
+                break
+            }
+            i += 1
+        }
+        if !merged { out.append(t) }
+    }
+    return out
 }
 
 /// min(), max() or clamp() of arguments that are all one unit, as one term.
@@ -1168,9 +1218,25 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
         if kw == "none" { return .none }
         let tracks = parseTracks(tokens, 0, tokens.count)
         return tracks.isEmpty ? nil : .tracks(tracks)
-    case .gridAutoRows:
+    case .gridAutoRows, .gridAutoColumns:
         let tracks = parseTracks(tokens, 0, tokens.count)
         return tracks.isEmpty ? nil : .tracks(tracks)
+    case .aspectRatio:
+        // auto, or a width / height ratio (after auto: the ratio used
+        // where the box has none of its own, which is here always).
+        var nums: [float32] = []
+        for tok in tokens where tok.Kind == .number { nums.append(tok.NumberVal) }
+        if nums.isEmpty { return kw == "auto" ? Value.auto : nil }
+        let ratio = nums.count >= 2 ? (nums[1] > 0 ? nums[0] / nums[1] : 0) : nums[0]
+        return .number(ratio)
+    case .gridAutoFlow:
+        // row or column; dense packing isn't done.
+        for tok in tokens where tok.Kind == .ident {
+            let w = lower(tok.Value)
+            if w == "row" || w == "column" { return .keyword(w) }
+        }
+        if kw == "dense" { return .keyword("row") }
+        return nil
     case .gridColumn, .gridRow:
         return .placement(parsePlacement(tokens))
     case .boxSizing:
@@ -1562,6 +1628,12 @@ func parseTracks(_ tokens: [Token], _ start: int, _ end: int) -> [GridTrack] {
                 out.append(.minmax(minValue, maxValue, maxFr))
             } else if name == "fit-content" {
                 out.append(.auto)
+            } else if name == "calc" || name == "-webkit-calc" || name == "min" || name == "max" || name == "clamp" {
+                // A length computed: pixels plus a share of the grid.
+                var slice: [Token] = []
+                var k = i
+                while k <= close && k < end { slice.append(tokens[k]); k += 1 }
+                if let track = trackOfCalc(calcValue(slice)) { out.append(track) }
             }
             i = close + 1
             continue
@@ -1582,6 +1654,28 @@ func parseTracks(_ tokens: [Token], _ start: int, _ end: int) -> [GridTrack] {
         i += 1
     }
     return out
+}
+
+/// A calc()'s value as a track: pixels and a percentage of the grid,
+/// font-relative units taken at 16px as the other track lengths are.
+func trackOfCalc(_ v: Value?) -> GridTrack? {
+    guard let v = v else { return nil }
+    var px: float32 = 0
+    var pct: float32 = 0
+    switch v {
+    case .length(let n, let unit):
+        if unit == .percent { pct = n } else if unit == .px { px = n } else { px = n * 16 }
+    case .calc(let terms):
+        for t in terms {
+            guard let u = t.Unit else { return nil }
+            if u == .percent { pct += t.Number } else if u == .px { px += t.Number } else { px += t.Number * 16 }
+        }
+    default:
+        return nil
+    }
+    if pct == 0 { return .length(.px(px)) }
+    if px == 0 { return .length(.percent(pct)) }
+    return .length(.calc(px, pct))
 }
 
 /// grid-column / grid-row: `2`, `span 2`, `1 / 3`, `1 / span 2`, `auto`.

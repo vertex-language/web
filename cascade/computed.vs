@@ -89,6 +89,11 @@ public final class ComputedStyle {
     public var GridColumns: [css.GridTrack] = []
     public var GridRows: [css.GridTrack] = []
     public var GridAutoRows: css.GridTrack = .auto
+    public var GridAutoColumns: css.GridTrack = .auto
+    /// grid-auto-flow: column, filling each column before the next.
+    public var GridAutoFlowColumn: bool = false
+    /// aspect-ratio as width over height; 0 for auto.
+    public var AspectRatio: float32 = 0
     public var GridColumn: css.GridPlacement = css.GridPlacement.auto
     public var GridRow: css.GridPlacement = css.GridPlacement.auto
 

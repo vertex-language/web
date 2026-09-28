@@ -38,14 +38,36 @@ extension Layout {
         // Column tracks: the template's, with auto-fill repeats counted
         // to fit, or one auto column for a grid without a template.
         var columns = expandAutoFill(s.GridColumns, available: contentWidth, gap: columnGap)
-        if columns.isEmpty { columns = [.auto] }
+        if columns.isEmpty { columns = [s.GridAutoColumns] }
         var maxColumnNeeded = 1
         for b in boxes {
             let p = b.Style.GridColumn
             let end = (p.Start > 0 ? int(p.Start) : 1) + int(p.Span) - 1
             if end > maxColumnNeeded { maxColumnNeeded = end }
         }
-        while columns.count < maxColumnNeeded { columns.append(.auto) }
+        // Flowing by column, the items fill the rows there are, one
+        // column after another, as many columns as that takes.
+        let columnFlow = s.GridAutoFlowColumn
+        let flowRows = s.GridRows.count > 0 ? s.GridRows.count : 1
+        if columnFlow {
+            var row = 0
+            var column = 0
+            for b in boxes where !(b.Style.GridColumn.Start > 0 && b.Style.GridRow.Start > 0) {
+                let cs = b.Style.GridColumn.Span > 0 ? int(b.Style.GridColumn.Span) : 1
+                if row >= flowRows {
+                    row = 0
+                    column += 1
+                }
+                if column + cs > maxColumnNeeded { maxColumnNeeded = column + cs }
+                row += 1
+                if cs > 1 {
+                    // A wide item leaves the rest of its columns' rows.
+                    column += cs - 1
+                }
+            }
+        }
+        // Implicit columns past the template take grid-auto-columns.
+        while columns.count < maxColumnNeeded { columns.append(s.GridAutoColumns) }
         let columnCount = columns.count
 
         // Placement: explicit positions first, then the rest row by row.
@@ -108,6 +130,27 @@ extension Layout {
                 }
             }
             if placed { continue }
+            if columnFlow {
+                // Down the rows, then on to the next column.
+                var rounds = 0
+                while rounds < 100000 && cursorColumn < columnCount {
+                    rounds += 1
+                    if cursorRow + rs > flowRows && cursorRow > 0 {
+                        cursorColumn += 1
+                        cursorRow = 0
+                        continue
+                    }
+                    if isFree(cursorRow, cursorColumn, rs, cs) {
+                        items.append(GridItem(box: b, column: cursorColumn, columnSpan: cs, row: cursorRow, rowSpan: rs))
+                        var rr = cursorRow
+                        while rr < cursorRow + rs { var cc = cursorColumn; while cc < cursorColumn + cs { occupy(rr, cc); cc += 1 }; rr += 1 }
+                        cursorRow += rs
+                        break
+                    }
+                    cursorRow += 1
+                }
+                continue
+            }
             var guardRounds = 0
             while guardRounds < 100000 {
                 guardRounds += 1

@@ -1077,6 +1077,12 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
         if case .tracks(let t) = v { s.GridRows = resolveTracks(t, s, ctx) } else { s.GridRows = [] }
     case .gridAutoRows:
         if case .tracks(let t) = v, !t.isEmpty { s.GridAutoRows = resolveTracks(t, s, ctx)[0] }
+    case .gridAutoColumns:
+        if case .tracks(let t) = v, !t.isEmpty { s.GridAutoColumns = resolveTracks(t, s, ctx)[0] }
+    case .gridAutoFlow:
+        if let k = keywordOf(v) { s.GridAutoFlowColumn = k == "column" }
+    case .aspectRatio:
+        if case .number(let r) = v, r > 0 { s.AspectRatio = r } else { s.AspectRatio = 0 }
     case .gridColumn:
         if case .placement(let p) = v { s.GridColumn = p }
     case .gridRow:
@@ -1544,6 +1550,9 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .gridTemplateColumns: b.GridColumns = a.GridColumns
     case .gridTemplateRows: b.GridRows = a.GridRows
     case .gridAutoRows: b.GridAutoRows = a.GridAutoRows
+    case .gridAutoColumns: b.GridAutoColumns = a.GridAutoColumns
+    case .gridAutoFlow: b.GridAutoFlowColumn = a.GridAutoFlowColumn
+    case .aspectRatio: b.AspectRatio = a.AspectRatio
     case .gridColumn: b.GridColumn = a.GridColumn
     case .gridRow: b.GridRow = a.GridRow
     case .color: b.Color = a.Color

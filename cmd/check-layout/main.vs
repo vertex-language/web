@@ -383,6 +383,20 @@ func testGrid() {
     check(ac.rect("panel")!.Height == 0 && ac.rect("after")!.Y == 0, "a 0fr row holding an item that clips collapses to nothing (got \(ac.rect("panel")!.Height))")
     guard let open = layoutOf("<body style='margin:0'><div style='display:grid;grid-template-rows:1fr'><div id=panel style='overflow:hidden'><p style='margin:0;height:50px'>shown</p></div></div></body>") else { check(false, "layout"); return }
     check(open.rect("panel")!.Height == 50, "and a 1fr row holds it whole")
+
+    guard let cf = layoutOf("<body style='margin:0'><div style='display:grid;grid-auto-flow:column;grid-auto-columns:calc(50% - 5px);gap:10px;width:400px'><div id=c1 style='height:10px'></div><div id=c2 style='height:10px'></div><div id=c3 style='height:10px'></div></div></body>") else { check(false, "layout"); return }
+    let c1 = cf.rect("c1")!
+    let c2 = cf.rect("c2")!
+    let c3 = cf.rect("c3")!
+    check(c1.Y == c2.Y && c2.Y == c3.Y && near(c2.X, 205) && near(c3.X, 410) && near(c1.Width, 195), "grid-auto-flow: column puts items side by side in grid-auto-columns tracks (got \(c2.X) \(c3.X) \(c1.Width))")
+    guard let cr = layoutOf("<body style='margin:0'><div style='display:grid;grid-auto-flow:column;grid-template-rows:10px 10px;width:400px'><div id=a></div><div id=b></div><div id=c></div></div></body>") else { check(false, "layout"); return }
+    check(cr.rect("b")!.Y == 10 && cr.rect("b")!.X == cr.rect("a")!.X && cr.rect("c")!.Y == 0 && cr.rect("c")!.X > 0, "and fills each column's rows before the next column")
+
+    guard let ar = layoutOf("<body style='margin:0;font-size:16px'><div id=r style='width:300px;aspect-ratio:2 / 3'></div><div id=t style='width:100px;aspect-ratio:4'><p style='margin:0;height:60px'>x</p></div><div id=p style='width:200px;aspect-ratio:1;position:relative'><div id=fill style='height:50%'></div></div><img id=i style='width:120px;aspect-ratio:16/9'></body>") else { check(false, "layout"); return }
+    check(near(ar.rect("r")!.Height, 450), "aspect-ratio gives an auto height (got \(ar.rect("r")!.Height))")
+    check(near(ar.rect("t")!.Height, 60), "content taller than the ratio keeps its height")
+    check(near(ar.rect("fill")!.Height, 100), "the ratio's height is definite for percentages (got \(ar.rect("fill")!.Height))")
+    check(near(ar.rect("i")!.Height, 67.5), "and it sizes a replaced element (got \(ar.rect("i")!.Height))")
 }
 
 func testPositioning() {
