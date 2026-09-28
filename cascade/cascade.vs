@@ -374,7 +374,10 @@ func mediaFeature(_ text: string, width: float32, height: float32) -> bool {
     case "height": return value.isEmpty ? height > 0 : (mediaLength(value).map { height == $0 } ?? false)
     case "orientation": return value == (width >= height ? "landscape" : "portrait")
     case "prefers-color-scheme": return value == "light"
-    case "prefers-reduced-motion", "prefers-reduced-transparency", "prefers-reduced-data", "prefers-contrast":
+    // The engine runs no transitions or animations: motion is reduced,
+    // and a page's reduced-motion rules show what its motion would.
+    case "prefers-reduced-motion": return value.isEmpty || value == "reduce"
+    case "prefers-reduced-transparency", "prefers-reduced-data", "prefers-contrast":
         return value == "no-preference"
     case "hover", "any-hover": return value.isEmpty || value == "hover"
     case "pointer", "any-pointer": return value.isEmpty || value == "fine"
