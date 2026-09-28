@@ -66,6 +66,13 @@ extension Layout {
             } else {
                 if let m = heightFromStyle(child, cs.MinHeight, cbHeight: innerHeight) { minMain = m }
                 if let m = heightFromStyle(child, cs.MaxHeight, cbHeight: innerHeight) { maxMain = m }
+                if cs.MinHeight == .px(0) && !cs.ClipsOverflow && child.Kind != .replaced {
+                    // min-height: auto is the content's height, or the
+                    // given height where that is smaller.
+                    let content = contentSize(child, isRow: false, cb: cb, flow: flow)
+                    let given = heightFromStyle(child, cs.Height, cbHeight: innerHeight)
+                    minMain = given != nil && given! < content ? given! : content
+                }
             }
             if basis < minMain { basis = minMain }
             if basis > maxMain { basis = maxMain }

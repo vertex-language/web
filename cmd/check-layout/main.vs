@@ -221,6 +221,9 @@ func testFlexLayout() {
     guard let sh = layoutOf("<body style='margin:0'><div style='display:flex;width:300px'><div id=a style='width:200px'></div><div id=b style='width:200px'></div></div></body>") else { check(false, "layout"); return }
     check(sh.rect("a")!.Width == 150 && sh.rect("b")!.Width == 150, "items shrink to fit (got \(sh.rect("a")!.Width))")
 
+    guard let fc = layoutOf("<body style='margin:0;font-size:16px'><div style='display:flex;flex-direction:column;width:100px'><div id=c style='flex:1'><p style='margin:0;height:40px'>x</p></div><div id=n style='height:10px'></div></div></body>") else { check(false, "layout"); return }
+    check(fc.rect("c")!.Height == 40 && fc.rect("n")!.Y == 40, "a column item with flex: 1 keeps its content's height, min-height: auto (got \(fc.rect("c")!.Height))")
+
     guard let tx = layoutOf("<body style='margin:0'><div style='display:flex;width:400px'><div id=a>short</div><div id=b style='flex:1'>grows</div></div></body>") else { check(false, "layout"); return }
     let ta = tx.rect("a")!
     check(ta.Width > 20 && ta.Width < 60 && near(tx.rect("b")!.Width, 400 - ta.Width), "an item without flex takes its content width (got \(ta.Width))")
@@ -403,6 +406,8 @@ func testGrid() {
     check(near(gl.rect("s")!.X, 100) && near(gl.rect("s")!.Width, 200) && near(gl.rect("e")!.Width, 200), "start and end longhands, and 1 / 3 (got \(gl.rect("s")!.X) \(gl.rect("s")!.Width))")
     guard let ga = layoutOf("<body style='margin:0'><div style='display:grid;width:200px'><div id=bg style='grid-area:1/1;height:80px'></div><div id=fg style='grid-area:1/1;height:20px'></div></div></body>") else { check(false, "layout"); return }
     check(ga.rect("fg")!.Y == 0 && ga.rect("bg")!.Y == 0, "grid-area: 1/1 puts items in the same cell (got \(ga.rect("fg")!.Y))")
+    guard let gp = layoutOf("<body style='margin:0'><div style='display:grid;grid-template-columns:1fr 1fr;width:200px'><div id=f style='height:100%;max-height:70px;position:relative'><div id=abs style='position:absolute;inset:0'></div></div><div style='height:100px'></div></div></body>") else { check(false, "layout"); return }
+    check(gp.rect("f")!.Height == 70 && gp.rect("abs")!.Height == 70, "a grid item's percentage height is of its grid area, then clamped (got \(gp.rect("f")!.Height) \(gp.rect("abs")!.Height))")
 }
 
 func testPositioning() {

@@ -370,6 +370,13 @@ extension Layout {
             if align == .stretch && child.Style.Height.IsAuto && (child.OuterHeight < cellH || (child.Style.ClipsOverflow && child.OuterHeight > cellH)) {
                 layoutFixed(child, width: child.Width, height: cellH - child.Margin.Vertical, cb: ContainingBlock(width: cellW, height: cellH), flow: flow.root(child))
             }
+            // A percentage height is of the grid area, known only now.
+            if case .percent = child.Style.Height, let given = heightFromStyle(child, child.Style.Height, cbHeight: cellH) {
+                let h = clampHeight(child, given, cbHeight: cellH)
+                if h != child.Height {
+                    layoutFixed(child, width: child.Width, height: h, cb: ContainingBlock(width: cellW, height: cellH), flow: flow.root(child))
+                }
+            }
             var dy: float32 = 0
             if align == .center { dy = (cellH - child.OuterHeight) / 2 } else if align == .flexEnd { dy = cellH - child.OuterHeight }
             var dx: float32 = 0
