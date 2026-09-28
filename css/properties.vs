@@ -259,6 +259,25 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
     case "inset":
         guard let four = fourSides(tokens, allowAuto: true) else { return [] }
         set(.top, four[0]); set(.right, four[1]); set(.bottom, four[2]); set(.left, four[3])
+    case "grid-area":
+        // row-start / column-start / row-end / column-end, by line
+        // number or span; names of template areas aren't placed.
+        var parts: [[Token]] = [[]]
+        for t in tokens {
+            if t.Kind == .delim && t.Value == "/" { parts.append([]) } else { parts[parts.count - 1].append(t) }
+        }
+        var row = gridAreaSide(parts, 0, end: false)
+        var column = gridAreaSide(parts, 1, end: false)
+        let rowEnd = gridAreaSide(parts, 2, end: true)
+        let columnEnd = gridAreaSide(parts, 3, end: true)
+        row.End = rowEnd.End
+        if rowEnd.Span > 0 { row.Span = rowEnd.Span }
+        column.End = columnEnd.End
+        if columnEnd.Span > 0 { column.Span = columnEnd.Span }
+        if row.Span == 0 { row.Span = 1 }
+        if column.Span == 0 { column.Span = 1 }
+        set(.gridRow, .placement(row))
+        set(.gridColumn, .placement(column))
     case "margin-inline", "margin-block", "padding-inline", "padding-block", "inset-inline", "inset-block":
         // A start and an end, one value for both, in a left-to-right,
         // top-to-bottom world.
@@ -404,7 +423,6 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
          "transition", "animation", "transform", "quotes", "counter-reset", "counter-increment",
          "background-attachment",
          "font-variant", "font-stretch", "font-feature-settings", "src", "unicode-range",
-         "grid-area",
          "user-select", "pointer-events", "appearance", "-webkit-appearance", "resize", "scroll-behavior",
          "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing", "filter", "backdrop-filter",
          "clip-path", "object-fit", "will-change", "contain", "isolation",
@@ -487,6 +505,7 @@ func longhandsOf(_ name: string) -> [Prop] {
     case "font": return [.fontFamily, .fontSize, .fontWeight, .fontStyle, .lineHeight]
     case "flex": return [.flexGrow, .flexShrink, .flexBasis]
     case "gap": return [.rowGap, .columnGap]
+    case "grid-area": return [.gridRow, .gridColumn]
     case "list-style": return [.listStyleType, .listStylePosition]
     case "text-decoration": return [.textDecorationLine, .textDecorationColor]
     case "margin-inline", "margin-block", "padding-inline", "padding-block", "inset-inline", "inset-block":
@@ -1712,6 +1731,11 @@ func parsePlacement(_ tokens: [Token]) -> GridPlacement {
     if span > 0 { p.Span = span }
     if end != 0 { p.End = end }
     return p
+}
+
+/// One of grid-area's slash-separated parts, or an auto side.
+func gridAreaSide(_ parts: [[Token]], _ k: int, end: bool) -> GridPlacement {
+    return k < parts.count ? parsePlacementSide(parts[k], end: end) : GridPlacement(start: 0, span: 0)
 }
 
 /// grid-column-start and the like: a line, or `span n`; for the end

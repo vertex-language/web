@@ -401,6 +401,8 @@ func testGrid() {
     guard let gl = layoutOf("<body style='margin:0'><div style='display:grid;grid-template-columns:repeat(4,1fr);width:400px'><div id=w style='grid-column-end:span 4;height:5px'></div><div id=f style='grid-column:1 / -1;height:5px'></div><div id=s style='grid-column-start:2;grid-column-end:4;height:5px'></div><div id=e style='grid-column:1 / 3;height:5px'></div></div></body>") else { check(false, "layout"); return }
     check(near(gl.rect("w")!.Width, 400) && near(gl.rect("f")!.Width, 400), "grid-column-end: span and a -1 end line span the grid (got \(gl.rect("w")!.Width) \(gl.rect("f")!.Width))")
     check(near(gl.rect("s")!.X, 100) && near(gl.rect("s")!.Width, 200) && near(gl.rect("e")!.Width, 200), "start and end longhands, and 1 / 3 (got \(gl.rect("s")!.X) \(gl.rect("s")!.Width))")
+    guard let ga = layoutOf("<body style='margin:0'><div style='display:grid;width:200px'><div id=bg style='grid-area:1/1;height:80px'></div><div id=fg style='grid-area:1/1;height:20px'></div></div></body>") else { check(false, "layout"); return }
+    check(ga.rect("fg")!.Y == 0 && ga.rect("bg")!.Y == 0, "grid-area: 1/1 puts items in the same cell (got \(ga.rect("fg")!.Y))")
 }
 
 func testPositioning() {
