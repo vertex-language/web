@@ -156,6 +156,16 @@ func testPageInput() {
     check(pixelAt(px3b, 200, 10, 50) == red && pixelAt(px3b, 200, 10, 70) == draw.Color.white, "a ::before's gradient paints, and not at opacity 0")
     check(countDark(px3b, 200, draw.IRect(0, 80, 60, 20)) > 5, "text after a leading absolute box paints")
 
+    // Stacking: an absolute background under a z-index: 1 relative
+    // box after it in the flow; without z-index, tree order.
+    let view5 = web.Page()
+    view5.SetViewportSize(draw.Size(100, 100))
+    view5.LoadHTML("<body style='margin:0'><div style='position:relative;height:40px'><div style='position:absolute;inset:0;background:red'></div><div style='position:relative;z-index:1;height:40px;background:lime'></div></div><div style='position:relative;height:40px'><div style='position:relative;height:40px;background:lime'></div><div style='position:absolute;inset:0;background:blue'></div></div></body>")
+    var px5 = [uint8](repeating: 0, count: 100 * 100 * 4)
+    view5.Draw(into: &px5, width: 100, height: 100, scale: 1)
+    check(pixelAt(px5, 100, 10, 10) == draw.Color(0, 255, 0), "a z-index: 1 relative box paints over an earlier absolute one")
+    check(pixelAt(px5, 100, 10, 50) == draw.Color(0, 0, 255), "and without z-index a later absolute box paints over a relative one")
+
     // ::placeholder: the UA's grey, an author's color, or hidden.
     let view4 = web.Page()
     view4.SetViewportSize(draw.Size(200, 100))

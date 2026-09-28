@@ -11,6 +11,13 @@ import (
     "web/svg"
 )
 
+/// A positioned box waiting its turn in a stacking context.
+struct Stacked {
+    var box: layout.Box
+    var x: float32
+    var y: float32
+}
+
 public enum PaintKind: Equatable {
     case fill
     case border
@@ -208,6 +215,9 @@ final class DisplayListBuilder {
     var fieldSelectionStart: int = -1
     var fieldSelectionEnd: int = -1
     var opacity: float32 = 1
+    /// The current stacking context's positioned boxes, waiting to paint,
+    /// each with the origin it paints from.
+    var stacked: [Stacked] = []
     /// The page's images by URL, for backgrounds.
     var images: [string: draw.Image] = [:]
     /// The selection, if any, and each text node's place in the document.
@@ -270,16 +280,31 @@ final class DisplayListBuilder {
         } else {
             paintPhase(box, .blockBackgrounds, x: parentX, y: parentY, skipBackground: skipBackground, isRoot: false)
         }
-        paintPhase(box, .floats, x: parentX, y: parentY, skipBackground: skipBackground, isRoot: false)
-        paintPhase(box, .inlineContent, x: parentX, y: parentY, skipBackground: skipBackground, isRoot: false)
         let sx = x - box.ScrollX
         let sy = y - box.ScrollY
-        if !box.Positioned.isEmpty {
-            var list = box.Positioned
-            sortByZIndex(&list)
-            for p in list {
-                paintBox(p, x: sx, y: sy, skipBackground: skipBackground)
-            }
+        // The positioned boxes of this stacking context -- relative ones
+        // met in its flow and the ones positioned against it -- paint
+        // after its in-flow content, by z-index and then in tree order;
+        // those below zero right after its backgrounds.
+        let savedStack = stacked
+        stacked = []
+        for p in box.Positioned {
+            stacked.append(Stacked(box: p, x: sx, y: sy))
+        }
+        var below: [Stacked] = []
+        var i = 0
+        while i < stacked.count {
+            if stacked[i].box.Style.ZIndex < 0 { below.append(stacked[i]); stacked.remove(at: i) } else { i += 1 }
+        }
+        sortStacked(&below)
+        for st in below { paintBox(st.box, x: st.x, y: st.y, skipBackground: skipBackground) }
+        paintPhase(box, .floats, x: parentX, y: parentY, skipBackground: skipBackground, isRoot: false)
+        paintPhase(box, .inlineContent, x: parentX, y: parentY, skipBackground: skipBackground, isRoot: false)
+        var list = stacked
+        stacked = savedStack
+        sortStacked(&list)
+        for st in list {
+            paintBox(st.box, x: st.x, y: st.y, skipBackground: skipBackground)
         }
         if clips {
             items.append(PaintItem.unclip)
@@ -352,8 +377,9 @@ final class DisplayListBuilder {
             }
             if child.Style.IsPositioned {
                 // A relative or sticky box paints as a whole, with what
-                // is positioned against it, after the in-flow content.
-                if phase == .inlineContent { paintBox(child, x: sx, y: sy, skipBackground: skipBackground) }
+                // is positioned against it, among the stacking context's
+                // positioned boxes.
+                if phase == .inlineContent { stacked.append(Stacked(box: child, x: sx, y: sy)) }
                 continue
             }
             if child.Style.ClipsOverflow || child.Style.Opacity < 1 || child.Style.FilterBlur > 0 {
@@ -714,12 +740,14 @@ final class DisplayListBuilder {
         }
     }
 
-    func sortByZIndex(_ list: inout [layout.Box]) {
+    /// Stacked boxes by z-index, then in tree order (box ids go in the
+    /// order boxes were made).
+    func sortStacked(_ list: inout [Stacked]) {
         var i = 1
         while i < list.count {
             let b = list[i]
             var j = i - 1
-            while j >= 0 && list[j].Style.ZIndex > b.Style.ZIndex {
+            while j >= 0 && (list[j].box.Style.ZIndex > b.box.Style.ZIndex || (list[j].box.Style.ZIndex == b.box.Style.ZIndex && list[j].box.Id > b.box.Id)) {
                 list[j + 1] = list[j]
                 j -= 1
             }
@@ -727,6 +755,7 @@ final class DisplayListBuilder {
             i += 1
         }
     }
+
 }
 
 /// Paints a display list onto a canvas: page coordinates are scaled by
