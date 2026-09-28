@@ -73,7 +73,7 @@ final class Laid {
     }
 }
 
-func layoutOf(_ source: string, width: float32 = 800, height: float32 = 600) -> Laid? {
+func layoutOf(_ source: string, width: float32 = 800, height: float32 = 600, images: [string: draw.Image] = [:]) -> Laid? {
     let doc = html.Parse(source)
     let resolver = cascade.StyleResolver(ua: cascade.UserAgentRules())
     resolver.ViewportWidth = width
@@ -82,6 +82,7 @@ func layoutOf(_ source: string, width: float32 = 800, height: float32 = 600) -> 
         resolver.Author.Add(css.Parse(style.InnerText()))
     }
     let builder = layout.BoxTreeBuilder(resolver: resolver, context: selector.MatchContext.none)
+    builder.Images = images
     guard let root = builder.Build(doc) else { return nil }
     let run = layout.Layout(viewportWidth: width, viewportHeight: height)
     run.Run(root)
@@ -434,8 +435,32 @@ func testPositioning() {
 
 // MARK: - The view
 
+// Images: a replaced element's width where nothing fixes it, as
+// Chrome lays these out.
+func testImages() {
+    print("Images")
+    let logo = draw.Image(width: 75, height: 24, pixels: [uint8](repeating: 0, count: 75 * 24 * 4))
+    let images = ["logo.png": logo]
+    // about.google's header: an image of height 32px and max-width 100%, in
+    // a block, in a flex link whose width is a percentage of a flex item
+    // sized by its content. Chrome: 132, 100 and 100x32.
+    guard let l = layoutOf("""
+        <body style='margin:0'><div style='display:flex'><div id=logo style='display:flex'>
+        <a id=link style='display:flex;align-items:center;width:calc(100% - 8px);padding:0 12px 0 20px;height:48px'>
+        <div id=custom><img id=im src=logo.png style='display:inline-block;max-width:100%;height:32px'></div></a></div></div></body>
+        """, images: images) else { check(false, "layout"); return }
+    check(l.rect("logo")!.Width == 132, "a flex item holding it is its width plus padding (got \(l.rect("logo")!.Width))")
+    check(l.rect("custom")!.Width == 100, "its block is as wide as it (got \(l.rect("custom")!.Width))")
+    let im = l.rect("im")!
+    check(im.Width == 100 && im.Height == 32, "its width is its height times its ratio, not its max-width of nothing (got \(im.Width)x\(im.Height))")
+    guard let b = layoutOf("<body style='margin:0'><img id=a src=logo.png style='display:block'><img id=b src=logo.png style='display:block'></body>", images: images) else { check(false, "layout"); return }
+    check(b.rect("a")! == draw.Rect(0, 0, 75, 24) && b.rect("b")! == draw.Rect(0, 24, 75, 24),
+          "display:block images stack, each a line of its own (got \(b.rect("b")!.X),\(b.rect("b")!.Y))")
+}
+
 func main() -> int32 {
     testBlockLayout()
+    testImages()
     testInlineLayout()
     testFlexLayout()
     testFloats()

@@ -1,5 +1,10 @@
 package html
 
+import (
+    "unicode/utf8"
+    "unicode/utf16"
+)
+
 // Character encodings (the Encoding Standard, and HTML's section 13.2.3):
 // how a document's bytes become its text.
 
@@ -66,56 +71,25 @@ func decodeWindows1252(_ bytes: [uint8]) -> string {
         if b < 0x80 {
             out.append(b)
         } else {
-            appendUTF8(&out, b < 0xA0 ? windows1252High[int(b) - 0x80] : uint32(b))
+            utf8.Append(&out, b < 0xA0 ? windows1252High[int(b) - 0x80] : uint32(b))
         }
     }
     return string(decoding: out, as: UTF8.self)
 }
 
 func decodeUTF16(_ bytes: [uint8], littleEndian: bool) -> string {
-    var out: [uint8] = []
+    var units: [uint16] = []
+    units.reserveCapacity(bytes.count / 2)
     var i = 0
     // A byte order mark is not text.
     if bytes.count >= 2 && ((bytes[0] == 0xFF && bytes[1] == 0xFE) || (bytes[0] == 0xFE && bytes[1] == 0xFF)) { i = 2 }
-    func unit(_ k: int) -> uint32 {
-        return littleEndian ? uint32(bytes[k]) | uint32(bytes[k + 1]) << 8 : uint32(bytes[k]) << 8 | uint32(bytes[k + 1])
-    }
     while i + 1 < bytes.count {
-        let u = unit(i)
+        let a = uint16(bytes[i])
+        let b = uint16(bytes[i + 1])
+        units.append(littleEndian ? a | b << 8 : a << 8 | b)
         i += 2
-        if u >= 0xD800 && u < 0xDC00 && i + 1 < bytes.count {
-            let low = unit(i)
-            if low >= 0xDC00 && low < 0xE000 {
-                appendUTF8(&out, 0x10000 + ((u - 0xD800) << 10) + (low - 0xDC00))
-                i += 2
-                continue
-            }
-            appendUTF8(&out, 0xFFFD)
-        } else if u >= 0xD800 && u < 0xE000 {
-            appendUTF8(&out, 0xFFFD)
-        } else {
-            appendUTF8(&out, u)
-        }
     }
-    return string(decoding: out, as: UTF8.self)
-}
-
-func appendUTF8(_ out: inout [uint8], _ c: uint32) {
-    if c < 0x80 {
-        out.append(uint8(c))
-    } else if c < 0x800 {
-        out.append(uint8(0xC0 | (c >> 6)))
-        out.append(uint8(0x80 | (c & 0x3F)))
-    } else if c < 0x10000 {
-        out.append(uint8(0xE0 | (c >> 12)))
-        out.append(uint8(0x80 | ((c >> 6) & 0x3F)))
-        out.append(uint8(0x80 | (c & 0x3F)))
-    } else {
-        out.append(uint8(0xF0 | (c >> 18)))
-        out.append(uint8(0x80 | ((c >> 12) & 0x3F)))
-        out.append(uint8(0x80 | ((c >> 6) & 0x3F)))
-        out.append(uint8(0x80 | (c & 0x3F)))
-    }
+    return utf16.Decode(units)
 }
 
 /// The charset parameter of a Content-Type: `text/html; charset=UTF-8`.

@@ -1,30 +1,26 @@
 package paint
 
-import "image/draw"
+import (
+    "math"
+    "image/draw"
+    "unicode/utf8"
+)
 
 func roundf(_ v: float32) -> float32 {
-    return float32(draw.RoundToInt(v))
+    return float32(math.RoundToInt(v))
 }
 
-@_silgen_name("ceilf")
-func c_ceilf(_ x: float32) -> float32
+// paint.vs calls these by their old names; they are math's now. (Its
+// call sites can use math directly once the work in flight there lands.)
+func c_ceilf(_ x: float32) -> float32 { return math.Ceil(x) }
 
-func clampf(_ v: float32, _ lo: float32, _ hi: float32) -> float32 {
-    if v < lo { return lo }
-    if v > hi { return hi }
-    return v
-}
-
-@_silgen_name("vertex_string_from_utf8")
-func stringFromUtf8(_ ptr: UnsafeRawPointer, _ count: int64) -> string
+func clampf(_ v: float32, _ lo: float32, _ hi: float32) -> float32 { return math.Clamp(v, lo, hi) }
 
 /// The string bytes[start..<end] spell.
 func stringOf(_ bytes: [uint8], _ start: int, _ end: int) -> string {
     if start >= end { return "" }
-    return bytes.withUnsafeBytes { bp in
-        stringFromUtf8(bp.baseAddress! + start, int64(end - start))
-    }
+    return utf8.Decode(bytes, start, end)
 }
 
-func minf(_ a: float32, _ b: float32) -> float32 { return a < b ? a : b }
-func maxf(_ a: float32, _ b: float32) -> float32 { return a > b ? a : b }
+func minf(_ a: float32, _ b: float32) -> float32 { return math.Min(a, b) }
+func maxf(_ a: float32, _ b: float32) -> float32 { return math.Max(a, b) }

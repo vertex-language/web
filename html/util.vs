@@ -1,13 +1,10 @@
 package html
 
-@_silgen_name("vertex_string_from_utf8")
-func stringFromUtf8(_ ptr: UnsafeRawPointer, _ count: int64) -> string
+import "unicode/utf8"
 
 func stringFromBytes(_ bytes: [uint8], from start: int, to end: int) -> string {
     if start >= end { return "" }
-    return bytes.withUnsafeBytes { bp in
-        stringFromUtf8(bp.baseAddress! + start, int64(end - start))
-    }
+    return utf8.Decode(bytes, start, end)
 }
 
 func bytesFromString(_ text: string) -> [uint8] {

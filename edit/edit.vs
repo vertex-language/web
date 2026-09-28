@@ -1,5 +1,7 @@
 package edit
 
+import "unicode/utf8"
+
 // Editing text by byte offsets into UTF-8: where the caret goes when it
 // moves by a character, a word or a line, and the text after an insert.
 // Characters are code points for now; grapheme clusters come with
@@ -128,12 +130,7 @@ func isSpaceByte(_ b: uint8) -> bool {
     return b == 32 || b == 9 || b == 10 || b == 13 || b == 12
 }
 
-@_silgen_name("vertex_string_from_utf8")
-func stringFromUtf8(_ ptr: UnsafeRawPointer, _ count: int64) -> string
-
 func stringOf(_ bytes: [uint8], _ start: int, _ end: int) -> string {
     if start >= end { return "" }
-    return bytes.withUnsafeBytes { bp in
-        stringFromUtf8(bp.baseAddress! + start, int64(end - start))
-    }
+    return utf8.Decode(bytes, start, end)
 }

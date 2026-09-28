@@ -1,6 +1,9 @@
 package dom
 
-import "web/html"
+import (
+    "web/html"
+    "unicode/utf8"
+)
 
 /// A point in the document's text: a text node and a byte offset into
 /// its text. One end of a selection.
@@ -100,12 +103,7 @@ func trimSpaces(_ s: string) -> string {
     return stringOf(b, start, end)
 }
 
-@_silgen_name("vertex_string_from_utf8")
-func stringFromUtf8(_ ptr: UnsafeRawPointer, _ count: int64) -> string
-
 func stringOf(_ bytes: [uint8], _ start: int, _ end: int) -> string {
     if start >= end { return "" }
-    return bytes.withUnsafeBytes { bp in
-        stringFromUtf8(bp.baseAddress! + start, int64(end - start))
-    }
+    return utf8.Decode(bytes, start, end)
 }

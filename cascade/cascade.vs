@@ -1,6 +1,7 @@
 package cascade
 
 import (
+    "math"
     "image/draw"
     "web/css"
     "web/css/selector"
@@ -1120,8 +1121,8 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
             case .ex, .ch: s.FontSize = ctx.parent.FontSize * n * 0.5
             case .vw: s.FontSize = ctx.viewportWidth * n / 100
             case .vh: s.FontSize = ctx.viewportHeight * n / 100
-            case .vmin: s.FontSize = minf(ctx.viewportWidth, ctx.viewportHeight) * n / 100
-            case .vmax: s.FontSize = maxf(ctx.viewportWidth, ctx.viewportHeight) * n / 100
+            case .vmin: s.FontSize = math.Min(ctx.viewportWidth, ctx.viewportHeight) * n / 100
+            case .vmax: s.FontSize = math.Max(ctx.viewportWidth, ctx.viewportHeight) * n / 100
             }
             if s.FontSize < 0 { s.FontSize = 0 }
         }
@@ -1285,8 +1286,8 @@ func length(_ v: css.Value, _ s: ComputedStyle, _ ctx: ApplyContext) -> css.Leng
         case .ch: return .px(n * s.FontSize * 0.5)
         case .vw: return .px(n * ctx.viewportWidth / 100)
         case .vh: return .px(n * ctx.viewportHeight / 100)
-        case .vmin: return .px(n * minf(ctx.viewportWidth, ctx.viewportHeight) / 100)
-        case .vmax: return .px(n * maxf(ctx.viewportWidth, ctx.viewportHeight) / 100)
+        case .vmin: return .px(n * math.Min(ctx.viewportWidth, ctx.viewportHeight) / 100)
+        case .vmax: return .px(n * math.Max(ctx.viewportWidth, ctx.viewportHeight) / 100)
         }
     case .number(let n):
         return n == 0 ? .px(0) : nil
@@ -1601,8 +1602,6 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     }
 }
 
-func minf(_ a: float32, _ b: float32) -> float32 { return a < b ? a : b }
-func maxf(_ a: float32, _ b: float32) -> float32 { return a > b ? a : b }
 
 package func trimSpaces(_ s: string) -> string {
     let b = [uint8](s.utf8)

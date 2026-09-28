@@ -465,11 +465,7 @@ public final class Layout {
         let s = box.Style
         let edges = box.Padding.Horizontal + box.Border.Horizontal
         if box.Kind == .replaced {
-            if let w = s.Width.Pixels, !ignoringWidth {
-                let bw = s.BoxSizing == .borderBox ? w : w + edges
-                return (min: bw, max: bw)
-            }
-            return (min: box.IntrinsicWidth + edges, max: box.IntrinsicWidth + edges)
+            return replacedIntrinsicWidths(box, ignoringWidth: ignoringWidth)
         }
         if let w = s.Width.Pixels, !ignoringWidth {
             let bw = s.BoxSizing == .borderBox ? w : w + edges
@@ -528,6 +524,42 @@ public final class Layout {
             if minW + edges < bw { minW = bw - edges }
         }
         return (min: minW + edges, max: maxW + edges)
+    }
+
+    /// A replaced element's contributions (CSS Sizing 3 §5): its natural
+    /// width -- the width CSS fixes, or the height CSS fixes times its
+    /// ratio, or its own -- within fixed min- and max-widths. Percentages
+    /// have nothing to resolve against here, so a percentage max-width
+    /// limits nothing; and an element whose width or max-width is a
+    /// percentage is compressible, contributing nothing to min-content.
+    func replacedIntrinsicWidths(_ box: Box, ignoringWidth: Bool) -> (min: float32, max: float32) {
+        let s = box.Style
+        let edges = box.Padding.Horizontal + box.Border.Horizontal
+        var w: float32
+        if let fixed = s.Width.Pixels, !ignoringWidth {
+            w = s.BoxSizing == .borderBox ? fixed : fixed + edges
+        } else if let h = s.Height.Pixels, box.IntrinsicHeight > 0 {
+            let inner = s.BoxSizing == .borderBox ? h - box.Padding.Vertical - box.Border.Vertical : h
+            w = inner * box.IntrinsicWidth / box.IntrinsicHeight + edges
+        } else {
+            w = box.IntrinsicWidth + edges
+        }
+        if let max = s.MaxWidth.Pixels {
+            let bw = s.BoxSizing == .borderBox ? max : max + edges
+            if w > bw { w = bw }
+        }
+        if let min = s.MinWidth.Pixels {
+            let bw = s.BoxSizing == .borderBox ? min : min + edges
+            if w < bw { w = bw }
+        }
+        var compressible = false
+        if case .percent(_) = s.MaxWidth { compressible = true }
+        if case .calc(_, _) = s.MaxWidth { compressible = true }
+        if !ignoringWidth {
+            if case .percent(_) = s.Width { compressible = true }
+            if case .calc(_, _) = s.Width { compressible = true }
+        }
+        return (min: compressible ? edges : w, max: w)
     }
 
     // MARK: - Positioned boxes

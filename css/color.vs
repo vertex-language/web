@@ -1,6 +1,9 @@
 package css
 
-import "image/draw"
+import (
+    "image/draw"
+    "math"
+)
 
 /// Parses a CSS color: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`,
 /// `rgb()`, `rgba()`, `hsl()`, `hsla()`, `transparent` and the named
@@ -108,11 +111,11 @@ func parseHSL(_ b: [uint8], from start: int) -> draw.Color? {
     var h = parts.values[0]
     while h < 0 { h += 360 }
     while h >= 360 { h -= 360 }
-    let s = clamp01(parts.values[1] / 100)
-    let l = clamp01(parts.values[2] / 100)
-    let c = (1 - absf(2 * l - 1)) * s
+    let s = math.Saturate(parts.values[1] / 100)
+    let l = math.Saturate(parts.values[2] / 100)
+    let c = (1 - math.Abs(2 * l - 1)) * s
     let hp = h / 60
-    let x = c * (1 - absf(modf2(hp) - 1))
+    let x = c * (1 - math.Abs(math.FloorMod(hp, 2) - 1))
     var r: float32 = 0
     var g: float32 = 0
     var bl: float32 = 0
@@ -128,20 +131,9 @@ func parseHSL(_ b: [uint8], from start: int) -> draw.Color? {
     return draw.Color(clampByte((r + m) * 255), clampByte((g + m) * 255), clampByte((bl + m) * 255), alpha)
 }
 
-func modf2(_ v: float32) -> float32 {
-    var x = v
-    while x >= 2 { x -= 2 }
-    while x < 0 { x += 2 }
-    return x
-}
-
-func absf(_ v: float32) -> float32 { return v < 0 ? -v : v }
-func clamp01(_ v: float32) -> float32 { return v < 0 ? 0 : (v > 1 ? 1 : v) }
-
+/// clampByte is a channel from 0 to 255, rounded.
 func clampByte(_ v: float32) -> uint8 {
-    if v <= 0 { return 0 }
-    if v >= 255 { return 255 }
-    return uint8(v + 0.5)
+    return uint8(math.Clamp(v, 0, 255) + 0.5)
 }
 
 /// A decimal number, with an optional sign, point and exponent, read

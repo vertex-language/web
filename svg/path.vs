@@ -1,6 +1,9 @@
 package svg
 
-import "web/css"
+import (
+    "web/css"
+    "math"
+)
 
 // Path data (SVG 2 section 9.3) and the transform attribute, parsed.
 
@@ -193,18 +196,7 @@ func numbers(_ s: string) -> [float32] {
     return out
 }
 
-@_silgen_name("sinf")
-func sinf32(_ x: float32) -> float32
-@_silgen_name("cosf")
-func cosf32(_ x: float32) -> float32
-@_silgen_name("sqrtf")
-func sqrtf32(_ x: float32) -> float32
-@_silgen_name("atan2f")
-func atan2f32(_ y: float32, _ x: float32) -> float32
-@_silgen_name("tanf")
-func tanf32(_ x: float32) -> float32
-
-let pi: float32 = 3.14159265
+let pi = float32(math.Pi)
 
 /// An elliptical arc from (x1, y1) to (x2, y2) as cubics, a quarter turn
 /// at most each (SVG 2 appendix B.2.4, endpoint to center).
@@ -219,8 +211,8 @@ func arcTo(_ x1: float32, _ y1: float32, _ rxIn: float32, _ ryIn: float32, _ ang
         return
     }
     let phi = angle * pi / 180
-    let cosPhi = cosf32(phi)
-    let sinPhi = sinf32(phi)
+    let cosPhi = math.Cos(phi)
+    let sinPhi = math.Sin(phi)
     let dx = (x1 - x2) / 2
     let dy = (y1 - y2) / 2
     let x1p = cosPhi * dx + sinPhi * dy
@@ -228,34 +220,34 @@ func arcTo(_ x1: float32, _ y1: float32, _ rxIn: float32, _ ryIn: float32, _ ang
     // Radii too small to reach are scaled up until they do.
     let lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry)
     if lambda > 1 {
-        let s = sqrtf32(lambda)
+        let s = math.Sqrt(lambda)
         rx *= s
         ry *= s
     }
     let num = rx * rx * ry * ry - rx * rx * y1p * y1p - ry * ry * x1p * x1p
     let den = rx * rx * y1p * y1p + ry * ry * x1p * x1p
-    var coef = den > 0 && num > 0 ? sqrtf32(num / den) : 0
+    var coef = den > 0 && num > 0 ? math.Sqrt(num / den) : 0
     if large == sweep { coef = -coef }
     let cxp = coef * rx * y1p / ry
     let cyp = -coef * ry * x1p / rx
     let cx = cosPhi * cxp - sinPhi * cyp + (x1 + x2) / 2
     let cy = sinPhi * cxp + cosPhi * cyp + (y1 + y2) / 2
-    let theta1 = atan2f32((y1p - cyp) / ry, (x1p - cxp) / rx)
-    var delta = atan2f32((-y1p - cyp) / ry, (-x1p - cxp) / rx) - theta1
+    let theta1 = math.Atan2((y1p - cyp) / ry, (x1p - cxp) / rx)
+    var delta = math.Atan2((-y1p - cyp) / ry, (-x1p - cxp) / rx) - theta1
     if sweep && delta < 0 { delta += 2 * pi }
     if !sweep && delta > 0 { delta -= 2 * pi }
     var pieces = int((delta < 0 ? -delta : delta) / (pi / 2)) + 1
     if pieces > 8 { pieces = 8 }
     let step = delta / float32(pieces)
-    let t = 4 / 3 * tanf32(step / 4)
+    let t = 4 / 3 * math.Tan(step / 4)
     var a = theta1
     var k = 0
     while k < pieces {
         let b = a + step
-        let cosA = cosf32(a)
-        let sinA = sinf32(a)
-        let cosB = cosf32(b)
-        let sinB = sinf32(b)
+        let cosA = math.Cos(a)
+        let sinA = math.Sin(a)
+        let cosB = math.Cos(b)
+        let sinB = math.Sin(b)
         // The piece on the unit circle, then onto the ellipse.
         let p1x = cosA - t * sinA
         let p1y = sinA + t * cosA
@@ -304,17 +296,17 @@ func parseTransform(_ text: string) -> Matrix {
         case "rotate":
             if args.count >= 1 {
                 let r = args[0] * pi / 180
-                let c = cosf32(r)
-                let s = sinf32(r)
+                let c = math.Cos(r)
+                let s = math.Sin(r)
                 t = Matrix(c, s, -s, c, 0, 0)
                 if args.count == 3 {
                     t = Matrix(1, 0, 0, 1, args[1], args[2]).Times(t).Times(Matrix(1, 0, 0, 1, -args[1], -args[2]))
                 }
             }
         case "skewx":
-            if args.count == 1 { t = Matrix(1, 0, tanf32(args[0] * pi / 180), 1, 0, 0) }
+            if args.count == 1 { t = Matrix(1, 0, math.Tan(args[0] * pi / 180), 1, 0, 0) }
         case "skewy":
-            if args.count == 1 { t = Matrix(1, tanf32(args[0] * pi / 180), 0, 1, 0, 0) }
+            if args.count == 1 { t = Matrix(1, math.Tan(args[0] * pi / 180), 0, 1, 0, 0) }
         default:
             break
         }

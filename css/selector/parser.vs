@@ -1,6 +1,7 @@
 package selector
 
 import (
+    "unicode/utf8"
     "web/css"
     "web/html"
 )
@@ -344,14 +345,9 @@ func bytesFrom(_ s: string) -> [uint8] {
     return [uint8](s.utf8)
 }
 
-@_silgen_name("vertex_string_from_utf8")
-func stringFromUtf8(_ ptr: UnsafeRawPointer, _ count: int64) -> string
-
 func strFrom(_ bytes: [uint8], _ start: int, _ end: int) -> string {
     if start >= end { return "" }
-    return bytes.withUnsafeBytes { bp in
-        stringFromUtf8(bp.baseAddress! + start, int64(end - start))
-    }
+    return utf8.Decode(bytes, start, end)
 }
 
 func isSpace(_ b: uint8) -> bool {

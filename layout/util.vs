@@ -1,5 +1,7 @@
 package layout
 
+import "unicode/utf8"
+
 func isSpaceByte(_ b: uint8) -> bool {
     return b == 32 || b == 9 || b == 10 || b == 13 || b == 12
 }
@@ -72,13 +74,8 @@ func alpha(_ n: int, upper: bool) -> string {
     return stringOf(bytes, 0, bytes.count)
 }
 
-@_silgen_name("vertex_string_from_utf8")
-func stringFromUtf8(_ ptr: UnsafeRawPointer, _ count: int64) -> string
-
 /// The string bytes[start..<end] spell.
 func stringOf(_ bytes: [uint8], _ start: int, _ end: int) -> string {
     if start >= end { return "" }
-    return bytes.withUnsafeBytes { bp in
-        stringFromUtf8(bp.baseAddress! + start, int64(end - start))
-    }
+    return utf8.Decode(bytes, start, end)
 }

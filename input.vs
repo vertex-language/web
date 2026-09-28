@@ -1,6 +1,7 @@
 package web
 
 import (
+    "math"
     "image/draw"
     "web/dom"
     "web/edit"
@@ -357,7 +358,7 @@ extension Page {
                 if b.Style.IsScrollContainer && b.Kind == .block {
                     let maxY = b.ContentHeight - b.InnerHeight
                     if maxY > 0 && ((dy > 0 && b.ScrollY < maxY) || (dy < 0 && b.ScrollY > 0)) {
-                        b.ScrollY = clampf(b.ScrollY + dy, 0, maxY)
+                        b.ScrollY = math.Clamp(b.ScrollY + dy, 0, maxY)
                         needsPaint = true
                         return .handled
                     }

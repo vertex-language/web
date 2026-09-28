@@ -1,5 +1,6 @@
-// Package svg draws inline SVG: an <svg> element's shapes, filled into
-// the box it lays out as. What it reads: <path> (every command, arcs
+// Package svg draws SVG: an inline <svg> element's shapes, or an SVG
+// file's (read with encoding/xml) that an <img> shows, filled into the
+// box it lays out as. What it reads: <path> (every command, arcs
 // too), <rect>, <circle>, <ellipse>, <polygon> and <polyline>, grouped
 // by <g> and moved by `transform`; fills by attribute or style
 // (colors, none, currentColor, the first stop of a gradient), fill-rule,
@@ -8,6 +9,7 @@
 package svg
 
 import (
+    "encoding/xml"
     "image/draw"
     "web/css"
     "web/html"
@@ -156,12 +158,42 @@ public final class Drawing {
     }
 }
 
+/// An SVG file shown as an image, as <img src=logo.svg> shows one: what
+/// it draws, and the size it lays out at before CSS. It is a document of
+/// its own, so the page's CSS doesn't reach into it: its fill and color
+/// are its own.
+public final class Document {
+    public let Drawing: Drawing
+    public let Width: float32
+    public let Height: float32
+
+    init(drawing: Drawing, width: float32, height: float32) {
+        self.Drawing = drawing
+        Width = width
+        Height = height
+    }
+}
+
+/// Reads bytes that are an SVG file, or nil where they aren't one: not
+/// well-formed XML (a raster image, say), or a root that isn't <svg>.
+public func ParseDocument(_ bytes: [uint8]) -> Document? {
+    guard let doc = try? xml.Parse(bytes: bytes) else { return nil }
+    if doc.Root.Name.Local != "svg" { return nil }
+    let root = fromXML(doc.Root)
+    let size = intrinsicSize(root)
+    return Document(drawing: parse(root), width: size.width, height: size.height)
+}
+
 /// What an <svg> element draws.
 public func Parse(_ root: html.Node) -> Drawing {
+    return parse(fromHTML(root))
+}
+
+func parse(_ root: element) -> Drawing {
     let d = Drawing(viewBox: viewBoxOf(root), stretch: (root.GetAttribute("preserveaspectratio") ?? "").hasPrefix("none"))
     var ctx = Context(matrix: Matrix.identity, fill: blackFill, fillInherited: true, rule: .nonZero, opacity: 1)
     ctx = ctx.with(root, ids: [:])
-    var ids: [string: html.Node] = [:]
+    var ids: [string: element] = [:]
     collectIds(root, &ids)
     walk(root, ctx, d, ids)
     return d
@@ -173,12 +205,20 @@ public func Parse(_ root: html.Node) -> Drawing {
 /// Whether an <svg> has a ratio from its viewBox but neither a width nor
 /// a height: CSS then sizes it to the room it has, not to 300 by 150.
 public func HasRatioOnly(_ root: html.Node) -> bool {
+    return hasRatioOnly(fromHTML(root))
+}
+
+func hasRatioOnly(_ root: element) -> bool {
     if lengthAttribute(root.GetAttribute("width")) != nil || lengthAttribute(root.GetAttribute("height")) != nil { return false }
     if let vb = viewBoxOf(root), vb.Width > 0, vb.Height > 0 { return true }
     return false
 }
 
 public func IntrinsicSize(_ root: html.Node) -> (width: float32, height: float32) {
+    return intrinsicSize(fromHTML(root))
+}
+
+func intrinsicSize(_ root: element) -> (width: float32, height: float32) {
     let w = lengthAttribute(root.GetAttribute("width"))
     let h = lengthAttribute(root.GetAttribute("height"))
     let vb = viewBoxOf(root)
@@ -201,7 +241,7 @@ struct Context {
 
     /// The context inside an element: its transform, and the fill
     /// properties it sets by attribute or style.
-    func with(_ n: html.Node, ids: [string: html.Node]) -> Context {
+    func with(_ n: element, ids: [string: element]) -> Context {
         var c = self
         if let t = n.GetAttribute("transform") { c.matrix = matrix.Times(parseTransform(t)) }
         var props: [(string, string)] = []
@@ -246,7 +286,7 @@ struct Context {
 
 /// A url(#id) fill: a gradient's first stop color, until gradients are
 /// drawn as gradients.
-func gradientFill(_ v: string, _ ids: [string: html.Node]) -> Fill? {
+func gradientFill(_ v: string, _ ids: [string: element]) -> Fill? {
     let b = [uint8](v.utf8)
     var i = 0
     while i < b.count && b[i] != 35 { i += 1 }
@@ -254,7 +294,7 @@ func gradientFill(_ v: string, _ ids: [string: html.Node]) -> Fill? {
     while j < b.count && b[j] != 41 && b[j] != 34 && b[j] != 39 { j += 1 }
     if i >= b.count { return nil }
     guard let g = ids[css.stringOf(b, i + 1, j)] else { return nil }
-    for stop in g.Children where stop.Kind == html.NodeKind.element && stop.TagName == "stop" {
+    for stop in g.Children where stop.TagName == "stop" {
         var color = stop.GetAttribute("stop-color")
         if let style = stop.GetAttribute("style") {
             for d in css.ParseDeclarations(style) where d.Property == "stop-color" { color = d.Value }
@@ -264,16 +304,16 @@ func gradientFill(_ v: string, _ ids: [string: html.Node]) -> Fill? {
     return nil
 }
 
-func collectIds(_ n: html.Node, _ ids: inout [string: html.Node]) {
-    for c in n.Children where c.Kind == html.NodeKind.element {
+func collectIds(_ n: element, _ ids: inout [string: element]) {
+    for c in n.Children {
         if let id = c.GetAttribute("id") { ids[id] = c }
         collectIds(c, &ids)
     }
 }
 
 /// The shapes under an element, into the drawing.
-func walk(_ n: html.Node, _ ctx: Context, _ d: Drawing, _ ids: [string: html.Node]) {
-    for c in n.Children where c.Kind == html.NodeKind.element {
+func walk(_ n: element, _ ctx: Context, _ d: Drawing, _ ids: [string: element]) {
+    for c in n.Children {
         switch c.TagName {
         case "defs", "clippath", "mask", "lineargradient", "radialgradient", "pattern", "symbol", "marker",
              "title", "desc", "metadata", "style", "script", "filter", "text", "foreignobject":
@@ -296,7 +336,7 @@ func walk(_ n: html.Node, _ ctx: Context, _ d: Drawing, _ ids: [string: html.Nod
     }
 }
 
-func isHidden(_ n: html.Node) -> bool {
+func isHidden(_ n: element) -> bool {
     if n.GetAttribute("display") == "none" || n.GetAttribute("visibility") == "hidden" { return true }
     if let style = n.GetAttribute("style") {
         let s = css.lower(style)
@@ -306,7 +346,7 @@ func isHidden(_ n: html.Node) -> bool {
 }
 
 /// A shape element's outline, as path commands.
-func outline(_ n: html.Node, _ ops: inout [uint8], _ coords: inout [float32]) {
+func outline(_ n: element, _ ops: inout [uint8], _ coords: inout [float32]) {
     func num(_ name: string) -> float32 { return lengthAttribute(n.GetAttribute(name)) ?? 0 }
     switch n.TagName {
     case "path":
@@ -374,7 +414,7 @@ func outline(_ n: html.Node, _ ops: inout [uint8], _ coords: inout [float32]) {
 func smaller(_ a: float32, _ b: float32) -> float32 { return a < b ? a : b }
 
 /// The viewBox: min-x, min-y, width, height.
-func viewBoxOf(_ n: html.Node) -> draw.Rect? {
+func viewBoxOf(_ n: element) -> draw.Rect? {
     guard let v = n.GetAttribute("viewbox") else { return nil }
     let parts = numbers(v)
     if parts.count != 4 || parts[2] <= 0 || parts[3] <= 0 { return nil }

@@ -43,6 +43,12 @@ public class Scanner {
                 if isTagChar(src[pos + 1]) {
                     return scanStartTag()
                 }
+                // "<?" is a bogus comment up to the next '>', as the HTML
+                // tokenizer has it (unexpected-question-mark-instead-of-
+                // tag-name).
+                if src[pos + 1] == 63 { // "<?"
+                    return scanBogusComment()
+                }
             }
         }
 
@@ -219,8 +225,23 @@ public class Scanner {
         return Token(kind: TokenKind.text, data: text)
     }
 
+    func scanBogusComment() -> Token {
+        pos += 1 // skip "<"; the "?" is the comment's
+        let start = pos
+        while pos < len && src[pos] != 62 { // '>'
+            pos += 1
+        }
+        let text = stringFromBytes(src, from: start, to: pos)
+        if pos < len { pos += 1 }
+        return Token(kind: TokenKind.comment, data: text)
+    }
+
     func scanText() -> Token {
         let start = pos
+        // A '<' that starts no tag (as in "a < b") is text, as the HTML
+        // tokenizer has it (invalid-first-character-of-tag-name): Next
+        // comes here with it, and it's taken as a character.
+        if pos < len && src[pos] == 60 { pos += 1 }
         while pos < len && src[pos] != 60 { // '<'
             pos += 1
         }

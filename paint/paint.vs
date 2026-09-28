@@ -731,9 +731,15 @@ final class DisplayListBuilder {
                                   box.Width - box.Padding.Left - box.Padding.Right - box.Border.Left - box.Border.Right,
                                   box.Height - box.Padding.Top - box.Padding.Bottom - box.Border.Top - box.Border.Bottom)
             item.Vector = v
-            item.Color = color(st.Color)
-            item.FillNone = st.FillNone
-            if st.FillCurrent { item.Fill = color(st.Color) } else if st.Fill != draw.Color(0, 0, 0) { item.Fill = color(st.Fill) }
+            if box.VectorIsDocument {
+                // An SVG file is its own document: black is its currentColor,
+                // and its fills are what it says.
+                item.Color = draw.Color(0, 0, 0)
+            } else {
+                item.Color = color(st.Color)
+                item.FillNone = st.FillNone
+                if st.FillCurrent { item.Fill = color(st.Color) } else if st.Fill != draw.Color(0, 0, 0) { item.Fill = color(st.Fill) }
+            }
             items.append(item)
         case .none:
             break

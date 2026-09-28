@@ -2,7 +2,9 @@
 package main
 
 import (
+    "image"
     "image/draw"
+    "image/png"
     "web"
     "web/fetch"
 )
@@ -249,10 +251,66 @@ func testJournal() {
     check(doc.HasMutations, "and records the change in the journal")
 }
 
-func main() -> int32 {
+// Images a page defers are decoded off the main thread by LoadImages,
+// and given to the page, which is the main actor's.
+@MainActor
+func testDeferredImages() async {
+    print("Deferred images")
+    var red = image.RGBA(width: 2, height: 2)
+    var i = 0
+    while i < red.Pixels.count {
+        red.Pixels[i] = i % 4 == 0 || i % 4 == 3 ? 255 : 0
+        i += 1
+    }
+    let bytes = png.Encode(red)
+    let junk: [uint8] = [1, 2, 3]
+    let page = web.Page(configuration: web.Config(baseURL: "/site/", fetcher: fetch.Fetcher({ url in
+        url.hasSuffix("red.png") ? bytes : (url.hasSuffix("junk.png") ? junk : nil)
+    }), defersImages: true))
+    page.SetViewportSize(draw.Size(20, 20))
+    page.LoadHTML("<body style='margin:0'><img src=red.png style='width:10px;height:10px;display:block'><img src=junk.png></body>")
+    check(page.PendingImages.count == 2, "loading leaves the images for LoadImages (\(page.PendingImages.count))")
+    var px = [uint8](repeating: 0, count: 20 * 20 * 4)
+    page.Draw(into: &px, width: 20, height: 20, scale: 1)
+    check(pixelAt(px, 20, 5, 5) != draw.Color(255, 0, 0), "and draws none of them before")
+    let failed = await page.LoadImages()
+    check(failed.count == 1 && failed[0].hasSuffix("junk.png"), "LoadImages answers the one that didn't decode (\(failed))")
+    check(page.PendingImages.isEmpty, "and leaves nothing pending")
+    page.Draw(into: &px, width: 20, height: 20, scale: 1)
+    check(pixelAt(px, 20, 5, 5) == draw.Color(255, 0, 0), "the decoded image draws")
+}
+
+// An <img> naming an SVG file draws it as a vector, at its own size or
+// the size CSS gives, with its own colors whatever the page's fill is;
+// loaded at once or deferred.
+@MainActor
+func testSVGImages() async {
+    print("SVG images")
+    let file = "<?xml version='1.0'?>\n<!-- a logo -->\n<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4' viewBox='0 0 8 4'><rect width='8' height='4' fill='#00f'/></svg>"
+    let bytes = Array(file.utf8)
+    for defers in [false, true] {
+        let page = web.Page(configuration: web.Config(baseURL: "/site/", fetcher: fetch.Fetcher({ url in
+            url.hasSuffix("logo.svg") ? bytes : nil
+        }), defersImages: defers))
+        page.SetViewportSize(draw.Size(40, 20))
+        page.LoadHTML("<body style='margin:0;fill:red'><img src=logo.svg style='display:block'><img src=logo.svg style='width:32px;height:16px;display:block'></body>")
+        let failed = await page.LoadImages()
+        let how = defers ? "deferred" : "at once"
+        check(failed.isEmpty, "\(how): the SVG file decodes (\(failed))")
+        var px = [uint8](repeating: 0, count: 40 * 20 * 4)
+        page.Draw(into: &px, width: 40, height: 20, scale: 1)
+        check(pixelAt(px, 40, 4, 2) == draw.Color(0, 0, 255), "\(how): it draws in its own fill, not the page's")
+        check(pixelAt(px, 40, 12, 2) != draw.Color(0, 0, 255), "\(how): at its own width, 8px")
+        check(pixelAt(px, 40, 30, 12) == draw.Color(0, 0, 255), "\(how): and scaled where CSS sizes it")
+    }
+}
+
+func main() async -> int32 {
     testTextFeatures()
     testPageInput()
     testJournal()
+    await testDeferredImages()
+    await testSVGImages()
     if failures == 0 {
         print("ALL PAGE CHECKS PASSED")
         return 0

@@ -1,5 +1,10 @@
 package css
 
+import (
+    "unicode"
+    "unicode/utf8"
+)
+
 /// Tokenizer that scans CSS source bytes into a CSS Token stream, as CSS
 /// Syntax Level 3 tokenizes: numbers with their sign, unit or percent
 /// sign; identifiers that may start with `-`; functions with their
@@ -135,7 +140,7 @@ public class Scanner {
                         n += 1
                     }
                     if pos < len && isWhitespace(src[pos]) { pos += 1 }
-                    appendUTF8(&bytes, code)
+                    appendEscaped(&bytes, code)
                     continue
                 }
                 bytes.append(src[pos])
@@ -169,7 +174,7 @@ public class Scanner {
                         n += 1
                     }
                     if pos < len && isWhitespace(src[pos]) { pos += 1 }
-                    appendUTF8(&bytes, code)
+                    appendEscaped(&bytes, code)
                 } else {
                     bytes.append(src[pos])
                     pos += 1
@@ -333,22 +338,9 @@ func hexDigit(_ b: uint8) -> uint32 {
     return uint32(b - 65 + 10)
 }
 
-func appendUTF8(_ out: inout [uint8], _ code: uint32) {
-    var c = code
-    if c == 0 || c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF) { c = 0xFFFD }
-    if c < 0x80 {
-        out.append(uint8(c))
-    } else if c < 0x800 {
-        out.append(uint8(0xC0 | (c >> 6)))
-        out.append(uint8(0x80 | (c & 0x3F)))
-    } else if c < 0x10000 {
-        out.append(uint8(0xE0 | (c >> 12)))
-        out.append(uint8(0x80 | ((c >> 6) & 0x3F)))
-        out.append(uint8(0x80 | (c & 0x3F)))
-    } else {
-        out.append(uint8(0xF0 | (c >> 18)))
-        out.append(uint8(0x80 | ((c >> 12) & 0x3F)))
-        out.append(uint8(0x80 | ((c >> 6) & 0x3F)))
-        out.append(uint8(0x80 | (c & 0x3F)))
-    }
+// appendEscaped writes an escape's code point; CSS Syntax 4.3.7 reads
+// zero as U+FFFD, as it does a surrogate or a value past U+10FFFF (which
+// utf8.Append replaces itself).
+func appendEscaped(_ out: inout [uint8], _ code: uint32) {
+    utf8.Append(&out, code == 0 ? unicode.ReplacementCharacter : code)
 }

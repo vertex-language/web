@@ -17,6 +17,9 @@ public final class BoxTreeBuilder {
     /// Images by URL, for <img> boxes; missing ones are laid out with
     /// their attributes' size, or none.
     public var Images: [string: draw.Image] = [:]
+    /// The images that are SVG files, by the src that names them: drawn
+    /// as vectors, sharp at any size.
+    public var Vectors: [string: svg.Document] = [:]
     /// The text a form control holds, by node, where the user has typed
     /// into it; otherwise the DOM's value.
     public var Values: [int64: string] = [:]
@@ -205,7 +208,13 @@ public final class BoxTreeBuilder {
         case "img":
             box = Box(kind: .replaced, style: style, node: node)
             box.Replaced = .image
-            if let src = node.GetAttribute("src"), let img = Images[src] {
+            if let src = node.GetAttribute("src"), let doc = Vectors[src] {
+                box.Replaced = .svg
+                box.Vector = doc.Drawing
+                box.VectorIsDocument = true
+                box.IntrinsicWidth = doc.Width
+                box.IntrinsicHeight = doc.Height
+            } else if let src = node.GetAttribute("src"), let img = Images[src] {
                 box.Image = img
                 box.IntrinsicWidth = float32(img.Width)
                 box.IntrinsicHeight = float32(img.Height)

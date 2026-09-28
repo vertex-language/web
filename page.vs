@@ -5,6 +5,7 @@ import (
     "image"
     "image/draw"
     "image/format"
+    "sync"
     "text/font"
     "web/cascade"
     "web/css"
@@ -14,6 +15,7 @@ import (
     "web/html"
     "web/layout"
     "web/paint"
+    "web/svg"
 )
 
 /// How a page is set up.
@@ -26,11 +28,18 @@ public struct Config {
     /// Where the page's resources come from: stylesheets, images, fonts.
     /// By default, file paths under BaseURL are read from disk.
     public var Fetcher: fetch.Fetcher
+    /// Whether loading leaves the page's images for LoadImages, which
+    /// decodes them off the main thread, instead of decoding each as it
+    /// loads -- which a window's page wants, and a headless render
+    /// doesn't need.
+    public var DefersImages: bool
 
-    public init(baseURL: string? = nil, backgroundColor: draw.Color = draw.Color.white, fetcher: fetch.Fetcher = fetch.Fetcher()) {
+    public init(baseURL: string? = nil, backgroundColor: draw.Color = draw.Color.white, fetcher: fetch.Fetcher = fetch.Fetcher(),
+                defersImages: bool = false) {
         BaseURL = baseURL
         BackgroundColor = backgroundColor
         Fetcher = fetcher
+        DefersImages = defersImages
     }
 }
 
@@ -81,6 +90,10 @@ public final class Page {
     var root: layout.Box?
     var displayList: [paint.PaintItem] = []
     var images: [string: draw.Image] = [:]
+    /// The images that are SVG files, drawn as vectors.
+    var vectors: [string: svg.Document] = [:]
+    /// The images the page names and hasn't decoded: LoadImages's.
+    var pendingImages: [string] = []
     var fontFaces: [string] = []
 
     var size: draw.Size
@@ -193,12 +206,19 @@ public final class Page {
             if let src = img.GetAttribute("src") { wanted.append(src) }
         }
         for url in resolver.Author.ImageURLs { wanted.append(url) }
+        pendingImages = []
         for src in wanted {
-            if images[src] == nil {
+            if images[src] == nil && vectors[src] == nil {
                 if src.hasPrefix("data:") {
                     if let decoded = format.DecodeDataURL(src) { images[src] = drawable(decoded) }
-                } else if let bytes = Configuration.Fetcher.Fetch(Resolve(src)), let decoded = decodeImage(bytes) {
-                    images[src] = decoded
+                } else if Configuration.DefersImages {
+                    pendingImages.append(src)
+                } else if let bytes = Configuration.Fetcher.Fetch(Resolve(src)) {
+                    if let doc = svg.ParseDocument(bytes) {
+                        vectors[src] = doc
+                    } else if let decoded = decodeImage(bytes) {
+                        images[src] = decoded
+                    }
                 }
             }
         }
@@ -235,10 +255,22 @@ public final class Page {
                 }
             }
             if family.isEmpty { continue }
+            // The first source the platform can read: a local file by
+            // path, anything else fetched. WOFF and WOFF2 aren't unpacked
+            // yet, so a TrueType or OpenType source after them is taken.
             for src in sources {
-                let path = fetch.FilePath(Resolve(src))
-                if path.contains("://") { continue }
-                if font.Register(path: path, as: family) {
+                let url = Resolve(src)
+                let path = fetch.FilePath(url)
+                if !path.contains("://") {
+                    if font.Register(path: path, as: family) {
+                        fontFaces.append(family)
+                        break
+                    }
+                    continue
+                }
+                guard let bytes = Configuration.Fetcher.Fetch(url), bytes.count > 4 else { continue }
+                if bytes[0] == 119 && bytes[1] == 79 && bytes[2] == 70 { continue } // "wOF": WOFF or WOFF2
+                if font.RegisterData(bytes, as: family) {
                     fontFaces.append(family)
                     break
                 }
@@ -260,6 +292,47 @@ public final class Page {
     public func SetImage(_ url: string, _ image: draw.Image) {
         images[url] = image
         needsStyle = true
+    }
+
+    /// The images the page names that it hasn't decoded yet (see
+    /// Config.DefersImages), as the page writes them.
+    public var PendingImages: [string] { pendingImages }
+
+    /// Decodes the images loading left (Config.DefersImages) on
+    /// sync.ThreadPoolExecutor.Shared, several at once, and gives them to
+    /// the page: a big image decodes without holding the main thread, or
+    /// a worker of the pool. Answers the URLs, resolved, of those that
+    /// didn't decode.
+    public func LoadImages() async -> [string] {
+        var jobs: [ImageJob] = []
+        for src in pendingImages where images[src] == nil && vectors[src] == nil {
+            let url = Resolve(src)
+            if let bytes = Configuration.Fetcher.Fetch(url) {
+                jobs.append(ImageJob(src: src, url: url, bytes: bytes))
+            }
+        }
+        pendingImages = []
+        if jobs.isEmpty { return [] }
+        let decoded = await withTaskGroup(of: DecodedImage.self) { group in
+            for job in jobs {
+                group.addTask(executorPreference: sync.ThreadPoolExecutor.Shared) { await decodeOffMain(job) }
+            }
+            var out: [DecodedImage] = []
+            for await d in group { out.append(d) }
+            return out
+        }
+        var failed: [string] = []
+        for d in decoded {
+            if let img = d.image {
+                SetImage(d.src, img)
+            } else if let doc = d.vector {
+                vectors[d.src] = doc
+                needsStyle = true
+            } else {
+                failed.append(d.url)
+            }
+        }
+        return failed
     }
 
     // MARK: - Geometry
@@ -369,6 +442,7 @@ public final class Page {
         takeJournal()
         if needsStyle {
             builder.Images = images
+            builder.Vectors = vectors
             builder.Values = values
             context.Reset()
             context.Hovered = hovered
@@ -738,6 +812,31 @@ func importURL(_ params: string) -> string {
         return stringOf(b, 1, i)
     }
     return ""
+}
+
+/// An image to decode: as the page names it, resolved, and its bytes.
+struct ImageJob {
+    var src: string
+    var url: string
+    var bytes: [uint8]
+}
+
+/// An image decoded, or not, for the page.
+struct DecodedImage {
+    var src: string
+    var url: string
+    var image: draw.Image?
+    /// Where the bytes were an SVG file instead.
+    var vector: svg.Document? = nil
+}
+
+/// Decodes a job's bytes. Isolated to no actor: it runs where its task
+/// prefers, which LoadImages makes the thread pool.
+func decodeOffMain(_ job: ImageJob) async -> DecodedImage {
+    if let doc = svg.ParseDocument(job.bytes) {
+        return DecodedImage(src: job.src, url: job.url, image: nil, vector: doc)
+    }
+    return DecodedImage(src: job.src, url: job.url, image: decodeImage(job.bytes))
 }
 
 func decodeImage(_ bytes: [uint8]) -> draw.Image? {

@@ -791,10 +791,20 @@ extension Layout {
                     current += item.width
                 }
             case .atomic, .float:
-                lineMax += item.width
+                // An atomic inline gives its own contributions, not the
+                // width it took when laid out here, against no width at
+                // all, where a percentage would have come to nothing.
+                var most = item.width
+                var least = item.width
+                if item.kind == .atomic {
+                    let w = intrinsicWidths(item.box)
+                    let m = item.box.Margin.Horizontal
+                    most = w.max + m
+                    least = w.min + m
+                }
+                lineMax += most
                 if current > minW { minW = current }
-                current = item.width
-                if current > minW { minW = current }
+                if least > minW { minW = least }
                 current = 0
             default:
                 lineMax += item.width

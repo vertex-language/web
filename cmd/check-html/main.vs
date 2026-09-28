@@ -207,10 +207,23 @@ func testEncodings() {
     check(html.EncodingForLabel(" Latin1 ") == "windows-1252" && html.EncodingForLabel("shift_jis") == nil, "labels, and one not supported")
 }
 
+// A '<' that starts no tag is text, and <?...> a bogus comment: the
+// scanner used to stop at either with nothing read, and loop forever.
+func testStrayLessThan() {
+    print("Stray '<'")
+    let d = html.Parse("<p>a < b <</p>")
+    let p = d.ElementsByTagName("p")
+    check(p.count == 1 && p[0].InnerText() == "a < b <", "a '<' that starts nothing is text (\(p.first?.InnerText() ?? "none"))")
+    check(html.Parse("x <").ElementsByTagName("body").count == 1, "a '<' at the end is text")
+    let svg = html.Parse("<?xml version='1.0'?>\n<svg width='8'></svg>")
+    check(svg.ElementsByTagName("svg").count == 1, "an XML declaration is a bogus comment, and what follows parses")
+}
+
 func main() -> int32 {
     testEncodings()
     testTreeBuilding()
     testHTML()
+    testStrayLessThan()
 
     if failures == 0 {
         print("ALL HTML CHECKS PASSED")

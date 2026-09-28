@@ -77,6 +77,9 @@ public final class Box {
     /// control's default.
     /// An <svg> box's shapes.
     public var Vector: svg.Drawing? = nil
+    /// Whether Vector is an SVG file an <img> shows, which the page's CSS
+    /// doesn't style, rather than an inline <svg>.
+    public var VectorIsDocument: bool = false
     public var IntrinsicWidth: float32 = 0
     public var IntrinsicHeight: float32 = 0
     /// A replaced box with a ratio but no size of its own (an <svg> with
@@ -113,10 +116,14 @@ public final class Box {
         Node = node
     }
 
-    public var IsBlockLevel: bool { return Kind == .block }
-    public var IsInlineLevel: bool { return Kind != .block }
+    /// A block box, or a replaced element displayed as a block: an
+    /// <img style="display:block"> takes a line of its own.
+    public var IsBlockLevel: bool {
+        return Kind == .block || (Kind == .replaced && !Style.Display.IsInlineLevel)
+    }
+    public var IsInlineLevel: bool { return !IsBlockLevel }
     public var IsReplaced: bool { return Kind == .replaced }
-    public var IsAtomicInline: bool { return Kind == .inlineBlock || Kind == .replaced }
+    public var IsAtomicInline: bool { return Kind == .inlineBlock || (Kind == .replaced && !IsBlockLevel) }
 
     /// The content box, relative to the border-box corner.
     public var ContentX: float32 { return Border.Left + Padding.Left }
