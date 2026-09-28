@@ -76,6 +76,10 @@ public enum Prop: int32 {
     case gridTemplateColumns
     case gridTemplateRows
     case gridAutoRows
+    case gridColumnStart
+    case gridColumnEnd
+    case gridRowStart
+    case gridRowEnd
     case gridAutoColumns
     case gridAutoFlow
     case aspectRatio
@@ -200,7 +204,7 @@ let propNames: [string: Prop] = [
     "flex-grow": .flexGrow, "flex-shrink": .flexShrink, "flex-basis": .flexBasis, "order": .order,
     "row-gap": .rowGap, "column-gap": .columnGap, "table-layout": .tableLayout,
     "grid-template-columns": .gridTemplateColumns, "grid-template-rows": .gridTemplateRows,
-    "grid-auto-rows": .gridAutoRows, "grid-auto-columns": .gridAutoColumns, "grid-auto-flow": .gridAutoFlow, "aspect-ratio": .aspectRatio, "grid-column": .gridColumn, "grid-row": .gridRow,
+    "grid-auto-rows": .gridAutoRows, "grid-column-start": .gridColumnStart, "grid-column-end": .gridColumnEnd, "grid-row-start": .gridRowStart, "grid-row-end": .gridRowEnd, "grid-auto-columns": .gridAutoColumns, "grid-auto-flow": .gridAutoFlow, "aspect-ratio": .aspectRatio, "grid-column": .gridColumn, "grid-row": .gridRow,
     "color": .color, "font-family": .fontFamily, "font-size": .fontSize, "font-weight": .fontWeight,
     "font-style": .fontStyle, "line-height": .lineHeight, "text-align": .textAlign,
     "text-transform": .textTransform, "text-indent": .textIndent, "letter-spacing": .letterSpacing,
@@ -1239,6 +1243,10 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
         return nil
     case .gridColumn, .gridRow:
         return .placement(parsePlacement(tokens))
+    case .gridColumnStart, .gridRowStart:
+        return .placement(parsePlacementSide(tokens, end: false))
+    case .gridColumnEnd, .gridRowEnd:
+        return .placement(parsePlacementSide(tokens, end: true))
     case .boxSizing:
         if kw == "content-box" || kw == "border-box" { return .keyword(kw) }
         return nil
@@ -1702,7 +1710,22 @@ func parsePlacement(_ tokens: [Token]) -> GridPlacement {
     }
     var p = GridPlacement(start: start, span: 1)
     if span > 0 { p.Span = span }
-    if start > 0 && end > start { p.Span = end - start }
-    if start == 0 && end > 0 && span == 0 { p.Start = end - 1 }
+    if end != 0 { p.End = end }
+    return p
+}
+
+/// grid-column-start and the like: a line, or `span n`; for the end
+/// side the line is the placement's End.
+func parsePlacementSide(_ tokens: [Token], end: bool) -> GridPlacement {
+    var p = GridPlacement(start: 0, span: 0)
+    var spanNext = false
+    for t in tokens {
+        if t.Kind == .ident && lower(t.Value) == "span" { spanNext = true; continue }
+        if t.Kind == .number {
+            let n = int32(t.NumberVal)
+            if spanNext { p.Span = n } else if end { p.End = n } else { p.Start = n }
+            spanNext = false
+        }
+    }
     return p
 }

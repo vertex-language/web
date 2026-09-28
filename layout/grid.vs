@@ -38,10 +38,18 @@ extension Layout {
         // Column tracks: the template's, with auto-fill repeats counted
         // to fit, or one auto column for a grid without a template.
         var columns = expandAutoFill(s.GridColumns, available: contentWidth, gap: columnGap)
+        // Each item's lines, end lines made spans against the explicit
+        // tracks (-1 being the last line).
+        var columnOf: [int: css.GridPlacement] = [:]
+        var rowOf: [int: css.GridPlacement] = [:]
+        for b in boxes {
+            columnOf[b.Id] = b.Style.GridColumn.Resolved(explicitTracks: int32(columns.count))
+            rowOf[b.Id] = b.Style.GridRow.Resolved(explicitTracks: int32(s.GridRows.count))
+        }
         if columns.isEmpty { columns = [s.GridAutoColumns] }
         var maxColumnNeeded = 1
         for b in boxes {
-            let p = b.Style.GridColumn
+            let p = columnOf[b.Id] ?? b.Style.GridColumn
             let end = (p.Start > 0 ? int(p.Start) : 1) + int(p.Span) - 1
             if end > maxColumnNeeded { maxColumnNeeded = end }
         }
@@ -52,8 +60,9 @@ extension Layout {
         if columnFlow {
             var row = 0
             var column = 0
-            for b in boxes where !(b.Style.GridColumn.Start > 0 && b.Style.GridRow.Start > 0) {
-                let cs = b.Style.GridColumn.Span > 0 ? int(b.Style.GridColumn.Span) : 1
+            for b in boxes where !((columnOf[b.Id] ?? b.Style.GridColumn).Start > 0 && (rowOf[b.Id] ?? b.Style.GridRow).Start > 0) {
+                let bc = columnOf[b.Id] ?? b.Style.GridColumn
+                let cs = bc.Span > 0 ? int(bc.Span) : 1
                 if row >= flowRows {
                     row = 0
                     column += 1
@@ -92,8 +101,8 @@ extension Layout {
         }
         var pending: [Box] = []
         for b in boxes {
-            let pc = b.Style.GridColumn
-            let pr = b.Style.GridRow
+            let pc = columnOf[b.Id] ?? b.Style.GridColumn
+            let pr = rowOf[b.Id] ?? b.Style.GridRow
             let cs = pc.Span > 0 ? int(pc.Span) : 1
             let rs = pr.Span > 0 ? int(pr.Span) : 1
             if pc.Start > 0 && pr.Start > 0 {
@@ -108,8 +117,8 @@ extension Layout {
         var cursorRow = 0
         var cursorColumn = 0
         for b in pending {
-            let pc = b.Style.GridColumn
-            let pr = b.Style.GridRow
+            let pc = columnOf[b.Id] ?? b.Style.GridColumn
+            let pr = rowOf[b.Id] ?? b.Style.GridRow
             var cs = pc.Span > 0 ? int(pc.Span) : 1
             let rs = pr.Span > 0 ? int(pr.Span) : 1
             if cs > columnCount { cs = columnCount }

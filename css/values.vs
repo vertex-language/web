@@ -57,6 +57,9 @@ public struct GridPlacement: Equatable {
     public var Start: int32
     /// Lines spanned.
     public var Span: int32
+    /// The end line where one was named: 1-based, or counted back from
+    /// the last explicit line when negative (-1 is the last); 0 for none.
+    public var End: int32 = 0
 
     public init(start: int32 = 0, span: int32 = 1) {
         Start = start
@@ -64,4 +67,20 @@ public struct GridPlacement: Equatable {
     }
 
     public static let auto = GridPlacement(start: 0, span: 1)
+
+    /// The placement with its end line made a span, for a grid with so
+    /// many explicit tracks.
+    public func Resolved(explicitTracks: int32) -> GridPlacement {
+        if End == 0 { return self }
+        let endLine = End > 0 ? End : explicitTracks + 2 + End
+        var p = GridPlacement(start: Start, span: Span)
+        if Start > 0 {
+            p.Span = endLine > Start ? endLine - Start : 1
+        } else if endLine > 1 {
+            // Only the end: the span reaches back from it.
+            let start = endLine - Span
+            p.Start = start > 0 ? start : 1
+        }
+        return p
+    }
 }

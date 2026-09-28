@@ -1087,6 +1087,19 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
         if case .placement(let p) = v { s.GridColumn = p }
     case .gridRow:
         if case .placement(let p) = v { s.GridRow = p }
+    case .gridColumnStart, .gridColumnEnd, .gridRowStart, .gridRowEnd:
+        // One side of grid-column or grid-row, merged into it.
+        if case .placement(let side) = v {
+            var p = (d.Prop == .gridColumnStart || d.Prop == .gridColumnEnd) ? s.GridColumn : s.GridRow
+            if d.Prop == .gridColumnStart || d.Prop == .gridRowStart {
+                p.Start = side.Start
+                if side.Span > 0 { p.Span = side.Span }
+            } else {
+                p.End = side.End
+                if side.Span > 0 { p.Span = side.Span }
+            }
+            if d.Prop == .gridColumnStart || d.Prop == .gridColumnEnd { s.GridColumn = p } else { s.GridRow = p }
+        }
     case .color:
         if case .currentColor = v { s.Color = ctx.parent.Color }
         else if let c = colorOf(v) { s.Color = c }
@@ -1553,8 +1566,8 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .gridAutoColumns: b.GridAutoColumns = a.GridAutoColumns
     case .gridAutoFlow: b.GridAutoFlowColumn = a.GridAutoFlowColumn
     case .aspectRatio: b.AspectRatio = a.AspectRatio
-    case .gridColumn: b.GridColumn = a.GridColumn
-    case .gridRow: b.GridRow = a.GridRow
+    case .gridColumn, .gridColumnStart, .gridColumnEnd: b.GridColumn = a.GridColumn
+    case .gridRow, .gridRowStart, .gridRowEnd: b.GridRow = a.GridRow
     case .color: b.Color = a.Color
     case .fontFamily: b.FontFamilies = a.FontFamilies
     case .fontSize: b.FontSize = a.FontSize
