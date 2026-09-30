@@ -39,6 +39,9 @@ final class StyleRule {
     var usesState: bool = false
 
     let Layer: int32
+    /// The @scope the rule is in, or nil: it applies to an element only
+    /// inside the scope.
+    var scope: Scope? = nil
 
     init(selector sel: selector.ComplexSelector, order: int32, declarations: SplitDecls, media: [string], layer: int32) {
         Selector = sel
@@ -71,6 +74,9 @@ public final class RuleSet {
     /// are first named.
     var layers: [string: int32] = [:]
     var anonymousLayers = 0
+    /// Custom properties registered with @property, and the value each
+    /// has where nothing sets it (its initial-value).
+    var registered: [string: [css.Token]] = [:]
     /// What the selectors mention, for turning changes into restyles.
     let features = Features()
     /// Whether any rule asks about pointer or keyboard state, which is
@@ -98,29 +104,39 @@ public final class RuleSet {
     /// under, as a <link media> or <style media> puts it.
     public func Add(_ sheet: css.StyleSheet, media: string = "") {
         let m: [string] = media.isEmpty ? [] : [css.lower(media)]
-        for rule in sheet.Rules {
-            add(rule, media: m, layer: Unlayered)
+        addBlock(sheet.Rules, sheet.AtRules, media: m, layer: "", scope: nil)
+    }
+
+    /// Adds a block's rules and at-rules in the order they were written:
+    /// a sheet keeps the two apart, and a later rule beats an earlier one.
+    func addBlock(_ rules: [css.Rule], _ ats: [css.AtRule], media: [string], layer: string, scope: Scope?) {
+        let rank = layer.isEmpty ? Unlayered : layerRank(layer)
+        var i = 0
+        var j = 0
+        while i < rules.count || j < ats.count {
+            if j >= ats.count || (i < rules.count && rules[i].Position <= ats[j].Position) {
+                add(rules[i], media: media, layer: rank, scope: scope)
+                i += 1
+            } else {
+                addAtRules([ats[j]], media: media, layer: layer, scope: scope)
+                j += 1
+            }
         }
-        addAtRules(sheet.AtRules, media: m, layer: "")
     }
 
     /// The rules of at-rules, as deep as they nest: @media's under its
     /// query (with those around it), @supports' where its condition
     /// holds, and @layer's in their layer. @container, @keyframes and
     /// the rest aren't read yet.
-    func addAtRules(_ ats: [css.AtRule], media: [string], layer: string) {
+    func addAtRules(_ ats: [css.AtRule], media: [string], layer: string, scope: Scope? = nil) {
         for at in ats {
             switch at.Name {
             case "media":
                 let m = media + [css.lower(at.Params)]
-                let rank = layer.isEmpty ? Unlayered : layerRank(layer)
-                for rule in at.Rules { add(rule, media: m, layer: rank) }
-                addAtRules(at.AtRules, media: m, layer: layer)
+                addBlock(at.Rules, at.AtRules, media: m, layer: layer, scope: scope)
             case "supports":
                 if !SupportsCondition(at.Params) { continue }
-                let rank = layer.isEmpty ? Unlayered : layerRank(layer)
-                for rule in at.Rules { add(rule, media: media, layer: rank) }
-                addAtRules(at.AtRules, media: media, layer: layer)
+                addBlock(at.Rules, at.AtRules, media: media, layer: layer, scope: scope)
             case "layer":
                 let names = at.Params.split(separator: ",").map { trimSpaces(string($0)) }.filter { !$0.isEmpty }
                 if at.Rules.isEmpty && at.AtRules.isEmpty {
@@ -134,9 +150,24 @@ public final class RuleSet {
                     name = "\u{1}\(anonymousLayers)"
                 }
                 let full = layer.isEmpty ? name : layer + "." + name
-                let rank = layerRank(full)
-                for rule in at.Rules { add(rule, media: media, layer: rank) }
-                addAtRules(at.AtRules, media: media, layer: full)
+                _ = layerRank(full)
+                addBlock(at.Rules, at.AtRules, media: media, layer: full, scope: scope)
+            case "property":
+                // `@property --kit-accent { syntax: "<color>"; inherits:
+                // true; initial-value: blue }`: the value --kit-accent has
+                // wherever nothing sets it.
+                let name = trimSpaces(at.Params)
+                if !name.hasPrefix("--") { continue }
+                for d in at.Declarations where d.Property == "initial-value" {
+                    registered[name] = d.Tokens
+                    UsesCustomProperties = true
+                }
+            case "scope":
+                // `@scope (root) to (limit) { … }`: the rules apply inside
+                // an element the root matches, and not at or below one the
+                // limit matches under it.
+                guard let sc = Scope.parse(at.Params) else { continue }
+                addBlock(at.Rules, at.AtRules, media: media, layer: layer, scope: sc)
             default:
                 continue
             }
@@ -152,7 +183,7 @@ public final class RuleSet {
         return r
     }
 
-    func add(_ rule: css.Rule, media: [string], layer: int32) {
+    func add(_ rule: css.Rule, media: [string], layer: int32, scope: Scope? = nil) {
         let split = SplitDecls(rule.Declarations)
         if split.isEmpty { return }
         let decls = split.longhands
@@ -170,6 +201,7 @@ public final class RuleSet {
             for sel in parsed {
                 order += 1
                 let r = StyleRule(selector: sel, order: order, declarations: split, media: media, layer: layer)
+                r.scope = scope
                 r.usesState = noteState(sel)
                 features.note(sel)
                 bucket(r)
@@ -223,6 +255,74 @@ public final class RuleSet {
     }
 }
 
+extension StyleRule {
+    /// Whether the rule is on, and the element is in its scope.
+    func applies(_ node: html.Node) -> bool {
+        if !enabled { return false }
+        if let sc = scope { return sc.contains(node) }
+        return true
+    }
+}
+
+/// An @scope's root and limit: `@scope (.card) to (.content)`.
+final class Scope {
+    let roots: [selector.ComplexSelector]
+    let limits: [selector.ComplexSelector]
+
+    init(roots: [selector.ComplexSelector], limits: [selector.ComplexSelector]) {
+        self.roots = roots
+        self.limits = limits
+    }
+
+    /// The prelude's two parenthesized selector lists, or nil for one
+    /// this engine cannot read (an @scope with no root).
+    static func parse(_ params: string) -> Scope? {
+        let b = [uint8](params.utf8)
+        var i = 0
+        func group() -> string? {
+            while i < b.count && (b[i] == 32 || b[i] == 9 || b[i] == 10) { i += 1 }
+            guard i < b.count && b[i] == 40 else { return nil }
+            var depth = 0
+            let start = i + 1
+            while i < b.count {
+                if b[i] == 40 { depth += 1 }
+                if b[i] == 41 {
+                    depth -= 1
+                    if depth == 0 {
+                        let text = stringOf(b, start, i)
+                        i += 1
+                        return text
+                    }
+                }
+                i += 1
+            }
+            return nil
+        }
+        guard let root = group() else { return nil }
+        var limits: [selector.ComplexSelector] = []
+        while i < b.count && (b[i] == 32 || b[i] == 9 || b[i] == 10) { i += 1 }
+        if i + 1 < b.count && (b[i] == 116 || b[i] == 84) && (b[i + 1] == 111 || b[i + 1] == 79) { // "to"
+            i += 2
+            if let limit = group() { limits = selector.ParseSelectors(limit) }
+        }
+        let roots = selector.ParseSelectors(root)
+        if roots.isEmpty { return nil }
+        return Scope(roots: roots, limits: limits)
+    }
+
+    /// Whether node is in the scope: at or under a root, with no limit
+    /// between -- the limit itself is out.
+    func contains(_ node: html.Node) -> bool {
+        var cur: html.Node? = node
+        while let n = cur, n.Kind == html.NodeKind.element {
+            for r in roots where selector.MatchComplexIn(r, n, selector.MatchContext.none) { return true }
+            for l in limits where selector.MatchComplexIn(l, n, selector.MatchContext.none) { return false }
+            cur = n.Parent
+        }
+        return false
+    }
+}
+
 /// Rules bucketed by what their rightmost compound asks for -- an id, a
 /// class, a tag, an attribute, :root -- so that an element is tested
 /// against the rules that could match it and not against every rule on
@@ -272,27 +372,27 @@ final class Buckets {
     }
 
     func candidates(_ node: html.Node, into out: inout [StyleRule]) {
-        for r in universal { if r.enabled { out.append(r) } }
+        for r in universal { if r.applies(node) { out.append(r) } }
         if node.Parent == nil || node.Parent?.Kind == html.NodeKind.document {
-            for r in root { if r.enabled { out.append(r) } }
+            for r in root { if r.applies(node) { out.append(r) } }
         }
         if let list = byTag[node.TagName] {
-            for r in list { if r.enabled { out.append(r) } }
+            for r in list { if r.applies(node) { out.append(r) } }
         }
         if !byId.isEmpty, let id = node.IdAttr(), let list = byId[id] {
-            for r in list { if r.enabled { out.append(r) } }
+            for r in list { if r.applies(node) { out.append(r) } }
         }
         if !byClass.isEmpty && node.HasAttribute("class") {
             for cls in node.Classes() {
                 if let list = byClass[cls] {
-                    for r in list { if r.enabled { out.append(r) } }
+                    for r in list { if r.applies(node) { out.append(r) } }
                 }
             }
         }
         if !byAttribute.isEmpty {
             for a in node.Attributes {
                 if let list = byAttribute[a.Name] {
-                    for r in list { if r.enabled { out.append(r) } }
+                    for r in list { if r.applies(node) { out.append(r) } }
                 }
             }
         }
@@ -539,6 +639,16 @@ public final class StyleResolver {
     var matchedScratch: [StyleRule] = []
     var declScratch: [css.Longhand] = []
 
+    /// The initial values of the custom properties the sheets register,
+    /// as the scope under the root's; nil where none are registered.
+    func registeredScope() -> CustomScope? {
+        if UA.registered.isEmpty && Author.registered.isEmpty { return nil }
+        let scope = CustomScope(parent: nil)
+        for (name, tokens) in UA.registered { scope.own[name] = tokens }
+        for (name, tokens) in Author.registered { scope.own[name] = tokens }
+        return scope
+    }
+
     public init(ua: RuleSet) {
         UA = ua
         Author = RuleSet()
@@ -687,7 +797,9 @@ public final class StyleResolver {
             for c in r.Customs where c.important { customs.append(c) }
         }
         for c in inline.customs where c.important { customs.append(c) }
-        style.customs = customScope(customs, parent: base.customs)
+        // The root's properties sit over the registered ones' initial
+        // values (@property): what var() finds where nothing sets it.
+        style.customs = customScope(customs, parent: parent == nil ? registeredScope() : base.customs)
         let scope = style.customs
 
         for r in matched {

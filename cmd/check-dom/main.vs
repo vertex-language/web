@@ -132,11 +132,55 @@ func testText() {
     check(!doc.HasMutations, "emptying an empty element records nothing")
 }
 
+func testEvents() {
+    print("Events")
+    let doc = load("<div id=outer><form id=f><button id=b>Go</button></form></div>")
+    let outer = doc.ElementById("outer")!.Node
+    let form = doc.ElementById("f")!.Node
+    let button = doc.ElementById("b")!.Node
+    check(!doc.HasEventListeners, "a parsed document has no listeners")
+    check(doc.Dispatch(dom.MouseEvent("click"), to: button), "with no listeners the default action is taken")
+
+    var order: [string] = []
+    _ = doc.AddEventListener(outer, "click", { e in order.append("outer") })
+    let fid = doc.AddEventListener(form, "click", { e in order.append("form") })
+    _ = doc.AddEventListener(button, "click", { e in
+        order.append("button")
+        check(e.Target!.Id == button.Id && e.CurrentTarget!.Id == button.Id, "at the target, target and current target are the button")
+    })
+    _ = doc.AddEventListener(button, "input", { e in order.append("input") })
+    check(doc.Dispatch(dom.MouseEvent("click"), to: button), "a click nobody prevents takes its default action")
+    check(order == ["button", "form", "outer"], "a click bubbles from the target out, and only to its own type")
+
+    order = []
+    doc.RemoveEventListener(form, fid)
+    _ = doc.AddEventListener(form, "click", { e in
+        order.append("stop")
+        e.PreventDefault()
+        e.StopPropagation()
+    })
+    check(!doc.Dispatch(dom.MouseEvent("click"), to: button), "a prevented click takes no default action")
+    check(order == ["button", "stop"], "a removed listener is not called, and a stopped event goes no further")
+
+    var typed = ""
+    _ = doc.AddEventListener(form, "input", { e in
+        if let i = e as? dom.InputEvent { typed = i.Value }
+    })
+    _ = doc.Dispatch(dom.InputEvent("input", Value: "milk", Data: "k"), to: button)
+    check(typed == "milk", "a listener reads the event's own kind")
+
+    doc.RemoveEventListeners(within: form)
+    order = []
+    _ = doc.Dispatch(dom.MouseEvent("click"), to: button)
+    check(order == ["outer"], "removing a subtree's listeners leaves those outside it")
+}
+
 func main() -> int32 {
     testAttributes()
     testClassList()
     testChildren()
     testText()
+    testEvents()
     if failures == 0 {
         print("ALL DOM CHECKS PASSED")
         return 0

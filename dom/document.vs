@@ -43,6 +43,9 @@ public struct MutationRecord {
 public final class Document {
     public let Tree: html.Document
     var journal: [MutationRecord] = []
+    // The event listeners, by the id of the node they are on; see events.vs.
+    var listeners: [int64: [listener]] = [:]
+    var nextListener = 0
 
     public init(_ tree: html.Document) {
         Tree = tree
@@ -66,6 +69,9 @@ public final class Document {
 
     /// Whether anything changed since the last TakeRecords.
     public var HasMutations: bool { return !journal.isEmpty }
+
+    /// The changes since the last TakeRecords, left in the journal.
+    public var PendingRecords: [MutationRecord] { return journal }
 
     /// The changes since the last call, oldest first, and an empty
     /// journal.

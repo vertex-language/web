@@ -78,7 +78,7 @@ input, textarea, select, button {
   box-sizing: border-box; vertical-align: middle;
 }
 input, textarea { background-color: #ffffff; border: 1px solid #767676; border-radius: 3px; padding: 3px 6px; cursor: text; }
-input { width: 150px; height: 24px; }
+input { width: 150px; }
 ::placeholder { color: #757575; }
 textarea { width: 200px; height: 60px; white-space: pre-wrap; resize: none; }
 select { background-color: #ffffff; border: 1px solid #767676; border-radius: 4px; padding: 2px 24px 2px 6px; height: 24px; cursor: default; }

@@ -458,9 +458,28 @@ func testImages() {
           "display:block images stack, each a line of its own (got \(b.rect("b")!.X),\(b.rect("b")!.Y))")
 }
 
+func testControls() {
+    print("Controls")
+    guard let l = layoutOf("""
+        <body style='margin:0'>
+        <input id=plain style='display:block'>
+        <input id=padded style='display:block;font:14px system-ui;padding:8px 10px;width:300px'>
+        <input id=wide style='display:block;width:100%;padding:8px'>
+        <img id=pic src=logo.png style='display:block;width:150px'>
+        </body>
+        """, images: ["logo.png": draw.Image(width: 75, height: 24, pixels: [uint8](repeating: 0, count: 75 * 24 * 4))]) else { check(false, "layout"); return }
+    let plain = l.rect("plain")!
+    check(near(plain.Height, 24, 1), "an input is a line of its font, with its padding and border: 24px by default (got \(plain.Height))")
+    let padded = l.rect("padded")!
+    check(padded.Height > 30, "padding makes it taller, not the text shorter (got \(padded.Height))")
+    check(near(l.rect("wide")!.Height, plain.Height + 10, 1), "a width does not scale an input's height (got \(l.rect("wide")!.Height))")
+    check(l.rect("pic")!.Height == 48, "while an image's width scales its height by its ratio")
+}
+
 func main() -> int32 {
     testBlockLayout()
     testImages()
+    testControls()
     testInlineLayout()
     testFlexLayout()
     testFloats()

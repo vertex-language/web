@@ -129,6 +129,10 @@ public final class Page {
     var onNavigate: ((string) -> Void)? = nil
     var onSubmit: ((dom.Submission) -> Void)? = nil
     var onAction: ((string, string) -> Void)? = nil
+    /// The document's <style> and <link rel=stylesheet> elements, and the
+    /// sheets the program set.
+    var docSheets: [html.Node] = []
+    var programSheets: [string] = []
     var onTitle: ((string) -> Void)? = nil
     var onHoverLink: ((string?) -> Void)? = nil
     var isVisited: ((string) -> bool)? = nil
@@ -191,16 +195,9 @@ public final class Page {
         scroll = draw.Point(0, 0)
         // Stylesheets in document order, in the head or the body: a page
         // may link a component's sheet beside the component.
-        var sheets: [html.Node] = []
-        collectSheets(doc.Root, &sheets)
-        for node in sheets {
-            let media = node.GetAttribute("media") ?? ""
-            if node.TagName == "style" {
-                addSheet(css.Parse(node.InnerText()), media: media)
-            } else if let href = node.GetAttribute("href"), let bytes = Configuration.Fetcher.Fetch(Resolve(href)) {
-                addSheet(css.Parse(stringOf(bytes, 0, bytes.count)), media: media)
-            }
-        }
+        docSheets = []
+        collectSheets(doc.Root, &docSheets)
+        addSheets()
         var wanted: [string] = []
         for img in doc.ElementsByTagName("img") {
             if let src = img.GetAttribute("src") { wanted.append(src) }
@@ -224,6 +221,31 @@ public final class Page {
         }
         title = doc.Title
         if let cb = onTitle { cb(title) }
+        needsStyle = true
+        needsRepaint = true
+    }
+
+    /// The document's own sheets, then the program's (SetStyleSheets).
+    func addSheets() {
+        for node in docSheets {
+            let media = node.GetAttribute("media") ?? ""
+            if node.TagName == "style" {
+                addSheet(css.Parse(node.InnerText()), media: media)
+            } else if let href = node.GetAttribute("href"), let bytes = Configuration.Fetcher.Fetch(Resolve(href)) {
+                addSheet(css.Parse(stringOf(bytes, 0, bytes.count)), media: media)
+            }
+        }
+        for text in programSheets { addSheet(css.Parse(text)) }
+    }
+
+    /// Sets the stylesheets the program gives the page, after the
+    /// document's own: a .vsx app's compiled .vss, in cascade order. The
+    /// page restyles; setting the sheets it has costs nothing.
+    public func SetStyleSheets(_ sheets: [string]) {
+        if sheets == programSheets { return }
+        programSheets = sheets
+        resolver.Author = cascade.RuleSet()
+        addSheets()
         needsStyle = true
         needsRepaint = true
     }
@@ -380,8 +402,25 @@ public final class Page {
     /// tree since the last frame. Changes nothing depends on -- an
     /// attribute no rule and no stage reads, a class no rule names --
     /// are dropped, and cost no frame.
+    /// A field's value attribute set by the program is its value: what the
+    /// user typed before gives way to it, as a controlled input's does.
+    /// Reads the journal without taking it.
+    func syncValues() {
+        guard let doc = Document, doc.HasMutations, !values.isEmpty else { return }
+        for r in doc.PendingRecords where r.Kind == .attributes && r.AttributeName == "value" {
+            if let typed = values[r.Target.Id], typed != (r.Target.GetAttribute("value") ?? "") {
+                values.removeValue(forKey: r.Target.Id)
+                if focused?.Id == r.Target.Id {
+                    caret = valueOf(r.Target).utf8.count
+                    fieldAnchor = caret
+                }
+            }
+        }
+    }
+
     func takeJournal() {
         guard let doc = Document, doc.HasMutations else { return }
+        syncValues()
         let records = doc.TakeRecords()
         if needsStyle { return }
         let roots = resolver.Invalidate(records, reads: { name in layout.ReadsAttribute(name) || paint.ReadsAttribute(name) })
@@ -744,6 +783,7 @@ public final class Page {
 
     /// The text a form control holds now.
     public func ValueOf(_ node: html.Node) -> string {
+        syncValues()
         return valueOf(node)
     }
 
@@ -757,6 +797,18 @@ public final class Page {
         values[node.Id] = value
         showCaret()
         needsStyle = true
+        // The user changed the control: its listeners hear of it.
+        _ = Document?.Dispatch(dom.InputEvent("input", Value: value), to: node)
+    }
+
+    /// Dispatches an event to a node's element -- a text node's parent --
+    /// and answers whether the default action should be taken.
+    func dispatch(_ event: dom.Event, to node: html.Node?) -> bool {
+        guard let doc = Document, doc.HasEventListeners else { return true }
+        var cur = node
+        while let n = cur, n.Kind != html.NodeKind.element { cur = n.Parent }
+        guard let target = cur else { return true }
+        return doc.Dispatch(event, to: target)
     }
 
     /// The selected bytes of the focused text control, if any.

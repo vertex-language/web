@@ -283,7 +283,50 @@ func testColors() {
     check(css.ParseColor("#12345") == nil, "bad hex length is nil")
 }
 
+func testNesting() {
+    print("Nesting")
+    let sheet = css.Parse("""
+    .card {
+        padding: 4px;
+        &:hover { color: red; }
+        & .title, .sub { font-weight: 700; }
+        h2 { margin: 0; }
+        a:hover { color: blue; }
+        > p { margin: 1px; }
+        .inner { &.on { color: green; } }
+        *zoom: 1;
+        color: black;
+    }
+    a, b { &:focus { outline: none } }
+    """)
+    var got: [string] = []
+    for r in sheet.Rules { got.append(r.Selectors.joined(separator: ", ")) }
+    same(got.joined(separator: " | "),
+         ".card | .card:hover | .card .title, .card .sub | .card h2 | .card a:hover | .card > p | .card .inner | .card .inner.on | a, b | :is(a, b):focus",
+         "nested rules are flattened after their parent, their selectors composed with its")
+    let card = sheet.Rules[0]
+    check(card.GetDeclaration("padding") != nil && card.GetDeclaration("color")?.Value == "black",
+          "the parent keeps its declarations, before and after the nested rules")
+    check(sheet.Rules[5].GetDeclaration("margin")?.Value == "1px", "a nested rule keeps its own declarations")
+    check(css.Parse("p { color: red; } .x { a { b: c } }").Rules.count == 3, "a rule nested without & is a descendant")
+}
+
+func testNames() {
+    print("Property names")
+    let applied = css.AppliedPropertyNames()
+    let unapplied = css.UnappliedPropertyNames()
+    var both: [string] = []
+    for n in unapplied where applied.contains(n) { both.append(n) }
+    check(both.isEmpty, "no property is both applied and not (got \(both))")
+    var unknown: [string] = []
+    for n in applied where !css.IsKnownProperty(n) && css.Longhands(css.Declaration(property: n, value: "initial", important: false, tokens: [])).isEmpty && !["outline", "place-items", "flex-flow", "inset", "grid-gap", "border-top", "border-right", "border-bottom", "border-left"].contains(n) { unknown.append(n) }
+    check(unknown.isEmpty, "every applied name is one the engine expands (got \(unknown))")
+    check(applied.contains("margin") && applied.contains("color") && unapplied.contains("transition"), "the lists hold what they should")
+}
+
 func main() -> int32 {
+    testNames()
+    testNesting()
     testCSS()
     testSelector()
     testPseudoClasses()

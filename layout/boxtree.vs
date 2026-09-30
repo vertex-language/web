@@ -243,15 +243,17 @@ public final class BoxTreeBuilder {
             case "range", "color", "file", "date", "time", "month", "week", "datetime-local":
                 box.Replaced = .placeholder
                 box.IntrinsicWidth = 150
-                box.IntrinsicHeight = 24
+                box.IntrinsicHeight = style.Face.LineHeight
             default:
                 box.Replaced = .textInput
                 box.Text = Values[node.Id] ?? (node.GetAttribute("value") ?? "")
                 if node.HasAttribute("placeholder") {
                     box.PlaceholderStyle = resolver.ResolvePseudo(node, "placeholder", parent: style, context: context)
                 }
+                // A line of text: the height grows with the font and with
+                // the padding around it, as a browser's input does.
                 box.IntrinsicWidth = 150
-                box.IntrinsicHeight = 24
+                box.IntrinsicHeight = style.Face.LineHeight
             }
         case "textarea":
             box = Box(kind: .replaced, style: style, node: node)

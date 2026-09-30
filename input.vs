@@ -87,6 +87,9 @@ extension Page {
     /// keys while something in the page has focus are handled; the rest
     /// is ignored and left to the host.
     public func Handle(_ input: Input) -> EventResult {
+        // What the program changed since the last input -- a field's value
+        // set by a handler -- is what this input meets.
+        syncValues()
         switch input {
         case .pointerMoved(let p):
             return pointerMoved(p)
@@ -291,13 +294,17 @@ extension Page {
         guard let hit = hitAt(p) else { return .ignored }
         // A click is a press and release on the same element.
         if let w = was, let n = hit.Node, dom.Contains(w, n) || dom.Contains(n, w) {
-            return clicked(hit)
+            return clicked(hit, at: p)
         }
         return .handled
     }
 
-    func clicked(_ hit: layout.Hit) -> EventResult {
+    func clicked(_ hit: layout.Hit, at p: draw.Point) -> EventResult {
         let node = hit.Node
+        // Listeners first: one may take the click for its own.
+        if !dispatch(dom.MouseEvent("click", X: p.X, Y: p.Y), to: node) {
+            return .handled
+        }
         if let control = dom.ControlAncestor(node) {
             if control.TagName == "button" || (control.TagName == "input" && dom.IsButtonInput(control)) {
                 if !control.HasAttribute("disabled") { activateButton(control) }
@@ -381,6 +388,9 @@ extension Page {
     // MARK: - Keys
 
     func keyDown(_ k: Key) -> EventResult {
+        if !dispatch(dom.KeyboardEvent("keydown", Key: k.Key, Code: k.Code), to: focused ?? Document?.Tree.ElementsByTagName("body").first) {
+            return .handled
+        }
         if let f = focused, dom.IsTextControl(f) {
             return editKey(f, k)
         }
@@ -393,6 +403,8 @@ extension Page {
         }
         if let f = focused, k.Code == "Enter" || k.Code == "Space" {
             if f.TagName == "button" || (f.TagName == "input" && dom.IsButtonInput(f)) {
+                // A button pressed from the keyboard is clicked.
+                if !dispatch(dom.MouseEvent("click"), to: f) { return .handled }
                 activateButton(f)
                 return .handled
             }
@@ -699,6 +711,7 @@ extension Page {
         if input.HasAttribute("disabled") { return }
         _ = Document?.ToggleAttribute(input, "checked")
         Focus(input)
+        _ = dispatch(dom.Event("change"), to: input)
     }
 
     func check(_ radio: html.Node) {
@@ -713,6 +726,7 @@ extension Page {
         }
         doc.SetAttribute(radio, "checked", "")
         Focus(radio)
+        _ = dispatch(dom.Event("change"), to: radio)
     }
 
     func resetForm(_ form: html.Node) {
@@ -723,6 +737,7 @@ extension Page {
     }
 
     func submit(_ form: html.Node, submitter: html.Node?) {
+        if !dispatch(dom.SubmitEvent("submit", Submitter: submitter), to: form) { return }
         let fields = dom.FormData(form, submitter: submitter, value: { c in self.valueOf(c) })
         let action = form.GetAttribute("action") ?? ""
         let method = lower(form.GetAttribute("method") ?? "get")

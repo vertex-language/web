@@ -132,7 +132,7 @@ _ = page.Handle(.keyDown(web.Key(Key: "Enter", Code: "Enter")))
 
 ## What it renders
 
-- **Style**: the cascade with specificity, `!important`, inheritance, `em`,
+- **Style**: CSS nesting, `@layer`, `@scope`, the cascade with specificity, `!important`, inheritance, `em`,
   `rem` and viewport units, `calc()`, `@media` (including
   `prefers-color-scheme` and `prefers-reduced-motion`), `@import`,
   `@font-face`, `<link rel=stylesheet>`, `<base href>`, inline styles and

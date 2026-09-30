@@ -347,6 +347,12 @@ public final class Layout {
 
     // MARK: - Replaced and atomic boxes
 
+    /// Whether a replaced box keeps its intrinsic proportions when only one
+    /// of its sizes is given: an image or an SVG does, a control does not.
+    func keepsRatio(_ box: Box) -> bool {
+        return box.Replaced == .image || box.Replaced == .svg
+    }
+
     /// Sizes an image or control from its style, or its own size.
     func sizeReplaced(_ box: Box, cb: ContainingBlock) {
         let s = box.Style
@@ -364,15 +370,18 @@ public final class Layout {
             w = iw + edgesW
             h = ih + edgesH
         } else if w == nil {
-            // Keep the image's proportions.
+            // Keep the image's proportions. A control has none: its
+            // width is its own whatever its height.
             let inner = h! - edgesH
-            w = (ih > 0 ? inner * iw / ih : iw) + edgesW
+            w = (keepsRatio(box) && ih > 0 ? inner * iw / ih : iw) + edgesW
         } else if h == nil {
             let inner = w! - edgesW
             if s.AspectRatio > 0 {
                 h = inner / s.AspectRatio + edgesH
             } else {
-                h = (iw > 0 ? inner * ih / iw : ih) + edgesH
+                // A 300px-wide input is its own height, not one scaled
+                // to its width.
+                h = (keepsRatio(box) && iw > 0 ? inner * ih / iw : ih) + edgesH
             }
         }
         box.Width = clampWidth(box, w!, cbWidth: cb.Width)

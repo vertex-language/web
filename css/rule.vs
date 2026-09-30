@@ -4,6 +4,10 @@ package css
 public struct Rule {
     public var Selectors: [string]
     public var Declarations: [Declaration]
+    /// Where the rule stands among the rules and at-rules of its sheet,
+    /// in source order: a sheet keeps the two apart, and the cascade
+    /// needs them in the order they were written.
+    public var Position: int = 0
 
     public init(selectors: [string], declarations: [Declaration]) {
         self.Selectors = selectors
@@ -34,6 +38,8 @@ public struct AtRule {
     /// At-rules inside this one's block, in order: `@media` inside
     /// `@layer`, `@supports` inside `@media`.
     public var AtRules: [AtRule]
+    /// Where the at-rule stands in source order; see Rule.Position.
+    public var Position: int = 0
 
     public init(name: string, params: string, rules: [Rule], declarations: [Declaration] = [], atRules: [AtRule] = []) {
         self.Name = toLower(name)

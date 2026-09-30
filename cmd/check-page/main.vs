@@ -198,6 +198,51 @@ func near(_ a: float32, _ b: float32, _ tolerance: float32 = 0.5) -> bool {
 }
 
 @MainActor
+func testEvents() {
+    print("Events reach listeners")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(300, 200))
+    view.LoadHTML("""
+    <style>body { margin: 0 } button, input { position: absolute; left: 10px; width: 80px; height: 20px }</style>
+    <form id=f><button id=b style='top: 10px'>Go</button><input id=t style='top: 50px'></form>
+    """)
+    var pixels = [uint8](repeating: 0, count: 300 * 200 * 4)
+    view.Draw(into: &pixels, width: 300, height: 200, scale: 1)
+    let doc = view.Document!
+    let b = view.QuerySelector("#b")!
+    let t = view.QuerySelector("#t")!
+    var clicks = 0
+    var submits = 0
+    var submitted = 0
+    var typed = ""
+    var keys: [string] = []
+    _ = doc.AddEventListener(b, "click", { e in clicks += 1 })
+    _ = doc.AddEventListener(view.QuerySelector("#f")!, "submit", { e in
+        submits += 1
+        e.PreventDefault()
+    })
+    _ = doc.AddEventListener(t, "input", { e in
+        if let i = e as? dom.InputEvent { typed = i.Value }
+    })
+    _ = doc.AddEventListener(t, "keydown", { e in
+        if let k = e as? dom.KeyboardEvent { keys.append(k.Key) }
+    })
+    view.OnSubmit({ s in submitted += 1 })
+
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(30, 20))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(30, 20))))
+    check(clicks == 1, "a click on a button reaches its listener")
+    check(submits == 1 && submitted == 0, "the submit it makes reaches the form's listener, which prevents it")
+
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(30, 60))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(30, 60))))
+    _ = view.Handle(.text("hi"))
+    check(typed == "hi", "typing in a field fires input with its value (got '\(typed)')")
+    _ = view.Handle(.keyDown(web.Key(Key: "Backspace", Code: "Backspace")))
+    check(typed == "h" && keys == ["Backspace"], "a key fires keydown, and deleting fires input")
+}
+
+@MainActor
 func testJournal() {
     print("The journal drives restyle")
     let view = web.Page()
@@ -309,6 +354,7 @@ func main() async -> int32 {
     testTextFeatures()
     testPageInput()
     testJournal()
+    testEvents()
     await testDeferredImages()
     await testSVGImages()
     if failures == 0 {

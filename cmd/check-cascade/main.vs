@@ -289,6 +289,34 @@ func testAtRules() {
     check(width("@media (min-width: 100px) { @media (max-width: 200px) { div { width: 4px } } div { width: 6px } }") == Length.px(6), "nested @media needs both queries")
     check(width("@supports (display: grid) { @media (min-width: 100px) { div { width: 7px } } }") == Length.px(7), "@media inside @supports")
     check(width("@layer outer { @layer inner { div { width: 8px } } }") == Length.px(8), "a layer inside a layer")
+
+    // @scope, as .vss packages use it: a package's rules reach its own
+    // elements and stop at another package's.
+    let page = """
+    <div data-p=kit class=root><b class=t id=own>kit</b>
+      <section data-p=main class=t id=app><b class=t id=deep>app</b></section>
+    </div>
+    <b class=t id=outside>none</b>
+    """
+    func w(_ css: string, _ sel: string) -> Length? {
+        return styleOf("<style>" + css + "</style>" + page, sel)?.Width
+    }
+    let kit = "@scope ([data-p=kit]) to ([data-p]:not([data-p=kit])) { .t { width: 9px } }"
+    check(w(kit, "#own") == Length.px(9), "@scope: a rule applies inside its root")
+    check(w(kit, "#app") != Length.px(9), "not at a limit, which is outside the scope")
+    check(w(kit, "#deep") != Length.px(9), "nor under one")
+    check(w(kit, "#outside") != Length.px(9), "nor outside the root")
+    check(w("@layer kit { " + kit + " }", "#own") == Length.px(9), "@scope inside @layer")
+    check(w("@scope (.root) { .t { width: 3px } } .t { width: 1px }", "#deep") == Length.px(1), "an unlayered later rule still wins where both apply")
+    check(w("@scope (.root) to (section) { .t { width: 3px } } @scope (section) { .t { width: 4px } }", "#deep") == Length.px(4), "a limit stops one scope where another begins")
+
+    // @property: a registered custom property's initial value is what
+    // var() finds where nothing sets it.
+    let reg = "@property --kit-w { syntax: \"<length>\"; inherits: true; initial-value: 7px } .t { width: var(--kit-w) }"
+    check(w(reg, "#own") == Length.px(7), "@property: its initial-value stands where nothing sets it")
+    check(w(reg + " :root { --kit-w: 11px }", "#own") == Length.px(11), "a value set on :root overrides it")
+    check(w(reg + " section { --kit-w: 2px }", "#deep") == Length.px(2) && w(reg + " section { --kit-w: 2px }", "#own") == Length.px(7),
+          "and one set on an element reaches what is under it alone")
 }
 
 func testBackgroundPosition() {
