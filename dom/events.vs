@@ -14,10 +14,14 @@ public class Event {
     /// The element whose listener is running now.
     public internal(set) var CurrentTarget: html.Node? = nil
     public internal(set) var DefaultPrevented = false
+    /// Whether the event goes on to the ancestors' listeners. mouseenter,
+    /// mouseleave, focus and blur do not: each is its element's own.
+    public let Bubbles: bool
     var stopped = false
 
-    public init(_ type: string) {
+    public init(_ type: string, bubbles: bool = true) {
         Type = type
+        Bubbles = bubbles
     }
 
     /// Asks that what the engine would do after the event -- submit the
@@ -35,11 +39,11 @@ public final class MouseEvent: Event {
     public let Y: float32
     public let Clicks: int32
 
-    public init(_ type: string, X: float32 = 0, Y: float32 = 0, Clicks: int32 = 1) {
+    public init(_ type: string, X: float32 = 0, Y: float32 = 0, Clicks: int32 = 1, bubbles: bool = true) {
         self.X = X
         self.Y = Y
         self.Clicks = Clicks
-        super.init(type)
+        super.init(type, bubbles: bubbles)
     }
 }
 
@@ -80,8 +84,12 @@ public final class SubmitEvent: Event {
     }
 }
 
-/// Focus coming to or leaving an element.
-public final class FocusEvent: Event {}
+/// Focus coming to or leaving an element. focus and blur do not bubble.
+public final class FocusEvent: Event {
+    public init(_ type: string) {
+        super.init(type, bubbles: false)
+    }
+}
 
 /// The events of other kinds this document knows by name: pointer,
 /// wheel, composition, drag, and an element's box changing size.
@@ -148,6 +156,7 @@ extension Document {
                 }
                 if event.stopped { break }
             }
+            if !event.Bubbles { break }
             cur = n.Parent
         }
         event.CurrentTarget = nil

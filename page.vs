@@ -129,6 +129,8 @@ public final class Page {
     var onNavigate: ((string) -> Void)? = nil
     var onSubmit: ((dom.Submission) -> Void)? = nil
     var onAction: ((string, string) -> Void)? = nil
+    /// How many clicks the last primary press was: 2 on a double click.
+    var downClicks: int32 = 1
     /// The document's <style> and <link rel=stylesheet> elements, and the
     /// sheets the program set.
     var docSheets: [html.Node] = []
@@ -745,7 +747,11 @@ public final class Page {
     /// Gives an element focus, as clicking it or tabbing to it would.
     public func Focus(_ node: html.Node?) {
         if focused?.Id == node?.Id { return }
+        let before = focused
         focused = node
+        // blur to what had focus, focus to what has it: neither bubbles.
+        if let b = before { _ = dispatch(dom.FocusEvent("blur"), to: b) }
+        if let n = node { _ = dispatch(dom.FocusEvent("focus"), to: n) }
         if let n = node {
             let value = valueOf(n)
             caret = value.utf8.count

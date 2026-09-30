@@ -95,7 +95,17 @@ extension Page {
             return pointerMoved(p)
         case .pointerDown(let e):
             if !isInside(e.Position) { return .ignored }
-            if e.Button == .primary { return pointerDown(e.Position, clicks: e.Clicks) }
+            if e.Button == .primary {
+                downClicks = e.Clicks
+                return pointerDown(e.Position, clicks: e.Clicks)
+            }
+            if e.Button == .secondary {
+                // A secondary press asks for the element's context menu.
+                update()
+                if let hit = hitAt(e.Position) {
+                    _ = dispatch(dom.MouseEvent("contextmenu", X: e.Position.X, Y: e.Position.Y), to: hit.Node)
+                }
+            }
             return .handled
         case .pointerUp(let e):
             if e.Button == .primary { return pointerUp(e.Position) }
@@ -188,7 +198,9 @@ extension Page {
     func setHovered(_ node: html.Node?) {
         if hovered?.Id == node?.Id { return }
         let oldLink = dom.LinkAncestor(hovered)
+        let before = hovered
         hovered = node
+        enterAndLeave(from: before, to: node)
         let newLink = dom.LinkAncestor(node)
         if oldLink?.Id != newLink?.Id, let cb = onHoverLink {
             if let l = newLink, let href = l.GetAttribute("href") {
@@ -301,8 +313,14 @@ extension Page {
 
     func clicked(_ hit: layout.Hit, at p: draw.Point) -> EventResult {
         let node = hit.Node
-        // Listeners first: one may take the click for its own.
-        if !dispatch(dom.MouseEvent("click", X: p.X, Y: p.Y), to: node) {
+        // Listeners first: one may take the click for its own. The second
+        // click of a double one is a dblclick too.
+        let clicks = downClicks
+        let prevented = !dispatch(dom.MouseEvent("click", X: p.X, Y: p.Y, Clicks: clicks), to: node)
+        if clicks == 2 {
+            _ = dispatch(dom.MouseEvent("dblclick", X: p.X, Y: p.Y, Clicks: 2), to: node)
+        }
+        if prevented {
             return .handled
         }
         if let control = dom.ControlAncestor(node) {
@@ -746,5 +764,33 @@ extension Page {
         } else if let cb = onAction {
             cb(form.GetAttribute("name") ?? (form.GetAttribute("id") ?? "form"), action)
         }
+    }
+}
+
+extension Page {
+    /// The elements the pointer left and entered, moving from one to the
+    /// other: mouseleave to those left, the innermost first, and
+    /// mouseenter to those entered, the outermost first. Neither bubbles.
+    func enterAndLeave(from old: html.Node?, to new: html.Node?) {
+        guard let doc = Document, doc.HasEventListeners else { return }
+        let was = elementChain(old)
+        let now = elementChain(new)
+        for n in was where !now.contains(where: { $0.Id == n.Id }) {
+            _ = doc.Dispatch(dom.MouseEvent("mouseleave", bubbles: false), to: n)
+        }
+        for n in now.reversed() where !was.contains(where: { $0.Id == n.Id }) {
+            _ = doc.Dispatch(dom.MouseEvent("mouseenter", bubbles: false), to: n)
+        }
+    }
+
+    /// A node's element and its ancestors, innermost first.
+    func elementChain(_ node: html.Node?) -> [html.Node] {
+        var out: [html.Node] = []
+        var cur = node
+        while let n = cur {
+            if n.Kind == html.NodeKind.element { out.append(n) }
+            cur = n.Parent
+        }
+        return out
     }
 }

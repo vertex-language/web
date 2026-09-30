@@ -240,6 +240,33 @@ func testEvents() {
     check(typed == "hi", "typing in a field fires input with its value (got '\(typed)')")
     _ = view.Handle(.keyDown(web.Key(Key: "Backspace", Code: "Backspace")))
     check(typed == "h" && keys == ["Backspace"], "a key fires keydown, and deleting fires input")
+
+    // Focus, hover, double and secondary clicks.
+    var seen: [string] = []
+    let form = view.QuerySelector("#f")!
+    for type in ["focus", "blur", "mouseenter", "mouseleave"] {
+        _ = doc.AddEventListener(t, type, { e in seen.append("t." + e.Type) })
+        _ = doc.AddEventListener(form, type, { e in seen.append("form." + e.Type) })
+    }
+    _ = doc.AddEventListener(b, "dblclick", { e in seen.append("b.dblclick") })
+    _ = doc.AddEventListener(b, "contextmenu", { e in seen.append("b.contextmenu") })
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(30, 20))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(30, 20))))
+    check(seen == ["t.blur"], "focus moving off a field sends it blur, which does not bubble (got \(seen))")
+    _ = view.Handle(.pointerMoved(draw.Point(30, 20)))
+    seen = []
+    _ = view.Handle(.pointerMoved(draw.Point(30, 60)))
+    check(seen.contains("t.mouseenter") && !seen.contains("form.mouseenter"), "the pointer entering a field sends it mouseenter; its form was entered already (got \(seen))")
+    seen = []
+    _ = view.Handle(.pointerMoved(draw.Point(250, 180)))
+    check(seen.contains("t.mouseleave") && seen.contains("form.mouseleave"), "leaving sends mouseleave to each element left (got \(seen))")
+    seen = []
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(30, 20), clicks: 2)))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(30, 20), clicks: 2)))
+    check(seen.contains("b.dblclick"), "a second click is a dblclick (got \(seen))")
+    seen = []
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(30, 20), button: .secondary)))
+    check(seen == ["b.contextmenu"], "a secondary press asks for the context menu (got \(seen))")
 }
 
 @MainActor
