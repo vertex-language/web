@@ -251,6 +251,30 @@ func testCustomProperties() {
     check(b?.BorderTopColor == draw.Color(1, 2, 3) && b?.BorderTopWidth == 2, "var() inside the border shorthand")
 }
 
+func testColorScheme() {
+    print("Color scheme and system colors")
+    let src = "<style>p { color: red } @media (prefers-color-scheme: dark) { p { color: rgb(1, 2, 3) } } b { color: AccentColor; background-color: Canvas }</style><p>x</p><b>y</b>"
+    let doc = html.Parse(src)
+    let resolver = cascade.StyleResolver(ua: cascade.UserAgentRules())
+    for style in doc.ElementsByTagName("style") { resolver.Author.Add(css.Parse(style.InnerText())) }
+    func colorOf(_ sel: String) -> draw.Color? {
+        guard let n = selector.QuerySelector(sel, in: doc.Root) else { return nil }
+        var chain: [html.Node] = []
+        var cur: html.Node? = n
+        while let c = cur {
+            if c.Kind == html.NodeKind.element { chain.insert(c, at: 0) }
+            cur = c.Parent
+        }
+        var parent: cascade.ComputedStyle? = nil
+        for c in chain { parent = resolver.Resolve(c, parent: parent, context: selector.MatchContext.none) }
+        return parent?.Color
+    }
+    check(colorOf("p") == draw.Color(255, 0, 0), "light: prefers-color-scheme: dark does not hold")
+    resolver.Dark = true
+    check(colorOf("p") == draw.Color(1, 2, 3), "dark: it does")
+    check(colorOf("b") == css.SystemAccent, "AccentColor is the system's accent")
+}
+
 func testMediaQueries() {
     print("Media queries")
     func width(_ query: string) -> Length? {
@@ -360,6 +384,7 @@ func main() -> int32 {
     testCustomProperties()
     testMediaQueries()
     testAtRules()
+    testColorScheme()
     testBackgroundPosition()
     testEffects()
     if failures == 0 {

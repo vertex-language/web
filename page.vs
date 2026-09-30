@@ -362,6 +362,19 @@ public final class Page {
     /// How big the viewport is, in CSS pixels.
     public var ViewportSize: draw.Size { return size }
 
+    /// Shows the page in a dark or a light color scheme, which is what
+    /// `@media (prefers-color-scheme: dark)` asks: the host sets it from
+    /// the system's appearance, and again when that changes.
+    public func SetColorScheme(dark: bool) {
+        if resolver.Dark == dark { return }
+        resolver.Dark = dark
+        needsStyle = true
+        needsRepaint = true
+    }
+
+    /// Whether the page is shown in a dark color scheme.
+    public var IsDark: bool { return resolver.Dark }
+
     /// Resizes the viewport.
     public func SetViewportSize(_ size: draw.Size) {
         let widthChanged = self.size.Width != size.Width

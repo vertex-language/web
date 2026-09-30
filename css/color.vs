@@ -28,7 +28,30 @@ public func ParseColor(_ text: string) -> draw.Color? {
     if let packed = namedColors[name] {
         return draw.Color(uint8(packed >> 16), uint8((packed >> 8) & 0xFF), uint8(packed & 0xFF))
     }
+    if let system = systemColor(name) { return system }
     return nil
+}
+
+/// The accent color the system uses, which `AccentColor` is: set by the
+/// host from the platform's (macOS's is its blue by default).
+public var SystemAccent = draw.Color(0x00, 0x7A, 0xFF)
+
+/// The CSS system colors: the platform's accent, and the colors of the
+/// canvas, text, links and controls.
+func systemColor(_ name: string) -> draw.Color? {
+    switch name {
+    case "accentcolor": return SystemAccent
+    case "accentcolortext": return draw.Color.white
+    case "canvas", "field", "buttonface": return name == "buttonface" ? draw.Color(0xEF, 0xEF, 0xEF) : draw.Color.white
+    case "canvastext", "fieldtext", "buttontext", "highlighttext": return draw.Color.black
+    case "linktext": return draw.Color(0x00, 0x00, 0xEE)
+    case "visitedtext": return draw.Color(0x55, 0x1A, 0x8B)
+    case "graytext": return draw.Color(0x80, 0x80, 0x80)
+    case "highlight": return draw.Color(0xB3, 0xD4, 0xFC)
+    case "mark": return draw.Color(0xFF, 0xFF, 0x00)
+    case "marktext": return draw.Color.black
+    default: return nil
+    }
 }
 
 func parseHex(_ b: [uint8]) -> draw.Color? {

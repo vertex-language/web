@@ -94,6 +94,7 @@ public final class RuleSet {
     public var ImageURLs: [string] = []
     var mediaWidth: float32 = -1
     var mediaHeight: float32 = -1
+    var mediaDark = false
 
     public init() {}
 
@@ -235,14 +236,15 @@ public final class RuleSet {
     }
 
     /// Re-evaluates every @media rule for a viewport.
-    func setViewport(_ width: float32, _ height: float32) {
-        if width == mediaWidth && height == mediaHeight { return }
+    func setViewport(_ width: float32, _ height: float32, dark: bool = false) {
+        if width == mediaWidth && height == mediaHeight && dark == mediaDark { return }
         mediaWidth = width
         mediaHeight = height
+        mediaDark = dark
         for r in all {
             if !r.Media.isEmpty {
                 var on = true
-                for q in r.Media where on { on = mediaMatches(q, width: width, height: height) }
+                for q in r.Media where on { on = mediaMatches(q, width: width, height: height, dark: dark) }
                 r.enabled = on
             }
         }
@@ -401,14 +403,14 @@ final class Buckets {
 
 /// Whether a media query holds for a viewport: `screen`, `all`,
 /// `(min-width: N)`, `(max-width: N)`, `and`, `not`, and lists.
-func mediaMatches(_ query: string, width: float32, height: float32) -> bool {
+func mediaMatches(_ query: string, width: float32, height: float32, dark: bool = false) -> bool {
     for part in splitTop(query, on: 44) {
-        if mediaClauseMatches(part, width: width, height: height) { return true }
+        if mediaClauseMatches(part, width: width, height: height, dark: dark) { return true }
     }
     return false
 }
 
-func mediaClauseMatches(_ clause: string, width: float32, height: float32) -> bool {
+func mediaClauseMatches(_ clause: string, width: float32, height: float32, dark: bool = false) -> bool {
     let b = [uint8](clause.utf8)
     var i = 0
     var result = true
@@ -426,7 +428,7 @@ func mediaClauseMatches(_ clause: string, width: float32, height: float32) -> bo
                 i += 1
             }
             let inner = stringOf(b, start, i - 1)
-            var ok = mediaFeature(inner, width: width, height: height)
+            var ok = mediaFeature(inner, width: width, height: height, dark: dark)
             if negate { ok = !ok; negate = false }
             result = result && ok
             continue
@@ -451,7 +453,7 @@ func mediaClauseMatches(_ clause: string, width: float32, height: float32) -> bo
 /// or a feature on its own (`hover`). The page is on a screen with a
 /// fine pointer that hovers, in light mode, with no forced colors, no
 /// script, and motion allowed.
-func mediaFeature(_ text: string, width: float32, height: float32) -> bool {
+func mediaFeature(_ text: string, width: float32, height: float32, dark: bool = false) -> bool {
     let t = trimSpaces(text)
     if t.contains("<") || t.contains(">") || (t.contains("=") && !t.contains(":")) {
         return mediaRange(t, width: width, height: height)
@@ -474,7 +476,7 @@ func mediaFeature(_ text: string, width: float32, height: float32) -> bool {
     case "width": return value.isEmpty ? width > 0 : (mediaLength(value).map { width == $0 } ?? false)
     case "height": return value.isEmpty ? height > 0 : (mediaLength(value).map { height == $0 } ?? false)
     case "orientation": return value == (width >= height ? "landscape" : "portrait")
-    case "prefers-color-scheme": return value == "light"
+    case "prefers-color-scheme": return value == (dark ? "dark" : "light")
     // The engine runs no transitions or animations: motion is reduced,
     // and a page's reduced-motion rules show what its motion would.
     case "prefers-reduced-motion": return value.isEmpty || value == "reduce"
@@ -634,6 +636,9 @@ public final class StyleResolver {
     public var ViewportWidth: float32 = 800
     public var ViewportHeight: float32 = 600
     public var RootFontSize: float32 = 16
+    /// Whether the page is shown in a dark color scheme: what
+    /// `prefers-color-scheme` answers.
+    public var Dark: bool = false
     var inlineByText: [string: SplitDecls] = [:]
     var scratch: [StyleRule] = []
     var matchedScratch: [StyleRule] = []
@@ -737,8 +742,8 @@ public final class StyleResolver {
 
     /// The style of an element, given its parent's.
     public func Resolve(_ node: html.Node, parent: ComputedStyle?, context: selector.MatchContext) -> ComputedStyle {
-        UA.setViewport(ViewportWidth, ViewportHeight)
-        Author.setViewport(ViewportWidth, ViewportHeight)
+        UA.setViewport(ViewportWidth, ViewportHeight, dark: Dark)
+        Author.setViewport(ViewportWidth, ViewportHeight, dark: Dark)
         let root = parent == nil
         let base = parent ?? defaultStyle
         let style = ComputedStyle(inheriting: base)
