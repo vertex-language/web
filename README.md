@@ -116,6 +116,7 @@ _ = page.Handle(.keyDown(web.Key(Key: "Enter", Code: "Enter")))
 | `Configuration` | `BaseURL`, `BackgroundColor`, and the `Fetcher` resources come from. |
 | `SetViewportSize(_:)`, `ContentSize()` | The viewport, and the page's whole size. |
 | `Draw(into:width:height:scale:at:)` | Paint into premultiplied RGBA pixels. |
+| `DrawOver(_:into:width:height:scale:clip:at:)` | Paint only what the page paints over an element marked `data-viewport`, clipped: overlays put back over a box the host drew into (`ui/viewport`). |
 | `Handle(_:)` | Take an `Input`: `.handled` or `.ignored`. |
 | `NeedsRepaint()`, `DesiredCursor()` | What the host should do next. |
 | `NeedsAnimation()`, `Advance(time:)` | The caret blinks: keep frames coming while true. |
@@ -147,9 +148,13 @@ _ = page.Handle(.keyDown(web.Key(Key: "Enter", Code: "Enter")))
   corners, borders in every style, box shadows, text decorations,
   opacity, `z-index`, and a display list that scrolls without layout.
 - **Input**: hover and cursors, links, text editing in inputs and
-  textareas, check boxes, radios, selects, buttons, labels, `<details>`,
-  form submission, Tab focus, keyboard scrolling, text selection, copy
-  and paste.
+  textareas, check boxes, radios, selects, range sliders (dragged,
+  stepped with the keys, drawn in `accent-color`), buttons, labels,
+  `<details>`, form submission, Tab focus, keyboard scrolling, text
+  selection, copy and paste. Listeners get `pointerdown`, `pointermove`
+  and `pointerup` (`dom.PointerEvent`, with coordinates; a press's moves
+  and release go to the element it began on) and `wheel`
+  (`dom.WheelEvent`, with deltas), and may prevent their defaults.
 
 No JavaScript today. Scripting comes as an optional module, `web/script`
 over the `js` repository, that a program opts into; a page without it

@@ -35,3 +35,9 @@ import "web/dom"
 - and 4 more
 
 Part of the [`web`](https://github.com/vertex-language/web) repository.
+
+`KeyboardEvent` carries the modifiers held (`Shift`, `Control`, `Alt`,
+`Meta`) and `Repeat`. Text typed while a focused element that isn't a text
+control has the keyboard (a `tabindex` element: a terminal, a canvas) is
+dispatched to it as a `beforeinput` `InputEvent` whose `Data` is the text;
+markup takes it as `onBeforeInput`.

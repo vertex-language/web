@@ -24,17 +24,39 @@ public enum Input {
     case text(string)
 }
 
+/// The modifier keys held with a pointer, wheel or key input.
+public struct Modifiers: Equatable {
+    public var Shift: bool
+    public var Control: bool
+    public var Alt: bool
+    /// Command on a Mac, the Windows key elsewhere.
+    public var Meta: bool
+
+    public init(shift: bool = false, control: bool = false, alt: bool = false, meta: bool = false) {
+        Shift = shift
+        Control = control
+        Alt = alt
+        Meta = meta
+    }
+}
+
+/// No modifier held: what a Pointer or a Wheel has when none is given.
+public let noModifiers = Modifiers()
+
 /// A button pressed or released.
 public struct Pointer {
     public var Position: draw.Point
     public var Button: PointerButton
     /// 2 for the press of a double click, 3 for a triple.
     public var Clicks: int32
+    public var Modifiers: Modifiers
 
-    public init(_ position: draw.Point, button: PointerButton = PointerButton.primary, clicks: int32 = 1) {
+    public init(_ position: draw.Point, button: PointerButton = PointerButton.primary, clicks: int32 = 1,
+                modifiers: Modifiers? = nil) {
         Position = position
         Button = button
         Clicks = clicks
+        self.Modifiers = modifiers ?? noModifiers
     }
 }
 
@@ -43,10 +65,12 @@ public struct Pointer {
 public struct Wheel {
     public var Delta: draw.Point
     public var Precise: bool
+    public var Modifiers: Modifiers
 
-    public init(_ delta: draw.Point, precise: bool = false) {
+    public init(_ delta: draw.Point, precise: bool = false, modifiers: Modifiers? = nil) {
         Delta = delta
         Precise = precise
+        self.Modifiers = modifiers ?? noModifiers
     }
 }
 
@@ -94,7 +118,16 @@ extension Page {
         case .pointerMoved(let p):
             return pointerMoved(p)
         case .pointerDown(let e):
+            modifiers = e.Modifiers
             if !isInside(e.Position) { return .ignored }
+            update()
+            let target = hitAt(e.Position)?.Node
+            let button: int32 = e.Button == .primary ? 0 : (e.Button == .middle ? 1 : 2)
+            captured = target
+            if let t = target, !dispatch(dom.PointerEvent("pointerdown", X: e.Position.X, Y: e.Position.Y, Clicks: e.Clicks, Button: button, Pressed: true, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: t) {
+                // A listener took the press for its own (a drag).
+                return .handled
+            }
             if e.Button == .primary {
                 downClicks = e.Clicks
                 return pointerDown(e.Position, clicks: e.Clicks)
@@ -103,25 +136,51 @@ extension Page {
                 // A secondary press asks for the element's context menu.
                 update()
                 if let hit = hitAt(e.Position) {
-                    _ = dispatch(dom.MouseEvent("contextmenu", X: e.Position.X, Y: e.Position.Y), to: hit.Node)
+                    _ = dispatch(dom.MouseEvent("contextmenu", X: e.Position.X, Y: e.Position.Y, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: hit.Node)
                 }
             }
             return .handled
         case .pointerUp(let e):
+            modifiers = e.Modifiers
+            let button: int32 = e.Button == .primary ? 0 : (e.Button == .middle ? 1 : 2)
+            if let t = captured ?? hitAt(e.Position)?.Node {
+                _ = dispatch(dom.PointerEvent("pointerup", X: e.Position.X, Y: e.Position.Y, Button: button, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: t)
+            }
+            captured = nil
+            if let r = sliding {
+                sliding = nil
+                _ = dispatch(dom.Event("change"), to: r)
+                stateChanged()
+            }
             if e.Button == .primary { return pointerUp(e.Position) }
-            return .ignored
+            return .handled
         case .pointerLeft:
             pointer = nil
             setHovered(nil)
             return .handled
         case .wheel(let w):
+            modifiers = w.Modifiers
             if let p = pointer, !isInside(p) { return .ignored }
+            if let p = pointer {
+                update()
+                let step: float32 = w.Precise ? 1 : 40
+                if let t = hitAt(p)?.Node, !dispatch(dom.WheelEvent("wheel", X: p.X, Y: p.Y, DeltaX: -w.Delta.X * step, DeltaY: -w.Delta.Y * step, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: t) {
+                    return .handled
+                }
+            }
             return wheel(w.Delta, precise: w.Precise)
         case .keyDown(let k):
+            modifiers = Modifiers(shift: k.Shift, control: k.Control, alt: k.Alt, meta: k.Meta)
             return keyDown(k)
         case .text(let t):
             return typed(t)
         }
+    }
+
+    /// Tells the page which modifier keys are held now (a host's
+    /// "modifiers changed" event), for the mouse events that follow.
+    public func SetModifiers(_ m: Modifiers) {
+        modifiers = m
     }
 
     func isInside(_ p: draw.Point) -> bool {
@@ -132,6 +191,16 @@ extension Page {
 
     func pointerMoved(_ p: draw.Point) -> EventResult {
         pointer = p
+        if let r = sliding {
+            slide(r, to: p)
+            return .handled
+        }
+        if let c = captured {
+            _ = dispatch(dom.PointerEvent("pointermove", X: p.X, Y: p.Y, Pressed: true, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: c)
+        } else if isInside(p), let doc = Document, doc.HasEventListeners {
+            update()
+            if let t = hitAt(p)?.Node { _ = dispatch(dom.PointerEvent("pointermove", X: p.X, Y: p.Y, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: t) }
+        }
         if fieldSelecting, let f = focused {
             // Dragging in a field extends its selection from the anchor.
             update()
@@ -259,6 +328,14 @@ extension Page {
                     Focus(control)
                     return .handled
                 }
+                if type == "range" {
+                    if !control.HasAttribute("disabled") {
+                        Focus(control)
+                        sliding = control
+                        slide(control, to: p)
+                    }
+                    return .handled
+                }
                 if !control.HasAttribute("disabled") {
                     Focus(control)
                     clickInField(control, at: p, clicks: clicks)
@@ -290,6 +367,16 @@ extension Page {
             _ = Document?.ToggleAttribute(details, "open")
             return .handled
         }
+        // An element with a tabindex takes focus when it, or what is in
+        // it, is pressed.
+        var cur: html.Node? = node
+        while let n = cur {
+            if n.Kind == html.NodeKind.element && n.HasAttribute("tabindex") && !n.HasAttribute("disabled") {
+                Focus(n)
+                return .handled
+            }
+            cur = n.Parent
+        }
         Focus(nil)
         return .handled
     }
@@ -316,7 +403,7 @@ extension Page {
         // Listeners first: one may take the click for its own. The second
         // click of a double one is a dblclick too.
         let clicks = downClicks
-        let prevented = !dispatch(dom.MouseEvent("click", X: p.X, Y: p.Y, Clicks: clicks), to: node)
+        let prevented = !dispatch(dom.MouseEvent("click", X: p.X, Y: p.Y, Clicks: clicks, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: node)
         if clicks == 2 {
             _ = dispatch(dom.MouseEvent("dblclick", X: p.X, Y: p.Y, Clicks: 2), to: node)
         }
@@ -406,7 +493,8 @@ extension Page {
     // MARK: - Keys
 
     func keyDown(_ k: Key) -> EventResult {
-        if !dispatch(dom.KeyboardEvent("keydown", Key: k.Key, Code: k.Code), to: focused ?? Document?.Tree.ElementsByTagName("body").first) {
+        if !dispatch(dom.KeyboardEvent("keydown", Key: k.Key, Code: k.Code, Shift: k.Shift, Control: k.Control, Alt: k.Alt, Meta: k.Meta),
+                     to: focused ?? Document?.Tree.ElementsByTagName("body").first) {
             return .handled
         }
         if let f = focused, dom.IsTextControl(f) {
@@ -414,6 +502,26 @@ extension Page {
         }
         if let f = focused, f.TagName == "select" {
             return selectKey(f, k)
+        }
+        if let f = focused, f.TagName == "input" && dom.InputType(f) == "range" {
+            let rg = dom.Range(f)
+            let v = rg.Value(valueOf(f))
+            let step = rg.Step > 0 ? rg.Step : (rg.Max - rg.Min) / 100
+            var to = v
+            switch k.Code {
+            case "ArrowLeft", "ArrowDown": to = v - step
+            case "ArrowRight", "ArrowUp": to = v + step
+            case "PageDown": to = v - (rg.Max - rg.Min) / 10
+            case "PageUp": to = v + (rg.Max - rg.Min) / 10
+            case "Home": to = rg.Min
+            case "End": to = rg.Max
+            default: break
+            }
+            if to != v {
+                setValue(f, rg.Text(rg.Snap(to)))
+                _ = dispatch(dom.Event("change"), to: f)
+                return .handled
+            }
         }
         if k.Code == "Tab" {
             moveFocus(backwards: k.Shift)
@@ -509,11 +617,19 @@ extension Page {
     }
 
     func typed(_ text: string) -> EventResult {
-        guard let f = focused, dom.IsTextControl(f), !f.HasAttribute("disabled"), !f.HasAttribute("readonly") else { return .ignored }
         if text.isEmpty { return .ignored }
         let bytes = [uint8](text.utf8)
         // Control characters arrive as keys, not text.
-        if bytes.count == 1 && bytes[0] < 32 && bytes[0] != 10 { return .ignored }
+        if bytes.count == 1 && (bytes[0] < 32 || bytes[0] == 127) && bytes[0] != 10 { return .ignored }
+        // Text typed into something focused that isn't a text control (an
+        // element with a tabindex: a terminal, a canvas) is its to take, as
+        // beforeinput.
+        if let f = focused, !dom.IsTextControl(f) {
+            if isFunctionKeyText(bytes) { return .ignored }
+            _ = dispatch(dom.InputEvent("beforeinput", Value: "", Data: text), to: f)
+            return .handled
+        }
+        guard let f = focused, dom.IsTextControl(f), !f.HasAttribute("disabled"), !f.HasAttribute("readonly") else { return .ignored }
         var value = deleteFieldSelection(f)
         if f.TagName == "input", let max = f.GetAttribute("maxlength") {
             let mb = [uint8](max.utf8)
@@ -525,6 +641,12 @@ extension Page {
         fieldAnchor = caret
         setValue(f, value)
         return .handled
+    }
+
+    /// Whether typed text is a function key's private-use character (the
+    /// arrows and F-keys on a Mac, U+F700 to U+F8FF): a key, not text.
+    func isFunctionKeyText(_ b: [uint8]) -> bool {
+        return b.count == 3 && b[0] == 0xEF && (b[1] >= 0x9C && b[1] <= 0xA3)
     }
 
     /// Removes the field's selected text, if any, leaving the caret at
@@ -792,5 +914,25 @@ extension Page {
             cur = n.Parent
         }
         return out
+    }
+}
+
+extension Page {
+    /// slide sets a range input's value from where the pointer is over its
+    /// track.
+    func slide(_ control: html.Node, to p: draw.Point) {
+        update()
+        guard let box = builder.byNode[control.Id] else { return }
+        let pos = layout.PagePosition(box)
+        let thumb: float32 = min(16, box.Height)
+        let w = box.Width - thumb
+        if w <= 0 { return }
+        let f = float64(max(0, min(1, (p.X + scroll.X - pos.x - thumb / 2) / w)))
+        let rg = dom.Range(control)
+        let text = rg.Text(rg.Snap(rg.Min + f * (rg.Max - rg.Min)))
+        if text != valueOf(control) {
+            setValue(control, text)
+            needsLayout = true
+        }
     }
 }

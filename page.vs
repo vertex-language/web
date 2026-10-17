@@ -109,6 +109,11 @@ public final class Page {
     var hovered: html.Node? = nil
     var focused: html.Node? = nil
     var pressed: html.Node? = nil
+    /// The <input type=range> being dragged, if one is.
+    var sliding: html.Node? = nil
+    /// The element a press began on: pointermove and pointerup go to it
+    /// until the release, wherever the pointer goes.
+    var captured: html.Node? = nil
     var caret: int = 0
     var values: [int64: string] = [:]
     var caretVisible = true
@@ -123,6 +128,9 @@ public final class Page {
     var cursor: Cursor = Cursor.default
     /// Where the pointer is, or nil when it is not over the page.
     var pointer: draw.Point? = nil
+    /// The modifier keys held, as the last input said: what mouse and
+    /// wheel events report.
+    var modifiers = Modifiers()
     var baseURL: string = ""
     var title: string = ""
 
@@ -251,6 +259,9 @@ public final class Page {
         needsStyle = true
         needsRepaint = true
     }
+
+    /// The stylesheets the program gave (SetStyleSheets), in order.
+    public var ProgramStyleSheets: [string] { return programSheets }
 
     /// Adds a stylesheet: its rules, and the fonts its @font-face rules
     /// name, registered from the files they point at.
@@ -575,6 +586,37 @@ public final class Page {
     }
 
     // MARK: - Drawing
+
+    /// DrawOver paints only what the page paints over an element marked
+    /// data-viewport (what comes after it in paint order), clipped to
+    /// `clip` in device pixels: after a program has drawn into that
+    /// element's box, this puts the page's overlays back on top. Answers
+    /// false when the element isn't in the display list.
+    @discardableResult
+    public func DrawOver(_ node: html.Node, into pixels: inout [uint8], width: int32, height: int32, scale: float32,
+                         clip: draw.IRect, at origin: draw.Point = draw.Point.zero) -> bool {
+        update()
+        let list = displayList
+        var at = -1
+        for i in 0..<list.count where list[i].Kind == .mark && list[i].Node == node.Id {
+            at = i
+            break
+        }
+        if at < 0 { return false }
+        var rest: [paint.PaintItem] = []
+        for i in (at + 1)..<list.count { rest.append(list[i]) }
+        if rest.isEmpty { return true }
+        let viewRect = draw.Rect(origin.X, origin.Y, size.Width, size.Height).Snapped(scale: scale)
+        let sx = scroll.X
+        let sy = scroll.Y
+        draw.WithCanvas(&pixels, width: width, height: height) { c in
+            var canvas = c
+            canvas.ClipTo(viewRect)
+            canvas.ClipTo(clip)
+            paint.Rasterize(rest, on: canvas, scale: scale, originX: float32(viewRect.X), originY: float32(viewRect.Y), scrollX: sx, scrollY: sy)
+        }
+        return true
+    }
 
     /// Paints the page into premultiplied RGBA pixels, `width` by `height`
     /// device pixels, with its viewport's top-left corner at `origin` (in

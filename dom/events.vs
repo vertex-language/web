@@ -32,17 +32,35 @@ public class Event {
     public func StopPropagation() { stopped = true }
 }
 
-/// A pointer press and release on the same element, and its kin.
-public final class MouseEvent: Event {
+/// A pointer press and release on the same element, and its kin:
+/// pointerdown, pointermove and pointerup too (a press's moves and its
+/// release go to the element it began on).
+public class MouseEvent: Event {
     /// Where, in CSS pixels from the viewport's corner.
     public let X: float32
     public let Y: float32
     public let Clicks: int32
+    /// 0 primary, 1 middle, 2 secondary, as the DOM numbers them.
+    public let Button: int32
+    /// Whether a button is held (for pointermove).
+    public let Pressed: bool
+    /// The modifier keys held.
+    public let Shift: bool
+    public let Control: bool
+    public let Alt: bool
+    public let Meta: bool
 
-    public init(_ type: string, X: float32 = 0, Y: float32 = 0, Clicks: int32 = 1, bubbles: bool = true) {
+    public init(_ type: string, X: float32 = 0, Y: float32 = 0, Clicks: int32 = 1, Button: int32 = 0, Pressed: bool = false,
+                Shift: bool = false, Control: bool = false, Alt: bool = false, Meta: bool = false, bubbles: bool = true) {
         self.X = X
         self.Y = Y
         self.Clicks = Clicks
+        self.Button = Button
+        self.Pressed = Pressed
+        self.Shift = Shift
+        self.Control = Control
+        self.Alt = Alt
+        self.Meta = Meta
         super.init(type, bubbles: bubbles)
     }
 }
@@ -61,14 +79,27 @@ public final class InputEvent: Event {
     }
 }
 
-/// A key, as the W3C names keys and codes.
+/// A key, as the W3C names keys and codes, and the modifiers held with it.
 public final class KeyboardEvent: Event {
     public let Key: string
     public let Code: string
+    public let Shift: bool
+    public let Control: bool
+    public let Alt: bool
+    /// Command on a Mac, the Windows key elsewhere.
+    public let Meta: bool
+    /// Whether the key is held and repeating.
+    public let Repeat: bool
 
-    public init(_ type: string, Key: string, Code: string) {
+    public init(_ type: string, Key: string, Code: string, Shift: bool = false, Control: bool = false, Alt: bool = false,
+                Meta: bool = false, Repeat: bool = false) {
         self.Key = Key
         self.Code = Code
+        self.Shift = Shift
+        self.Control = Control
+        self.Alt = Alt
+        self.Meta = Meta
+        self.Repeat = Repeat
         super.init(type)
     }
 }
@@ -91,10 +122,42 @@ public final class FocusEvent: Event {
     }
 }
 
-/// The events of other kinds this document knows by name: pointer,
-/// wheel, composition, drag, and an element's box changing size.
-public final class PointerEvent: Event {}
-public final class WheelEvent: Event {}
+/// The events of other kinds this document knows by name: pointer (a
+/// MouseEvent, as the DOM has it), wheel, composition, drag, and an
+/// element's box changing size.
+public final class PointerEvent: MouseEvent {
+    public override init(_ type: string, X: float32 = 0, Y: float32 = 0, Clicks: int32 = 1, Button: int32 = 0, Pressed: bool = false,
+                         Shift: bool = false, Control: bool = false, Alt: bool = false, Meta: bool = false, bubbles: bool = true) {
+        super.init(type, X: X, Y: Y, Clicks: Clicks, Button: Button, Pressed: Pressed,
+                   Shift: Shift, Control: Control, Alt: Alt, Meta: Meta, bubbles: bubbles)
+    }
+}
+public final class WheelEvent: Event {
+    /// Where the pointer is, in CSS pixels from the viewport's corner.
+    public let X: float32
+    public let Y: float32
+    /// How far, in CSS pixels; positive DeltaY scrolls down (the DOM's sense).
+    public let DeltaX: float32
+    public let DeltaY: float32
+    /// The modifier keys held.
+    public let Shift: bool
+    public let Control: bool
+    public let Alt: bool
+    public let Meta: bool
+
+    public init(_ type: string, X: float32 = 0, Y: float32 = 0, DeltaX: float32 = 0, DeltaY: float32 = 0,
+                Shift: bool = false, Control: bool = false, Alt: bool = false, Meta: bool = false) {
+        self.X = X
+        self.Y = Y
+        self.DeltaX = DeltaX
+        self.DeltaY = DeltaY
+        self.Shift = Shift
+        self.Control = Control
+        self.Alt = Alt
+        self.Meta = Meta
+        super.init(type)
+    }
+}
 public final class CompositionEvent: Event {}
 public final class DragEvent: Event {}
 public final class LayoutEvent: Event {}

@@ -377,11 +377,63 @@ func testSVGImages() async {
     }
 }
 
+@MainActor
+func testRange() {
+    print("Range inputs and pointer events")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(300, 120))
+    view.LoadHTML("""
+    <style>body { margin: 0 } input { position: absolute; left: 10px; top: 10px; width: 116px; height: 20px; accent-color: rgb(200, 20, 20) }
+    #pad { position: absolute; left: 10px; top: 60px; width: 100px; height: 40px }</style>
+    <input type=range id=r min=0 max=10 value=3><div id=pad></div>
+    """)
+    var pixels = [uint8](repeating: 0, count: 300 * 120 * 4)
+    view.Draw(into: &pixels, width: 300, height: 120, scale: 1)
+    let doc = view.Document!
+    let r = view.QuerySelector("#r")!
+    var inputs: [string] = []
+    var changes = 0
+    _ = doc.AddEventListener(r, "input", { e in if let i = e as? dom.InputEvent { inputs.append(i.Value) } })
+    _ = doc.AddEventListener(r, "change", { _ in changes += 1 })
+    check(view.ValueOf(r) == "3", "a range starts at its value")
+    // The track runs from 8px in (half the 16px thumb) to 8px from the end:
+    // 100px for 0…10.
+    let filled = pixelAt(pixels, 300, 30, 20)
+    check(filled.R > 150 && filled.G < 80, "the track's filled part is in the accent color (got \(filled))")
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(18 + 70, 20))))
+    check(view.ValueOf(r) == "7" && inputs.last == "7", "pressing on the track jumps there (got \(view.ValueOf(r)))")
+    _ = view.Handle(.pointerMoved(draw.Point(18 + 100, 20)))
+    check(view.ValueOf(r) == "10", "dragging moves it, past the end it stops at max (got \(view.ValueOf(r)))")
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(18 + 100, 20))))
+    check(changes == 1, "letting go is one change event")
+    _ = view.Handle(.keyDown(web.Key(Key: "ArrowLeft", Code: "ArrowLeft")))
+    check(view.ValueOf(r) == "9" && changes == 2, "the arrow keys step it")
+    // Pointer events with coordinates, captured for the press.
+    let pad = view.QuerySelector("#pad")!
+    var trail: [string] = []
+    _ = doc.AddEventListener(pad, "pointerdown", { e in
+        if let m = e as? dom.MouseEvent { trail.append("down \(Int(m.X))") }
+        e.PreventDefault()
+    })
+    _ = doc.AddEventListener(pad, "pointermove", { e in if let m = e as? dom.MouseEvent, m.Pressed { trail.append("move \(Int(m.X))") } })
+    _ = doc.AddEventListener(pad, "pointerup", { e in if let m = e as? dom.MouseEvent { trail.append("up \(Int(m.X))") } })
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(20, 80))))
+    _ = view.Handle(.pointerMoved(draw.Point(250, 10)))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(250, 10))))
+    check(trail == ["down 20", "move 250", "up 250"], "a press's moves and release reach the element it began on, outside it too (got \(trail))")
+    var wheel: float32 = 0
+    _ = doc.AddEventListener(pad, "wheel", { e in if let w = e as? dom.WheelEvent { wheel = w.DeltaY } })
+    _ = view.Handle(.pointerMoved(draw.Point(30, 80)))
+    _ = view.Handle(.wheel(web.Wheel(draw.Point(0, -1))))
+    check(wheel == 40, "the wheel reaches the element under the pointer (got \(wheel))")
+}
+
 func main() async -> int32 {
     testTextFeatures()
     testPageInput()
     testJournal()
     testEvents()
+    testRange()
     await testDeferredImages()
     await testSVGImages()
     if failures == 0 {

@@ -36,6 +36,8 @@ public enum ReplacedKind: Equatable {
     case radio
     case select
     case progress
+    /// <input type=range>: a track and a thumb.
+    case range
     case placeholder
     /// An inline <svg>, drawn from its shapes (web/svg).
     case svg

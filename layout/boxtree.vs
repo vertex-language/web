@@ -240,7 +240,12 @@ public final class BoxTreeBuilder {
                 let face = style.Face
                 box.IntrinsicWidth = face.Measure(box.Text) + 20
                 box.IntrinsicHeight = face.LineHeight + 6
-            case "range", "color", "file", "date", "time", "month", "week", "datetime-local":
+            case "range":
+                box.Replaced = .range
+                box.Text = Values[node.Id] ?? (node.GetAttribute("value") ?? "")
+                box.IntrinsicWidth = 150
+                box.IntrinsicHeight = 20
+            case "color", "file", "date", "time", "month", "week", "datetime-local":
                 box.Replaced = .placeholder
                 box.IntrinsicWidth = 150
                 box.IntrinsicHeight = style.Face.LineHeight

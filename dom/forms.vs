@@ -147,3 +147,52 @@ public func FormData(_ form: html.Node, submitter: html.Node?, value: (html.Node
     }
     return fields
 }
+
+/// Range is an <input type=range>'s bounds: min, max and step as its
+/// attributes say (0, 100 and 1 when they don't, as HTML's defaults);
+/// step 0 for "any".
+public struct Range {
+    public var Min: float64
+    public var Max: float64
+    public var Step: float64
+
+    public init(_ node: html.Node) {
+        Min = float64(node.GetAttribute("min") ?? "") ?? 0
+        Max = float64(node.GetAttribute("max") ?? "") ?? 100
+        if Max < Min { Max = Min }
+        let st = node.GetAttribute("step") ?? ""
+        Step = st == "any" ? 0 : (float64(st) ?? 1)
+        if Step < 0 { Step = 1 }
+    }
+
+    /// Value is text read as the range's value: clamped, snapped to a step
+    /// from Min, and the midpoint when it isn't a number (HTML's default).
+    public func Value(_ text: string) -> float64 {
+        let v = float64(text) ?? (Min + (Max - Min) / 2)
+        return Snap(v)
+    }
+
+    /// Snap clamps v to the range and onto its steps.
+    public func Snap(_ v: float64) -> float64 {
+        var x = v < Min ? Min : (v > Max ? Max : v)
+        if Step > 0 {
+            x = Min + ((x - Min) / Step).rounded() * Step
+            if x > Max { x -= Step }
+        }
+        return x
+    }
+
+    /// Fraction is how far along the track v is, 0…1.
+    public func Fraction(_ v: float64) -> float64 {
+        return Max > Min ? (v - Min) / (Max - Min) : 0
+    }
+
+    /// Text is v as a control's value: no trailing zeros.
+    public func Text(_ v: float64) -> string {
+        if v == v.rounded() && abs(v) < 1e15 { return "\(Int(v))" }
+        var s = "\(v)"
+        if s.contains("e") { return s }
+        while s.hasSuffix("0") { s.removeLast() }
+        return s
+    }
+}

@@ -99,6 +99,9 @@ public final class ComputedStyle {
 
     // Inherited.
     public var Color: draw.Color = draw.Color.black
+    /// accent-color: what checked boxes, sliders and progress bars are
+    /// drawn in; nil for auto (the system's accent).
+    public var AccentColor: draw.Color? = nil
     public var FontFamilies: [string] = ["system-ui"]
     public var FontSize: float32 = 16
     public var FontWeight: int32 = 400
@@ -139,6 +142,7 @@ public final class ComputedStyle {
     /// other property at its initial value.
     public init(inheriting parent: ComputedStyle) {
         Color = parent.Color
+        AccentColor = parent.AccentColor
         FontFamilies = parent.FontFamilies
         FontSize = parent.FontSize
         FontWeight = parent.FontWeight

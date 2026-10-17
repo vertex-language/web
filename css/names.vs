@@ -37,7 +37,7 @@ let unappliedNames: [string] = [
     "-webkit-tap-highlight-color", "touch-action", "overscroll-behavior", "scrollbar-width",
     "scrollbar-color", "list-style-image", "font-kerning", "text-align-last", "text-justify",
     "font-variant-numeric", "font-variant-ligatures", "font-optical-sizing", "color-scheme",
-    "accent-color", "caret-color", "border-inline", "border-block", "min-inline-size",
+    "caret-color", "border-inline", "border-block", "min-inline-size",
     "max-inline-size", "inline-size", "block-size", "place-content", "place-self", "justify-items",
     "justify-self", "grid", "grid-template", "grid-template-areas"
 ]

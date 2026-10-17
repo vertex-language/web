@@ -33,6 +33,9 @@ public enum PaintKind: Equatable {
     /// the filter is on.
     case layer
     case unlayer
+    /// Where an element marked data-viewport is painted: what comes after
+    /// is drawn over it. Node is the element's id. Paints nothing.
+    case mark
 }
 
 /// One thing to paint, in CSS pixels on the page: a filled rectangle, a
@@ -66,6 +69,9 @@ public struct PaintItem {
     public var FillNone: bool
     /// A layer's blur radius, in CSS pixels.
     public var Blur: float32
+
+    /// For a mark: the element's node id.
+    public var Node: int64 = 0
 
     init(_ kind: PaintKind) {
         Kind = kind
@@ -333,6 +339,14 @@ final class DisplayListBuilder {
     func paintBackgroundAndBorderIfVisible(_ box: layout.Box, x: float32, y: float32, skipBackground: Int) {
         if box.Style.Visibility == .visible && box.Id != skipBackground {
             paintBackgroundAndBorder(box, x: x, y: y)
+        }
+        // A box a program draws into itself (ui/viewport): what the page
+        // paints after this goes over the program's pixels.
+        if let n = box.Node, n.HasAttribute("data-viewport") {
+            var m = PaintItem(.mark)
+            m.Rect = draw.Rect(x, y, box.Width, box.Height)
+            m.Node = n.Id
+            items.append(m)
         }
     }
 
@@ -719,6 +733,24 @@ final class DisplayListBuilder {
             if fraction > 0 {
                 items.append(.fill(draw.Rect(x, y, box.Width * fraction, box.Height), color(draw.Color(0, 117, 255)), draw.Radii(all: box.Height / 2)))
             }
+        case .range:
+            guard let node = box.Node else { break }
+            let rg = dom.Range(node)
+            let f = float32(rg.Fraction(rg.Value(box.Text)))
+            let accent = color(s.AccentColor ?? draw.Color(0, 117, 255))
+            let thumb: float32 = min(16, box.Height)
+            let cy = y + box.Height / 2
+            let x0 = x + thumb / 2, w = box.Width - thumb
+            let track = draw.Rect(x0, cy - 2, w, 4)
+            items.append(.fill(track, color(draw.Color(128, 128, 140, 90)), draw.Radii(all: 2)))
+            if f > 0 { items.append(.fill(draw.Rect(x0, cy - 2, w * f, 4), accent, draw.Radii(all: 2))) }
+            let tx = x0 + w * f - thumb / 2
+            let knob = draw.Rect(tx, cy - thumb / 2, thumb, thumb)
+            let ring = draw.Rect(tx - 1, cy - thumb / 2 - 1, thumb + 2, thumb + 2)
+            items.append(.fill(ring, color(draw.Color(0, 0, 0, isFocused ? 90 : 50)), draw.Radii(all: thumb / 2 + 1)))
+            items.append(.fill(knob, color(draw.Color.white), draw.Radii(all: thumb / 2)))
+            let dot = draw.Rect(tx + thumb * 0.3, cy - thumb * 0.2, thumb * 0.4, thumb * 0.4)
+            items.append(.fill(dot, accent, draw.Radii(all: thumb * 0.2)))
         case .placeholder:
             // Video, canvas, iframe and the rest draw nothing until they
             // have something to show, as a browser's do before loading.
@@ -917,6 +949,8 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
                 layer.Composite(onto: canvas)
                 layer.Free()
             }
+        case .mark:
+            break
         case .clip:
             clips.append(canvas.Clip)
             canvas.ClipTo(device(item.Rect))
@@ -964,7 +998,7 @@ public func SelectedPart(_ f: layout.Fragment, _ node: html.Node, _ range: (star
 /// with the code.
 public func ReadsAttribute(_ name: string) -> bool {
     switch name {
-    case "alt", "max", "placeholder", "value", "checked":
+    case "alt", "max", "min", "step", "placeholder", "value", "checked", "data-viewport":
         return true
     default:
         return false

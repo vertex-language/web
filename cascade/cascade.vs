@@ -1132,6 +1132,7 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
         }
     case .outlineWidth: if let p = pixels(v, s, ctx) { s.OutlineWidth = p }
     case .outlineColor: s.OutlineColor = colorOf(v)
+    case .accentColor: s.AccentColor = colorOf(v)
     case .fill:
         s.FillNone = false
         s.FillCurrent = false
@@ -1665,6 +1666,7 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .boxShadow: b.Shadows = a.Shadows
     case .outlineWidth: b.OutlineWidth = a.OutlineWidth
     case .outlineColor: b.OutlineColor = a.OutlineColor
+    case .accentColor: b.AccentColor = a.AccentColor
     case .verticalAlign: b.VerticalAlign = a.VerticalAlign
     case .textDecorationLine: b.TextDecoration = a.TextDecoration
     case .textDecorationColor: b.TextDecorationColor = a.TextDecorationColor

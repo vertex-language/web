@@ -57,6 +57,7 @@ public enum Prop: int32 {
     case filter
     case outlineWidth
     case outlineColor
+    case accentColor
     case verticalAlign
     case textDecorationLine
     case textDecorationColor
@@ -196,7 +197,7 @@ let propNames: [string: Prop] = [
     "background-color": .backgroundColor, "background-image": .backgroundImage, "opacity": .opacity,
     "background-repeat": .backgroundRepeat, "background-size": .backgroundSize, "background-position": .backgroundPosition,
     "overflow-x": .overflowX, "overflow-y": .overflowY, "box-shadow": .boxShadow, "filter": .filter, "-webkit-filter": .filter,
-    "outline-width": .outlineWidth, "outline-color": .outlineColor,
+    "outline-width": .outlineWidth, "outline-color": .outlineColor, "accent-color": .accentColor,
     "vertical-align": .verticalAlign, "text-decoration-line": .textDecorationLine,
     "text-decoration-color": .textDecorationColor,
     "flex-direction": .flexDirection, "flex-wrap": .flexWrap, "justify-content": .justifyContent,
@@ -434,7 +435,7 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
          "text-size-adjust", "-webkit-text-size-adjust", "-webkit-tap-highlight-color", "touch-action",
          "overscroll-behavior", "scrollbar-width", "scrollbar-color", "list-style-image", "font-kerning",
          "text-align-last", "text-justify", "font-variant-numeric", "font-variant-ligatures",
-         "font-optical-sizing", "color-scheme", "accent-color", "caret-color",
+         "font-optical-sizing", "color-scheme", "caret-color",
          "border-inline", "border-block", "min-inline-size", "max-inline-size", "inline-size", "block-size",
          "place-content", "place-self", "justify-items", "justify-self", "grid", "grid-template",
          "grid-template-areas":
@@ -1142,7 +1143,7 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
     case .borderTopStyle, .borderRightStyle, .borderBottomStyle, .borderLeftStyle:
         return parseBorderStyle(t)
     case .borderTopColor, .borderRightColor, .borderBottomColor, .borderLeftColor,
-         .backgroundColor, .color, .textDecorationColor, .outlineColor:
+         .backgroundColor, .color, .textDecorationColor, .outlineColor, .accentColor:
         if let m = parseColorAt(tokens, 0) { return m.0 }
         return nil
     case .fill:
