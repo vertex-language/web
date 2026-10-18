@@ -330,6 +330,9 @@ extension Layout {
         }
         box.Height = clampHeight(box, h, cbHeight: cb.Height)
         box.ContentHeight = contentHeight
+        // A flex or grid item with position: relative is drawn shifted by
+        // its insets, as a block is.
+        applyRelativeOffsets(box, cbWidth: cb.Width, cbHeight: cb.Height)
         if box.Style.IsPositioned {
             layoutPositioned(box, cb: ContainingBlock(width: box.PaddingBoxWidth, height: box.PaddingBoxHeight))
         }

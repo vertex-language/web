@@ -431,6 +431,9 @@ func testPositioning() {
     let b = r.box("b")!
     check(b.OffsetX == 8 && b.OffsetY == 5, "relative offsets are kept aside (got \(b.OffsetX) \(b.OffsetY))")
     check(r.rect("c")!.Y == 20, "relative positioning leaves the flow alone")
+
+    guard let fr = layoutOf("<body style='margin:0'><div style='display:flex'><div id=fa style='position:relative;left:60px;width:80px;height:10px'></div><div id=fb style='width:80px;height:10px'></div></div></body>") else { check(false, "layout"); return }
+    check(fr.box("fa")!.OffsetX == 60 && fr.rect("fb")!.X == 80, "a flex item is shifted by its relative insets, its place kept (got \(fr.box("fa")!.OffsetX))")
 }
 
 // MARK: - The view

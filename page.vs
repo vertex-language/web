@@ -664,6 +664,14 @@ public final class Page {
         return builder.byNode[node.Id]
     }
 
+    /// Where an element's border box is in the page's view, scrolled as
+    /// it is shown; nil before it is laid out, or when it isn't.
+    public func BoundsOf(_ node: html.Node) -> draw.Rect? {
+        guard let box = BoxFor(node) else { return nil }
+        let p = layout.PagePosition(box)
+        return draw.Rect(p.x - scroll.X, p.y - scroll.Y, box.Width, box.Height)
+    }
+
     /// The root of the layout tree.
     public var RootBox: layout.Box? {
         update()
