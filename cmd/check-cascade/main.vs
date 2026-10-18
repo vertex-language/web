@@ -229,6 +229,7 @@ func testCustomProperties() {
       .case { margin-top: var(--Case); margin-bottom: var(--case, 1px); }
       .imp { width: var(--gap) !important; }
       .border { border: 2px solid var(--fg); }
+      .side { border-top: 3px solid var(--fg); }
     </style>
     """
     let card = styleOf(sheet + "<div class=card>x</div>", ".card")
@@ -249,6 +250,8 @@ func testCustomProperties() {
     check(styleOf(sheet + "<div style='--gap: 3px; width: var(--gap)'>x</div>", "div")?.Width == Length.px(3), "the style attribute declares and reads custom properties")
     let b = styleOf(sheet + "<div class=border>x</div>", ".border")
     check(b?.BorderTopColor == draw.Color(1, 2, 3) && b?.BorderTopWidth == 2, "var() inside the border shorthand")
+    let side = styleOf(sheet + "<div class=side>x</div>", ".side")
+    check(side?.BorderTopColor == draw.Color(1, 2, 3) && side?.BorderTopWidth == 3 && side?.BorderBottomWidth == 0, "var() inside one side's border shorthand")
 }
 
 func testColorScheme() {

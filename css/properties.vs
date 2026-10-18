@@ -105,6 +105,7 @@ public enum Prop: int32 {
     case listStylePosition
     case cursor
     case visibility
+    case scrollbarWidth
     case borderCollapse
     case borderSpacing
     case tabSize
@@ -211,7 +212,7 @@ let propNames: [string: Prop] = [
     "text-transform": .textTransform, "text-indent": .textIndent, "letter-spacing": .letterSpacing,
     "word-spacing": .wordSpacing, "white-space": .whiteSpace, "list-style-type": .listStyleType,
     "overflow-wrap": .overflowWrap, "word-wrap": .overflowWrap, "word-break": .wordBreak, "text-overflow": .textOverflow,
-    "list-style-position": .listStylePosition, "cursor": .cursor, "visibility": .visibility,
+    "list-style-position": .listStylePosition, "cursor": .cursor, "visibility": .visibility, "scrollbar-width": .scrollbarWidth,
     "border-collapse": .borderCollapse, "border-spacing": .borderSpacing, "tab-size": .tabSize,
     "content": .content, "fill": .fill,
 ]
@@ -433,7 +434,7 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
          "break-inside", "font-display", "text-shadow", "mix-blend-mode", "background-clip",
          "background-origin", "outline-offset", "outline-style", "border-image", "box-decoration-break",
          "text-size-adjust", "-webkit-text-size-adjust", "-webkit-tap-highlight-color", "touch-action",
-         "overscroll-behavior", "scrollbar-width", "scrollbar-color", "list-style-image", "font-kerning",
+         "overscroll-behavior", "scrollbar-color", "list-style-image", "font-kerning",
          "text-align-last", "text-justify", "font-variant-numeric", "font-variant-ligatures",
          "font-optical-sizing", "color-scheme", "caret-color",
          "border-inline", "border-block", "min-inline-size", "max-inline-size", "inline-size", "block-size",
@@ -500,6 +501,12 @@ func longhandsOf(_ name: string) -> [Prop] {
     case "border-style": return borderStyleProps
     case "border-color": return borderColorProps
     case "border": return borderWidthProps + borderStyleProps + borderColorProps
+    // One side's width, style and color: what var() in border-top waits
+    // to expand into.
+    case "border-top": return [borderWidthProps[0], borderStyleProps[0], borderColorProps[0]]
+    case "border-right": return [borderWidthProps[1], borderStyleProps[1], borderColorProps[1]]
+    case "border-bottom": return [borderWidthProps[2], borderStyleProps[2], borderColorProps[2]]
+    case "border-left": return [borderWidthProps[3], borderStyleProps[3], borderColorProps[3]]
     case "border-radius": return [.borderTopLeftRadius, .borderTopRightRadius, .borderBottomRightRadius, .borderBottomLeftRadius]
     case "background": return [.backgroundColor, .backgroundImage, .backgroundRepeat, .backgroundSize, .backgroundPosition]
     case "overflow": return [.overflowX, .overflowY]
@@ -1343,6 +1350,9 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
         case "visible", "hidden", "collapse": return .keyword(kw)
         default: return nil
         }
+    case .scrollbarWidth:
+        if kw == "auto" || kw == "thin" || kw == "none" { return .keyword(kw) }
+        return nil
     case .borderCollapse:
         if kw == "collapse" || kw == "separate" { return .keyword(kw) }
         return nil

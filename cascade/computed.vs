@@ -120,6 +120,9 @@ public final class ComputedStyle {
     public var ListStylePosition: ListStylePosition = .outside
     public var Cursor: CursorKind = .auto
     public var Visibility: Visibility = .visible
+    /// scrollbar-width: none: a scroll container that scrolls without
+    /// showing where it is.
+    public var ScrollbarHidden = false
     public var BorderCollapse: BorderCollapse = .separate
     public var BorderSpacing: float32 = 2
     public var TabSize: int32 = 8

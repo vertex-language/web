@@ -428,7 +428,25 @@ func testRange() {
     check(wheel == 40, "the wheel reaches the element under the pointer (got \(wheel))")
 }
 
+@MainActor
+func testStacking() {
+    print("Hit testing follows paint order")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(300, 200))
+    view.LoadHTML("""
+    <style>body { margin: 0 } .fill { position: absolute; left: 0; top: 0; right: 0; bottom: 0 }
+    #raised { z-index: 5 }</style>
+    <div class=fill id=under><div class=fill id=inner></div></div>
+    <div class=fill id=over><button id=b style="position: absolute; left: 10px; top: 10px; width: 50px; height: 20px">ok</button></div>
+    """)
+    var pixels = [uint8](repeating: 0, count: 300 * 200 * 4)
+    view.Draw(into: &pixels, width: 300, height: 200, scale: 1)
+    check(view.ElementAt(draw.Point(100, 100))?.Id == view.QuerySelector("#over")!.Id, "of two positioned siblings, the later one is on top")
+    check(view.ElementAt(draw.Point(20, 15))?.Id == view.QuerySelector("#b")!.Id, "and what is in it takes the click")
+}
+
 func main() async -> int32 {
+    testStacking()
     testTextFeatures()
     testPageInput()
     testJournal()

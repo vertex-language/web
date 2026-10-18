@@ -34,7 +34,7 @@ let unappliedNames: [string] = [
     "page-break-after", "break-inside", "font-display", "text-shadow", "mix-blend-mode",
     "background-clip", "background-origin", "outline-offset", "outline-style", "border-image",
     "box-decoration-break", "text-size-adjust", "-webkit-text-size-adjust",
-    "-webkit-tap-highlight-color", "touch-action", "overscroll-behavior", "scrollbar-width",
+    "-webkit-tap-highlight-color", "touch-action", "overscroll-behavior",
     "scrollbar-color", "list-style-image", "font-kerning", "text-align-last", "text-justify",
     "font-variant-numeric", "font-variant-ligatures", "font-optical-sizing", "color-scheme",
     "caret-color", "border-inline", "border-block", "min-inline-size",

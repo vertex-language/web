@@ -41,6 +41,19 @@ func at(_ p: [uint8], _ x: int32, _ y: int32, size: int32 = 20) -> (r: uint8, g:
 }
 
 func main() -> int32 {
+    print("Strokes")
+    // Lucide's form: the stroke on the <svg>, fill none, round ends.
+    let lucide = "<svg viewBox='0 0 20 20' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M4 10h12'/><line x1='10' y1='4' x2='10' y2='16'/><circle cx='10' cy='10' r='8'/></svg>"
+    var sp = render(lucide)
+    check(at(sp, 6, 10).g > 100 && at(sp, 6, 10).r == 0, "a stroked path draws in the current color")
+    check(at(sp, 10, 6).a > 200, "so does a <line>")
+    check(at(sp, 18, 10).a > 200 && at(sp, 13, 13).a == 0, "a circle's stroke is a ring, not a disc")
+    check(at(sp, 3, 10).a > 120, "round caps reach past the path's end")
+    sp = render("<svg viewBox='0 0 20 20'><polyline points='2,2 18,2 18,18' fill='none' stroke='#f00' stroke-width='2'/></svg>")
+    check(at(sp, 10, 2).r > 200 && at(sp, 10, 10).a == 0, "a polyline's stroke stays open")
+    sp = render("<svg viewBox='0 0 20 20'><rect x='4' y='4' width='12' height='12' fill='#00f' stroke='#f00' stroke-width='2' stroke-opacity='0.5'/></svg>")
+    check(at(sp, 10, 10).b > 200 && at(sp, 4, 10).r > 100 && at(sp, 4, 10).r < 200, "fill and a half-opaque stroke over it")
+
     print("Sizes")
     var s = svg.IntrinsicSize(svgNode("<svg width=32 height=16></svg>"))
     check(s.width == 32 && s.height == 16, "width and height attributes")

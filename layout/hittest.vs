@@ -32,7 +32,9 @@ public func HitTest(_ box: Box, _ px: float32, _ py: float32, originX: float32, 
         while i >= 0 {
             let p = box.Positioned[i]
             if let h = HitTest(p, px, py, originX: sx, originY: sy) {
-                if best == nil || p.Style.ZIndex >= bestZ {
+                // Later boxes paint over earlier ones: an earlier box
+                // wins only with a higher z-index.
+                if best == nil || p.Style.ZIndex > bestZ {
                     best = h
                     bestZ = p.Style.ZIndex
                 }

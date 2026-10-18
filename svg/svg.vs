@@ -4,13 +4,16 @@
 // too), <rect>, <circle>, <ellipse>, <polygon> and <polyline>, grouped
 // by <g> and moved by `transform`; fills by attribute or style
 // (colors, none, currentColor, the first stop of a gradient), fill-rule,
-// fill-opacity and opacity; and the viewBox with preserveAspectRatio.
-// Strokes, <use>, clipping, masks, filters and text aren't drawn yet.
+// fill-opacity and opacity; strokes (stroke, stroke-width,
+// stroke-linecap, stroke-linejoin, stroke-miterlimit, stroke-opacity) of
+// those and <line>; and the viewBox with preserveAspectRatio. <use>,
+// dashes, clipping, masks, filters and text aren't drawn yet.
 package svg
 
 import (
     "encoding/xml"
     "image/draw"
+    "math"
     "web/css"
     "web/html"
 )
@@ -71,6 +74,9 @@ struct Shape {
     /// Whether no element on the way down set a fill: the <svg>
     /// element's CSS fill decides it.
     var fillInherited: bool
+    var stroke: Fill
+    var strokeStyle: draw.Stroke
+    var strokeOpacity: float32
 }
 
 /// An <svg> element's shapes, ready to draw into a box.
@@ -112,10 +118,11 @@ public final class Drawing {
         var clipped = canvas
         clipped.ClipTo(draw.IRect(int32(r.X), int32(r.Y), int32(r.Width + 1), int32(r.Height + 1)))
         for s in shapes {
-            var color: draw.Color
+            var color = draw.Color.transparent
+            var skipFill = false
             switch s.fill.kind {
             case 0:
-                continue
+                skipFill = true
             case 1:
                 color = currentColor
             default:
@@ -124,37 +131,58 @@ public final class Drawing {
             // The <svg> element's CSS fill stands in for a shape that
             // says nothing of its own.
             if s.fillInherited {
-                if fillNone { continue }
-                if let f = fill { color = f }
+                if fillNone {
+                    skipFill = true
+                } else if let f = fill {
+                    color = f
+                    skipFill = false
+                }
             }
+            if skipFill && s.stroke.kind == 0 { continue }
             if s.opacity < 1 { color = color.Faded(s.opacity) }
             let m = view.Times(s.matrix)
-            var path = draw.Path()
-            var i = 0
-            var k = 0
-            while i < s.ops.count {
-                switch s.ops[i] {
-                case opMove:
-                    let p = m.Apply(s.coords[k], s.coords[k + 1])
-                    path.MoveTo(p.x, p.y)
-                    k += 2
-                case opLine:
-                    let p = m.Apply(s.coords[k], s.coords[k + 1])
-                    path.LineTo(p.x, p.y)
-                    k += 2
-                case opCubic:
-                    let c1 = m.Apply(s.coords[k], s.coords[k + 1])
-                    let c2 = m.Apply(s.coords[k + 2], s.coords[k + 3])
-                    let p = m.Apply(s.coords[k + 4], s.coords[k + 5])
-                    path.CubicTo(c1.x, c1.y, c2.x, c2.y, p.x, p.y)
-                    k += 6
-                default:
-                    path.Close()
-                }
-                i += 1
+            let path = devicePath(s, m)
+            if !skipFill { clipped.FillPath(path, rule: s.rule, color) }
+            if s.stroke.kind != 0 {
+                var sc = s.stroke.kind == 1 ? currentColor : s.stroke.color
+                let o = s.opacity * s.strokeOpacity
+                if o < 1 { sc = sc.Faded(o) }
+                // The width scales as the transform does.
+                let det = m.A * m.D - m.B * m.C
+                var st = s.strokeStyle
+                st.Width = st.Width * math.Sqrt(det < 0 ? -det : det)
+                clipped.FillPath(path.Stroked(st), rule: .nonZero, sc)
             }
-            clipped.FillPath(path, rule: s.rule, color)
         }
+    }
+
+    /// A shape's outline in device pixels.
+    func devicePath(_ s: Shape, _ m: Matrix) -> draw.Path {
+        var path = draw.Path()
+        var i = 0
+        var k = 0
+        while i < s.ops.count {
+            switch s.ops[i] {
+            case opMove:
+                let p = m.Apply(s.coords[k], s.coords[k + 1])
+                path.MoveTo(p.x, p.y)
+                k += 2
+            case opLine:
+                let p = m.Apply(s.coords[k], s.coords[k + 1])
+                path.LineTo(p.x, p.y)
+                k += 2
+            case opCubic:
+                let c1 = m.Apply(s.coords[k], s.coords[k + 1])
+                let c2 = m.Apply(s.coords[k + 2], s.coords[k + 3])
+                let p = m.Apply(s.coords[k + 4], s.coords[k + 5])
+                path.CubicTo(c1.x, c1.y, c2.x, c2.y, p.x, p.y)
+                k += 6
+            default:
+                path.Close()
+            }
+            i += 1
+        }
+        return path
     }
 }
 
@@ -238,6 +266,9 @@ struct Context {
     var fillInherited: bool
     var rule: draw.FillRule
     var opacity: float32
+    var stroke: Fill = noFill
+    var strokeStyle = draw.Stroke(width: 1)
+    var strokeOpacity: float32 = 1
 
     /// The context inside an element: its transform, and the fill
     /// properties it sets by attribute or style.
@@ -245,7 +276,8 @@ struct Context {
         var c = self
         if let t = n.GetAttribute("transform") { c.matrix = matrix.Times(parseTransform(t)) }
         var props: [(string, string)] = []
-        for name in ["fill", "fill-rule", "fill-opacity", "opacity"] {
+        for name in ["fill", "fill-rule", "fill-opacity", "opacity", "stroke", "stroke-width", "stroke-linecap",
+                     "stroke-linejoin", "stroke-miterlimit", "stroke-opacity"] {
             if let v = n.GetAttribute(name) { props.append((name, v)) }
         }
         if let style = n.GetAttribute("style") {
@@ -269,6 +301,31 @@ struct Context {
                 }
             case "fill-rule":
                 c.rule = v == "evenodd" ? .evenOdd : .nonZero
+            case "stroke":
+                if v == "none" || v == "transparent" {
+                    c.stroke = noFill
+                } else if v == "currentcolor" {
+                    c.stroke = currentFill
+                } else if v.hasPrefix("url(") {
+                    c.stroke = gradientFill(v, ids) ?? currentFill
+                } else if let color = css.ParseColor(v) {
+                    c.stroke = Fill(kind: 2, color: color)
+                }
+            case "stroke-width":
+                if let w = lengthAttribute(v), w >= 0 { c.strokeStyle.Width = w }
+            case "stroke-linecap":
+                c.strokeStyle.Cap = v == "round" ? .round : (v == "square" ? .square : .butt)
+            case "stroke-linejoin":
+                c.strokeStyle.Join = v == "round" ? .round : (v == "bevel" ? .bevel : .miter)
+            case "stroke-miterlimit":
+                let b = [uint8](v.utf8)
+                let m = css.parseNumber(b, 0, b.count)
+                if m >= 1 { c.strokeStyle.MiterLimit = m }
+            case "stroke-opacity":
+                let b = [uint8](v.utf8)
+                var o = css.parseNumber(b, 0, b.count)
+                if v.hasSuffix("%") { o /= 100 }
+                c.strokeOpacity = o < 0 ? 0 : (o > 1 ? 1 : o)
             case "fill-opacity", "opacity":
                 let b = [uint8](v.utf8)
                 var o = css.parseNumber(b, 0, b.count)
@@ -329,9 +386,12 @@ func walk(_ n: element, _ ctx: Context, _ d: Drawing, _ ids: [string: element]) 
             var ops: [uint8] = []
             var coords: [float32] = []
             outline(c, &ops, &coords)
-            if ops.isEmpty || inner.fill.kind == 0 { continue }
-            d.shapes.append(Shape(ops: ops, coords: coords, matrix: inner.matrix, fill: inner.fill, rule: inner.rule,
-                                  opacity: inner.opacity, fillInherited: inner.fillInherited))
+            if ops.isEmpty || (inner.fill.kind == 0 && inner.stroke.kind == 0) { continue }
+            // A line has no inside to fill.
+            let fill = c.TagName == "line" ? noFill : inner.fill
+            d.shapes.append(Shape(ops: ops, coords: coords, matrix: inner.matrix, fill: fill, rule: inner.rule,
+                                  opacity: inner.opacity, fillInherited: inner.fillInherited && c.TagName != "line",
+                                  stroke: inner.stroke, strokeStyle: inner.strokeStyle, strokeOpacity: inner.strokeOpacity))
         }
     }
 }
@@ -405,7 +465,11 @@ func outline(_ n: element, _ ops: inout [uint8], _ coords: inout [float32]) {
             coords += [pts[i], pts[i + 1]]
             i += 2
         }
-        ops.append(opClose)
+        // A polyline is open: its stroke ends at its ends.
+        if n.TagName == "polygon" { ops.append(opClose) }
+    case "line":
+        ops += [opMove, opLine]
+        coords += [num("x1"), num("y1"), num("x2"), num("y2")]
     default:
         return
     }

@@ -1344,6 +1344,8 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
         }
     case .visibility:
         if let k = keywordOf(v) { s.Visibility = k == "hidden" ? .hidden : (k == "collapse" ? .collapse : .visible) }
+    case .scrollbarWidth:
+        if let k = keywordOf(v) { s.ScrollbarHidden = k == "none" }
     case .borderCollapse:
         if let k = keywordOf(v) { s.BorderCollapse = k == "collapse" ? .collapse : .separate }
     case .borderSpacing: if let p = pixels(v, s, ctx) { s.BorderSpacing = p }
@@ -1710,6 +1712,7 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .listStylePosition: b.ListStylePosition = a.ListStylePosition
     case .cursor: b.Cursor = a.Cursor
     case .visibility: b.Visibility = a.Visibility
+    case .scrollbarWidth: b.ScrollbarHidden = a.ScrollbarHidden
     case .borderCollapse: b.BorderCollapse = a.BorderCollapse
     case .borderSpacing: b.BorderSpacing = a.BorderSpacing
     case .tabSize: b.TabSize = a.TabSize

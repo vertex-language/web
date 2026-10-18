@@ -316,7 +316,7 @@ final class DisplayListBuilder {
             items.append(PaintItem.unclip)
             // A scroll container whose content overflows shows a thin bar
             // where it is scrolled to.
-            if s.IsScrollContainer && box.ContentHeight > box.InnerHeight + 0.5 && box.InnerHeight > 20 {
+            if s.IsScrollContainer && !s.ScrollbarHidden && box.ContentHeight > box.InnerHeight + 0.5 && box.InnerHeight > 20 {
                 let trackTop = y + box.Border.Top + 2
                 let trackHeight = box.PaddingBoxHeight - 4
                 let thumb = trackHeight * box.InnerHeight / box.ContentHeight
