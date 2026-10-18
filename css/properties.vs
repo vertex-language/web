@@ -415,10 +415,16 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
         if lines.isEmpty { lines = ["none"] }
         set(.textDecorationLine, .keyword(joinWords(lines)))
     case "outline":
+        // outline-style isn't kept: a style of none or hidden is no
+        // outline, which is a width of 0 here (`outline: none` takes away
+        // a focus ring).
+        var noStyle = false
         for t in tokens {
-            if let w = parseBorderWidth(t) { set(.outlineWidth, w) }
+            if t.Kind == .ident && (lower(t.Value) == "none" || lower(t.Value) == "hidden") { noStyle = true }
+            else if let w = parseBorderWidth(t) { set(.outlineWidth, w) }
             else if let m = parseColorAt([t], 0) { set(.outlineColor, m.0) }
         }
+        if noStyle { set(.outlineWidth, .length(0, .px)) }
     case "place-items":
         if let v = parseValue(.alignItems, [tokens[0]]) { set(.alignItems, v) }
     case "text-decoration-style", "text-decoration-thickness", "text-underline-offset",

@@ -252,6 +252,7 @@ func testCustomProperties() {
     check(b?.BorderTopColor == draw.Color(1, 2, 3) && b?.BorderTopWidth == 2, "var() inside the border shorthand")
     let side = styleOf(sheet + "<div class=side>x</div>", ".side")
     check(side?.BorderTopColor == draw.Color(1, 2, 3) && side?.BorderTopWidth == 3 && side?.BorderBottomWidth == 0, "var() inside one side's border shorthand")
+    check(styleOf("<div style='outline: 2px solid red; outline: none'>x</div>", "div")?.OutlineWidth == 0, "outline: none takes the outline away")
 }
 
 func testColorScheme() {
