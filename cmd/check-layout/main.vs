@@ -531,6 +531,35 @@ func testColumns() {
     """) else { check(false, "layout"); return }
     check(o.rect("last")!.X == 400 && o.rect("last")!.Y == 0 && o.box("mc")!.ColumnsUsed == 3, "under a set height, content past the last column makes more (got \(o.rect("last")!))")
 
+    guard let br = layoutOf("<body style='margin:0'><div style='width:400px;column-count:2;column-gap:0'><div style='height:50px'></div><div id=br style='break-before:column;height:20px'></div></div></body>") else { check(false, "layout"); return }
+    check(br.rect("br")!.X == 200 && br.rect("br")!.Y == 0, "break-before: column starts the next column (got \(br.rect("br")!))")
+
+    // Four lines in columns three lines tall: widows (2 by default)
+    // brings a second line over; widows: 1 lets one go alone.
+    func secondColumnLines(_ widows: string) -> int {
+        guard let w = layoutOf("<body style='margin:0'><div style='width:200px;height:60px;column-count:2;column-gap:0;column-fill:auto;font-size:16px;line-height:20px'><p id=p style='margin:0;\(widows)'>a<br>b<br>c<br>d</p></div></body>") else { return -1 }
+        var n = 0
+        for line in w.box("p")!.Lines where line.X >= 100 { n += 1 }
+        return n
+    }
+    check(secondColumnLines("") == 2 && secondColumnLines("widows:1") == 1,
+          "widows keeps two lines together at the next column's top (got \(secondColumnLines("")) and \(secondColumnLines("widows:1")))")
+
+    guard let spn = layoutOf("""
+    <body style='margin:0'><div id=mc style='width:400px;column-count:2;column-gap:0'>
+    <div id=a style='height:40px'></div><div id=b style='height:40px'></div>
+    <div id=span style='column-span:all;height:10px'></div>
+    <div id=c style='height:40px'></div><div id=d style='height:40px'></div>
+    </div></body>
+    """) else { check(false, "layout"); return }
+    check(spn.rect("b")!.X == 200 && spn.rect("span")! == draw.Rect(0, 40, 400, 10), "column-span: all goes across, after the columns before it (got \(spn.rect("b")!) \(spn.rect("span")!))")
+    check(spn.rect("c")! == draw.Rect(0, 50, 200, 40) && spn.rect("d")! == draw.Rect(200, 50, 200, 40) && spn.rect("mc")!.Height == 90,
+          "and what follows starts a column set of its own (got \(spn.rect("c")!) \(spn.rect("d")!) \(spn.rect("mc")!.Height))")
+
+    guard let dc = layoutOf("<body style='margin:0'><div style='width:400px;column-count:2;column-gap:0'><div id=dec style='border:2px solid;padding:0 4px'><div style='height:40px'></div><div style='height:40px'></div></div></div></body>") else { check(false, "layout"); return }
+    let frags = dc.box("dec")!.ColumnFragments
+    check(frags.count == 2 && frags[1].X == 200 && frags[0].Y == 0 && frags[1].Y < 10, "a block with a border splits into a fragment in each column (got \(frags))")
+
     guard let f = layoutOf("<body style='margin:0'><div id=mc style='float:left;column-count:2;column-gap:10px'><div style='width:100px;height:40px'></div><div style='width:100px;height:40px'></div></div></body>") else { check(false, "layout"); return }
     check(f.rect("mc")!.Width == 210 && f.rect("mc")!.Height == 40, "a shrink-to-fit box makes room for every column (got \(f.rect("mc")!))")
 }

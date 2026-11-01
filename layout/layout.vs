@@ -127,6 +127,7 @@ public final class Layout {
     func layoutBlock(_ box: Box, cb: ContainingBlock, flow: Flow) {
         resolveEdges(box, cbWidth: cb.Width)
         box.Positioned = []
+        box.ColumnFragments = []
         let s = box.Style
 
         if box.Kind == .replaced {

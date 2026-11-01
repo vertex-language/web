@@ -1200,6 +1200,11 @@ func apply(_ given: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
     case .maskRepeat, .maskSize, .maskPosition:
         if let k = keywordOf(v) { applyLayerKeyword(d.Prop, k, &s.MaskLayer, s, ctx) }
     case .maskMode: s.MaskMode = keywordOf(v) ?? "match-source"
+    case .breakBefore: s.BreakBefore = keywordOf(v) ?? "auto"
+    case .breakAfter: s.BreakAfter = keywordOf(v) ?? "auto"
+    case .orphans: if case .number(let n) = v { s.Orphans = int32(n) }
+    case .widows: if case .number(let n) = v { s.Widows = int32(n) }
+    case .boxDecorationBreak: s.DecorationClone = keywordOf(v) == "clone"
     case .opacity:
         if case .number(let n) = v { s.Opacity = n < 0 ? 0 : (n > 1 ? 1 : n) }
     case .transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay, .transitionBehavior,
@@ -2127,6 +2132,11 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
         b.MaskLayer.OffsetX = a.MaskLayer.OffsetX
         b.MaskLayer.OffsetY = a.MaskLayer.OffsetY
     case .maskMode: b.MaskMode = a.MaskMode
+    case .breakBefore: b.BreakBefore = a.BreakBefore
+    case .breakAfter: b.BreakAfter = a.BreakAfter
+    case .orphans: b.Orphans = a.Orphans
+    case .widows: b.Widows = a.Widows
+    case .boxDecorationBreak: b.DecorationClone = a.DecorationClone
     case .mixBlendMode: b.BlendMode = a.BlendMode
     case .isolation: b.Isolated = a.Isolated
     case .borderImageSource: b.BorderImageURL = a.BorderImageURL; b.BorderImageGradient = a.BorderImageGradient

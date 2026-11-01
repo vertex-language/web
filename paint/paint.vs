@@ -632,6 +632,10 @@ final class DisplayListBuilder {
 
     func paintBackgroundAndBorder(_ box: layout.Box, x: float32, y: float32) {
         let s = box.Style
+        if !box.ColumnFragments.isEmpty {
+            paintFragments(box, x: x, y: y)
+            return
+        }
         let rect = draw.Rect(x, y, box.Width, box.Height)
         var radii = s.Radii(width: box.Width, height: box.Height)
         if !radii.IsZero { radii = radii.Fitted(box.Width, box.Height) }
@@ -763,16 +767,13 @@ final class DisplayListBuilder {
         }
         // column-rule: down the middle of each gap between columns
         // that hold content, as tall as the columns.
-        if s.IsMultiColumn && box.ColumnsUsed > 1 && s.ColumnRuleWidth > 0 && s.ColumnRuleStyle != .none && s.ColumnRuleStyle != .hidden {
+        if s.IsMultiColumn && !box.ColumnRules.isEmpty && s.ColumnRuleWidth > 0 && s.ColumnRuleStyle != .none && s.ColumnRuleStyle != .hidden {
             let w = s.ColumnRuleWidth
             let c = color(s.ColumnRuleColor ?? s.Color)
             let style = styleName(s.ColumnRuleStyle)
-            var i = 1
-            while i < box.ColumnsUsed {
-                let mid = x + box.ContentX + float32(i) * (box.ColumnWidthUsed + box.ColumnGapUsed) - box.ColumnGapUsed / 2
-                let rule = draw.Rect(mid - w / 2, y + box.ContentY, w, box.ColumnHeightUsed)
+            for r in box.ColumnRules where r.Height > 0 {
+                let rule = draw.Rect(x + r.X - w / 2, y + r.Y, w, r.Height)
                 styledRing(rule, draw.Edges(0, 0, 0, w), [c, c, c, c], draw.Radii.zero, [style, style, style, style])
-                i += 1
             }
         }
     }
@@ -831,6 +832,38 @@ final class DisplayListBuilder {
         case "round": return .round
         case "space": return .space
         default: return .stretch
+        }
+    }
+
+    /// A block split between columns: its background and border in each
+    /// column's fragment. Sliced, the top edge is the first fragment's
+    /// and the bottom the last's; cloned, each has all four.
+    func paintFragments(_ box: layout.Box, x: float32, y: float32) {
+        let s = box.Style
+        let n = box.ColumnFragments.count
+        var i = 0
+        while i < n {
+            let f = box.ColumnFragments[i]
+            let r = draw.Rect(x + f.X, y + f.Y, f.Width, f.Height)
+            let first = i == 0 || s.DecorationClone
+            let last = i == n - 1 || s.DecorationClone
+            var radii = s.HasBorderRadius ? s.Radii(width: r.Width, height: r.Height) : draw.Radii.zero
+            if !first { radii.TopLeft = 0; radii.TopRight = 0 }
+            if !last { radii.BottomLeft = 0; radii.BottomRight = 0 }
+            if !radii.IsZero { radii = radii.Fitted(r.Width, r.Height) }
+            if s.BackgroundColor.A > 0 { items.append(.fill(r, color(s.BackgroundColor), radii)) }
+            let w = draw.Edges(first ? box.Border.Top : 0, box.Border.Right, last ? box.Border.Bottom : 0, box.Border.Left)
+            if w.Top > 0 || w.Right > 0 || w.Bottom > 0 || w.Left > 0 {
+                var colors: [draw.Color] = []
+                var side = 0
+                while side < 4 {
+                    colors.append(color(borderSideColor(s, side)))
+                    side += 1
+                }
+                styledRing(r, w, colors, radii, [styleName(s.BorderTopStyle), styleName(s.BorderRightStyle),
+                                                 styleName(s.BorderBottomStyle), styleName(s.BorderLeftStyle)])
+            }
+            i += 1
         }
     }
 

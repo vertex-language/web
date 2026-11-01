@@ -102,6 +102,16 @@ public final class ComputedStyle {
     public var ColumnSpanAll: bool = false
     /// break-inside: avoid and its kin.
     public var BreakInsideAvoid: bool = false
+    /// break-before and break-after: a forced break (column, page and
+    /// the rest) or avoid; orphans and widows, inherited: the fewest
+    /// lines of a block a break may leave at a column's end or start.
+    public var BreakBefore: string = "auto"
+    public var BreakAfter: string = "auto"
+    public var Orphans: int32 = 2
+    public var Widows: int32 = 2
+    /// box-decoration-break: clone draws the whole border and padding on
+    /// each fragment of a split box; slice cuts them.
+    public var DecorationClone: bool = false
 
     /// background-attachment: scroll, fixed (to the viewport) or local
     /// (with a scroll container's content).
@@ -332,6 +342,8 @@ public final class ComputedStyle {
         ScrollbarTrack = parent.ScrollbarTrack
         CaretColor = parent.CaretColor
         TextFillColor = parent.TextFillColor
+        Orphans = parent.Orphans
+        Widows = parent.Widows
         ColorScheme = parent.ColorScheme
         EffectiveZoom = parent.EffectiveZoom
         Direction = parent.Direction

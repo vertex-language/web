@@ -81,6 +81,11 @@ public enum Prop: int32 {
     case maskSize
     case maskPosition
     case maskMode
+    case breakBefore
+    case breakAfter
+    case orphans
+    case widows
+    case boxDecorationBreak
     case textFillColor
     case outlineWidth
     case outlineColor
@@ -340,6 +345,9 @@ let propNames: [string: Prop] = [
     "background-attachment": .backgroundAttachment, "transition-behavior": .transitionBehavior,
     "mask-repeat": .maskRepeat, "-webkit-mask-repeat": .maskRepeat, "mask-size": .maskSize, "-webkit-mask-size": .maskSize,
     "mask-position": .maskPosition, "-webkit-mask-position": .maskPosition, "mask-mode": .maskMode,
+    "break-before": .breakBefore, "break-after": .breakAfter, "page-break-before": .breakBefore, "page-break-after": .breakAfter,
+    "orphans": .orphans, "widows": .widows,
+    "box-decoration-break": .boxDecorationBreak, "-webkit-box-decoration-break": .boxDecorationBreak,
     "-webkit-text-fill-color": .textFillColor, "text-fill-color": .textFillColor,
     "transform": .transform, "-webkit-transform": .transform, "transform-origin": .transformOrigin,
     "-webkit-transform-origin": .transformOrigin, "translate": .translate, "rotate": .rotate, "scale": .scale,
@@ -744,9 +752,8 @@ func longhands(_ d: Declaration) -> [Longhand] {
          "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
          "hyphens",
          "writing-mode", "caption-side",
-         "empty-cells", "speak", "orphans", "widows", "page-break-before", "page-break-after",
+         "empty-cells", "speak",
          "font-display",
-         "box-decoration-break",
          "text-size-adjust", "-webkit-text-size-adjust", "-webkit-tap-highlight-color",
          "list-style-image", "font-kerning",
          "text-align-last", "text-justify", "font-variant-numeric", "font-variant-ligatures",
@@ -1762,6 +1769,19 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
         return nil
     case .maskMode:
         return kw == "alpha" || kw == "luminance" || kw == "match-source" ? .keyword(kw) : nil
+    case .breakBefore, .breakAfter:
+        switch kw {
+        case "auto", "avoid", "avoid-page", "avoid-column", "avoid-region", "page", "column", "region", "left", "right", "recto", "verso", "all":
+            return .keyword(kw)
+        // page-break-before and -after's word for a forced break.
+        case "always": return .keyword("page")
+        default: return nil
+        }
+    case .orphans, .widows:
+        if t.Kind == .number && t.NumberVal >= 1 { return .number(t.NumberVal) }
+        return nil
+    case .boxDecorationBreak:
+        return kw == "slice" || kw == "clone" ? .keyword(kw) : nil
     case .backgroundRepeat, .maskRepeat:
         switch kw {
         case "no-repeat", "repeat", "repeat-x", "repeat-y", "space", "round": return .keyword(kw)

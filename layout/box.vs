@@ -146,6 +146,21 @@ public final class Box {
     public var ColumnWidthUsed: float32 = 0
     public var ColumnGapUsed: float32 = 0
     public var ColumnHeightUsed: float32 = 0
+    /// Where a column-rule goes, relative to the box: x down the middle
+    /// of a gap, from y, Height tall (Width unused).
+    public var ColumnRules: [draw.Rect] = []
+    /// A block split between columns: a rectangle for each column it
+    /// shows in, relative to its border box's corner, where its
+    /// background and border are drawn. Empty where it is whole.
+    public var ColumnFragments: [draw.Rect] = []
+
+    /// Whether the box draws something of its own: a border, padding,
+    /// a background or a shadow.
+    public var HasDecoration: bool {
+        let s = Style
+        return Border.Vertical > 0 || Border.Horizontal > 0 || Padding.Vertical > 0 || Padding.Horizontal > 0 ||
+            s.BackgroundColor.A > 0 || s.BackgroundImage != nil || !s.Shadows.isEmpty
+    }
 
     public init(kind: BoxKind, style: cascade.ComputedStyle, node: html.Node?) {
         Id = nextBoxId
