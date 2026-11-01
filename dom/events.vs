@@ -180,10 +180,86 @@ public final class FocusEvent: Event {
 /// MouseEvent, as the DOM has it), wheel, composition, drag, and an
 /// element's box changing size.
 public final class PointerEvent: MouseEvent {
+    /// "mouse", "pen" or "touch", and the pointer's id; the first pointer
+    /// of its kind is the primary one.
+    public let PointerType: string
+    public let PointerId: int32
+    public let IsPrimary: bool
+    /// How hard it presses, 0 to 1 (0.5 for a mouse button held), and a
+    /// pen's tilt in degrees.
+    public let Pressure: float32
+    public let TiltX: float32
+    public let TiltY: float32
+
     public override init(_ type: string, X: float32 = 0, Y: float32 = 0, Clicks: int32 = 1, Button: int32 = 0, Pressed: bool = false,
                          Shift: bool = false, Control: bool = false, Alt: bool = false, Meta: bool = false, bubbles: bool = true) {
+        let p = CurrentPointer
+        PointerType = p.Kind
+        PointerId = p.Id
+        IsPrimary = p.Id <= 1
+        Pressure = p.Pressure >= 0 ? p.Pressure : (Pressed || type == "pointerdown" ? 0.5 : 0)
+        TiltX = p.TiltX
+        TiltY = p.TiltY
         super.init(type, X: X, Y: Y, Clicks: Clicks, Button: Button, Pressed: Pressed,
                    Shift: Shift, Control: Control, Alt: Alt, Meta: Meta, bubbles: bubbles)
+    }
+}
+
+/// What the pointer is, as the host last said: the page sets it from the
+/// input it is handling, and pointer events read it.
+public struct PointerInfo {
+    public var Kind: string = "mouse"
+    public var Id: int32 = 1
+    /// -1 where the device doesn't say.
+    public var Pressure: float32 = -1
+    public var TiltX: float32 = 0
+    public var TiltY: float32 = 0
+
+    public init() {}
+}
+
+public var CurrentPointer = PointerInfo()
+
+/// The data a drag carries, by type ("text/plain", "text/uri-list",
+/// "text/html", or the page's own), and what may be done with it.
+public final class DataTransfer {
+    var items: [(type: string, data: string)] = []
+    /// copy, move, link (or none) -- what the drop target says it will do,
+    /// and what the source allows ("all", "copyMove", …).
+    public var DropEffect: string = "none"
+    public var EffectAllowed: string = "uninitialized"
+    /// Paths of files dropped from outside the page.
+    public var Files: [string] = []
+
+    public init() {}
+
+    public var Types: [string] { return items.map { $0.type } }
+
+    public func SetData(_ type: string, _ data: string) {
+        let t = type.lowercased() == "text" ? "text/plain" : type.lowercased()
+        items.removeAll(where: { $0.type == t })
+        items.append((type: t, data: data))
+    }
+
+    public func GetData(_ type: string) -> string {
+        let t = type.lowercased() == "text" ? "text/plain" : type.lowercased()
+        for i in items where i.type == t { return i.data }
+        return ""
+    }
+
+    public func ClearData(_ type: string? = nil) {
+        if let t = type { items.removeAll(where: { $0.type == t.lowercased() }) } else { items = [] }
+    }
+}
+
+/// A drag: dragstart, drag and dragend at what is dragged; dragenter,
+/// dragover, dragleave and drop at what it is over.
+public final class DragEvent: MouseEvent {
+    public let Data: DataTransfer
+
+    public init(_ type: string, X: float32, Y: float32, Data: DataTransfer, bubbles: bool = true) {
+        self.Data = Data
+        super.init(type, X: X, Y: Y, Clicks: 0, Button: 0, Pressed: type != "dragend" && type != "drop", bubbles: bubbles)
     }
 }
 public final class WheelEvent: Event {
@@ -225,7 +301,6 @@ public final class CompositionEvent: Event {
         super.init(type)
     }
 }
-public final class DragEvent: Event {}
 public final class LayoutEvent: Event {}
 
 /// A listener's handle, for removing it.

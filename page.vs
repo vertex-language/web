@@ -223,6 +223,8 @@ public final class Page {
     var modal = Set<int64>()
     var popovers = Set<int64>()
     var dialogReturnValues: [int64: string] = [:]
+    /// A drag under way, or a press that may become one (dragdrop.vs).
+    var dragging: DragState? = nil
     var scrollAnimation: ScrollAnimation? = nil
     var pendingSnap: (node: int64, at: float64)? = nil
     var caretVisible = true

@@ -1010,6 +1010,58 @@ func testDialogsAndPopovers() {
 }
 
 @MainActor
+func testDragAndDrop() {
+    print("Drag and drop, pointer types")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(400, 300))
+    view.LoadHTML("""
+    <style>body { margin: 0 } div { height: 40px }</style>
+    <div id=src draggable=true style="width: 60px">drag me</div>
+    <div id=dst style="width: 100px"></div><div id=no style="width: 100px"></div>
+    """)
+    let doc = view.Document!
+    func node(_ id: string) -> html.Node { return view.QuerySelector("#" + id)! }
+    var log: [string] = []
+    var dropped = ""
+    var clicks = 0
+    var kind = ""
+    _ = doc.AddEventListener(node("src"), "dragstart", { e in
+        log.append("dragstart")
+        if let d = e as? dom.DragEvent { d.Data.SetData("text/plain", "hello") }
+    })
+    _ = doc.AddEventListener(node("src"), "dragend", { e in log.append("dragend") })
+    _ = doc.AddEventListener(node("src"), "click", { e in clicks += 1 })
+    _ = doc.AddEventListener(node("src"), "pointerdown", { e in if let p = e as? dom.PointerEvent { kind = p.PointerType + " \(p.Pressure)" } })
+    _ = doc.AddEventListener(node("dst"), "dragenter", { e in log.append("enter") })
+    _ = doc.AddEventListener(node("dst"), "dragover", { e in e.PreventDefault() })
+    _ = doc.AddEventListener(node("dst"), "dragleave", { e in log.append("leave") })
+    _ = doc.AddEventListener(node("dst"), "drop", { e in
+        log.append("drop")
+        if let d = e as? dom.DragEvent { dropped = d.Data.GetData("text") }
+    })
+    var pen = web.Pointer(draw.Point(10, 10))
+    pen.Kind = "pen"
+    pen.Pressure = 0.8
+    _ = view.Handle(.pointerDown(pen))
+    check(kind == "pen 0.8", "a pointer event says what pointed, and how hard (got \(kind))")
+    _ = view.Handle(.pointerMoved(draw.Point(12, 11)))
+    check(log.isEmpty, "a small move is no drag")
+    _ = view.Handle(.pointerMoved(draw.Point(20, 60)))
+    _ = view.Handle(.pointerMoved(draw.Point(30, 62)))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(30, 62))))
+    check(log == ["dragstart", "enter", "drop", "dragend"] && dropped == "hello", "a drag carries its data to a target that takes it (got \(log) '\(dropped)')")
+    check(clicks == 0, "and the press is no click")
+    log = []
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(10, 10))))
+    _ = view.Handle(.pointerMoved(draw.Point(20, 100)))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(20, 100))))
+    check(log == ["dragstart", "dragend"], "a target that doesn't take it gets no drop (got \(log))")
+    log = []
+    let taken = view.DropFiles(["/tmp/a.txt"], at: draw.Point(10, 60))
+    check(taken && log == ["enter", "drop"], "files from outside drop the same way (got \(log))")
+}
+
+@MainActor
 func testPointerEventsAndUserSelect() {
     print("pointer-events and user-select")
     let view = web.Page()
@@ -1250,6 +1302,7 @@ func main() async -> int32 {
     testScrollbarsZoomAndContainment()
     testSmoothScrollAndSnap()
     testDialogsAndPopovers()
+    testDragAndDrop()
     testPointerEventsAndUserSelect()
     testRange()
     await testDeferredImages()

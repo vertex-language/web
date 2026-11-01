@@ -54,6 +54,13 @@ public struct Pointer {
     /// 2 for the press of a double click, 3 for a triple.
     public var Clicks: int32
     public var Modifiers: Modifiers
+    /// What presses: "mouse", "pen" or "touch"; how hard (0 to 1, -1
+    /// for unknown); a pen's tilt in degrees; which finger or pen.
+    public var Kind: string = "mouse"
+    public var Pressure: float32 = -1
+    public var TiltX: float32 = 0
+    public var TiltY: float32 = 0
+    public var Id: int32 = 1
 
     public init(_ position: draw.Point, button: PointerButton = PointerButton.primary, clicks: int32 = 1,
                 modifiers: Modifiers? = nil) {
@@ -138,7 +145,10 @@ extension Page {
         syncValues()
         switch input {
         case .keyDown(_): keyboardInput = true
-        case .pointerDown(_): keyboardInput = false
+        case .pointerDown(let e):
+            keyboardInput = false
+            setCurrentPointer(e)
+        case .pointerUp(let e): setCurrentPointer(e)
         default: break
         }
         if let r = forwardToFrame(input) { return r }
@@ -152,6 +162,7 @@ extension Page {
             if e.Button == .primary && startResize(at: e.Position) { return .handled }
             let target = hitAt(e.Position)?.Node
             if !topLayer.isEmpty && lightDismiss(target) { return .handled }
+            dragging = e.Button == .primary ? draggableAncestor(target).map { DragState(source: $0, start: e.Position) } : nil
             let button: int32 = e.Button == .primary ? 0 : (e.Button == .middle ? 1 : 2)
             captured = target
             mouseSuppressed = false
@@ -250,6 +261,7 @@ extension Page {
 
     func pointerMoved(_ p: draw.Point) -> EventResult {
         pointer = p
+        if dragging != nil && dragMoved(p) { return .handled }
         if resizing != nil {
             resize(to: p)
             return .handled
@@ -372,6 +384,16 @@ extension Page {
         if s.Resize == "both" || s.Resize == "vertical" { style += " height: \(h)px;" }
         Document?.SetAttribute(r.node, "style", style)
         needsStyle = true
+    }
+
+    func setCurrentPointer(_ e: Pointer) {
+        var info = dom.PointerInfo()
+        info.Kind = e.Kind
+        info.Pressure = e.Pressure
+        info.TiltX = e.TiltX
+        info.TiltY = e.TiltY
+        info.Id = e.Id
+        dom.CurrentPointer = info
     }
 
     func clampedToView(_ p: draw.Point) -> draw.Point {
@@ -577,6 +599,11 @@ extension Page {
     }
 
     func pointerUp(_ p: draw.Point) -> EventResult {
+        if dragReleased(p) {
+            pressed = nil
+            stateChanged()
+            return .handled
+        }
         if resizing != nil {
             resize(to: p)
             resizing = nil
