@@ -46,6 +46,10 @@ public enum ReplacedKind: Equatable {
     case frame
     /// <audio controls>: a bar of controls.
     case audio
+    /// <input type=color>: a swatch of its value.
+    case colorWell
+    /// <input type=file>: a button and the files chosen.
+    case fileInput
 }
 
 /// A box in the layout tree: an element, a run of text, or an anonymous

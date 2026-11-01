@@ -32,7 +32,7 @@ public func IsTextControl(_ node: html.Node) -> bool {
     if node.TagName != "input" { return false }
     let type = lower(node.GetAttribute("type") ?? "text")
     switch type {
-    case "text", "password", "search", "email", "url", "tel", "number", "": return true
+    case "text", "password", "search", "email", "url", "tel", "number", "", "date", "time", "datetime-local", "month", "week": return true
     default: return false
     }
 }

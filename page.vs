@@ -209,6 +209,8 @@ public final class Page {
     var target: html.Node? = nil
     /// The controls the user has changed: :user-valid and :user-invalid.
     var userEdited = Set<int64>()
+    /// What file inputs hold, by element.
+    var files: [int64: [string]] = [:]
     /// A resize grip being dragged: the element, where the drag began,
     /// the element's size then, and its style attribute then.
     var resizing: (node: html.Node, start: draw.Point, width: float32, height: float32, style: string)? = nil
@@ -255,6 +257,11 @@ public final class Page {
     var onNavigate: ((string) -> Void)? = nil
     var onSubmit: ((dom.Submission) -> Void)? = nil
     var onAction: ((string, string) -> Void)? = nil
+    /// The host's pickers: a color well, a file input, a date or time
+    /// field asking for one (the element, and what it holds now).
+    var onPickColor: ((html.Node, string) -> Void)? = nil
+    var onPickFiles: ((html.Node, bool, string) -> Void)? = nil
+    var onPickDate: ((html.Node, string, string) -> Void)? = nil
     /// How many clicks the last primary press was: 2 on a double click.
     var downClicks: int32 = 1
     /// The document's <style> and <link rel=stylesheet> elements, and the
@@ -312,6 +319,7 @@ public final class Page {
 
     func load(_ doc: html.Document) {
         frames = [:]
+        files = [:]
         target = nil
         elementScroll = [:]
         topLayer = []
@@ -1093,8 +1101,55 @@ public final class Page {
     func valueOf(_ node: html.Node) -> string {
         if let v = values[node.Id] { return v }
         if node.TagName == "textarea" { return node.InnerText() }
-        return node.GetAttribute("value") ?? ""
+        let raw = node.GetAttribute("value") ?? ""
+        if node.TagName == "input" {
+            let type = dom.InputType(node)
+            if dom.IsDateTimeType(type) || type == "color" { return dom.SanitizedValue(type, raw) }
+            if type == "file" { return "" }
+        }
+        return raw
     }
+
+    /// Sets a form control's value as the user would: input and change
+    /// fire at it. What a host's picker answers with.
+    public func SetControlValue(_ node: html.Node, _ value: string) {
+        var v = value
+        if node.TagName == "input" {
+            let type = dom.InputType(node)
+            if dom.IsDateTimeType(type) || type == "color" { v = dom.SanitizedValue(type, value) }
+        }
+        setValue(node, v)
+        _ = dispatch(dom.Event("change"), to: node)
+        needsStyle = true
+    }
+
+    /// The files a file input holds, as its picker chose them: their
+    /// names show, and change fires.
+    public func SetFiles(_ node: html.Node, _ paths: [string]) {
+        files[node.Id] = paths
+        let names = paths.map { p -> string in
+            let parts = p.split(separator: "/")
+            return parts.isEmpty ? p : string(parts[parts.count - 1])
+        }
+        values[node.Id] = names.count > 1 ? "\(names.count) files" : (names.first ?? "")
+        userEdited.insert(node.Id)
+        needsStyle = true
+        _ = dispatch(dom.Event("input"), to: node)
+        _ = dispatch(dom.Event("change"), to: node)
+    }
+
+    /// The paths a file input holds.
+    public func FilesOf(_ node: html.Node) -> [string] { return files[node.Id] ?? [] }
+
+    /// Called when a color well is clicked, with the element and its
+    /// color; the host shows a picker and answers with SetControlValue.
+    public func OnPickColor(_ handler: (html.Node, string) -> Void) { onPickColor = handler }
+    /// Called when a file input's button is clicked, with the element,
+    /// whether it takes several and its accept; answer with SetFiles.
+    public func OnPickFiles(_ handler: (html.Node, bool, string) -> Void) { onPickFiles = handler }
+    /// Called when a date or time field is clicked, with the element, its
+    /// type and its value; answer with SetControlValue.
+    public func OnPickDate(_ handler: (html.Node, string, string) -> Void) { onPickDate = handler }
 
     func setValue(_ node: html.Node, _ value: string) {
         values[node.Id] = value

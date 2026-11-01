@@ -959,6 +959,10 @@ final class DisplayListBuilder {
                         caretX = textX + face.Measure(stringOf(bytes, 0, upto))
                     }
                 }
+            } else if let node = box.Node, value.isEmpty, dom.IsDateTimeType(dom.InputType(node)) && !node.HasAttribute("placeholder") {
+                // An empty date or time field shows its format.
+                let run = face.Shape(dom.FormatHint(dom.InputType(node)))
+                items.append(.text(textX, textY, run, color(draw.Color(117, 117, 117)), 0))
             } else if let placeholder = box.Node?.GetAttribute("placeholder"), !placeholder.isEmpty {
                 // As ::placeholder styles it: its color, and its opacity.
                 let ps = box.PlaceholderStyle
@@ -974,6 +978,20 @@ final class DisplayListBuilder {
                 items.append(.fill(draw.Rect(caretX, textY - face.Ascent, 1, face.Ascent + face.Descent), color(s.CaretColor ?? s.Color), draw.Radii.zero))
             }
             items.append(PaintItem.unclip)
+            // A number field's spinner: up and down, at its right.
+            if let node = box.Node, dom.InputType(node) == "number" && s.Appearance != "none" && inner.Width > 30 {
+                let w: float32 = 11
+                let sx = inner.Right - w
+                let mid = inner.Y + inner.Height / 2
+                let c = color(draw.Color(90, 90, 90))
+                var k: float32 = 0
+                while k < 4 {
+                    // Rows of a triangle up above the middle, down below.
+                    items.append(.fill(draw.Rect(sx + 5.5 - k, mid - 2 - (3 - k), 1 + 2 * k, 1), c, draw.Radii.zero))
+                    items.append(.fill(draw.Rect(sx + 5.5 - k, mid + 2 + (3 - k), 1 + 2 * k, 1), c, draw.Radii.zero))
+                    k += 1
+                }
+            }
         case .button:
             let run = face.Shape(box.Text)
             let tx = inner.X + (inner.Width - run.Width) / 2
@@ -1052,6 +1070,28 @@ final class DisplayListBuilder {
             items.append(t)
             items.append(contentsOf: sub.Items)
             items.append(PaintItem(.untranslate))
+            items.append(PaintItem.unclip)
+        case .colorWell:
+            // A swatch of the color, inset in the box.
+            let swatch = draw.Rect(inner.X + 3, inner.Y + 3, inner.Width - 6, inner.Height - 6)
+            if swatch.Width > 0 && swatch.Height > 0 {
+                let c = css.ParseColor(box.Text) ?? draw.Color.black
+                items.append(.fill(swatch, color(c), draw.Radii(all: 2)))
+                let edge = color(draw.Color(0, 0, 0, 60))
+                items.append(.border(swatch, draw.Edges(all: 1), [edge, edge, edge, edge], draw.Radii(all: 2)))
+            }
+        case .fileInput:
+            // "Choose File", as a button, then what is chosen.
+            let label = face.Shape("Choose File")
+            let bw = label.Width + 16
+            let button = draw.Rect(inner.X, inner.Y, bw, inner.Height)
+            items.append(.fill(button, color(draw.Color(239, 239, 239)), draw.Radii(all: 3)))
+            let edge = color(draw.Color(118, 118, 118))
+            items.append(.border(button, draw.Edges(all: 1), [edge, edge, edge, edge], draw.Radii(all: 3)))
+            let ty = inner.Y + (inner.Height - face.LineHeight) / 2 + face.Ascent
+            items.append(.text(button.X + 8, ty, label, color(draw.Color.black), 0))
+            items.append(.clip(inner))
+            items.append(.text(button.Right + 8, ty, face.Shape(box.Text), color(s.Color), 0))
             items.append(PaintItem.unclip)
         case .audio:
             // The controls a browser shows, at rest: a play button, a

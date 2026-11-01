@@ -396,6 +396,17 @@ extension Page {
         dom.CurrentPointer = info
     }
 
+    /// Steps a number, date or time field, with input and change.
+    func stepControl(_ f: html.Node, by steps: int) {
+        let type = dom.InputType(f)
+        let value = valueOf(f)
+        let next = type == "number" ? dom.StepNumber(f, value, by: steps) : dom.StepDateTime(type, value, by: steps)
+        setValue(f, next)
+        caret = next.utf8.count
+        fieldAnchor = caret
+        _ = dispatch(dom.Event("change"), to: f)
+    }
+
     func clampedToView(_ p: draw.Point) -> draw.Point {
         var q = p
         if q.X < 0 { q.X = 0 }
@@ -550,6 +561,31 @@ extension Page {
                         sliding = control
                         slide(control, to: p)
                     }
+                    return .handled
+                }
+                if type == "color" || type == "file" {
+                    if control.HasAttribute("disabled") { return .handled }
+                    Focus(control)
+                    if type == "color", let cb = onPickColor { cb(control, valueOf(control)) }
+                    if type == "file", let cb = onPickFiles { cb(control, control.HasAttribute("multiple"), control.GetAttribute("accept") ?? "") }
+                    return .handled
+                }
+                // A number field's spinner: the top half steps up, the
+                // bottom half down.
+                if type == "number", let b = builder.byNode[control.Id], !control.HasAttribute("disabled") && !control.HasAttribute("readonly") {
+                    let pos = layout.PagePosition(b)
+                    let x = p.X + scroll.X - pos.x
+                    let y = p.Y + scroll.Y - pos.y
+                    if x >= b.ContentX + b.InnerWidth - 12 && x <= b.ContentX + b.InnerWidth {
+                        Focus(control)
+                        stepControl(control, by: y < b.Height / 2 ? 1 : -1)
+                        return .handled
+                    }
+                }
+                if dom.IsDateTimeType(type), let cb = onPickDate, !control.HasAttribute("disabled") {
+                    Focus(control)
+                    clickInField(control, at: p, clicks: clicks)
+                    cb(control, type, valueOf(control))
                     return .handled
                 }
                 if !control.HasAttribute("disabled") {
@@ -921,6 +957,14 @@ extension Page {
         let editable = !f.HasAttribute("disabled") && !f.HasAttribute("readonly")
         let shift = k.Shift
         let hasSelection = fieldRange() != nil
+        // The arrow keys step a number, a date or a time.
+        if f.TagName == "input" && (k.Code == "ArrowUp" || k.Code == "ArrowDown") {
+            let type = dom.InputType(f)
+            if type == "number" || dom.IsDateTimeType(type) {
+                if editable { stepControl(f, by: k.Code == "ArrowUp" ? 1 : -1) }
+                return .handled
+            }
+        }
         switch k.Code {
         case "Backspace":
             if !editable { return .handled }

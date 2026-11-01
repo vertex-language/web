@@ -1,6 +1,7 @@
 package layout
 
 import (
+    "web/dom"
     "image/draw"
     "web/cascade"
     "web/css"
@@ -252,10 +253,18 @@ public final class BoxTreeBuilder {
                 box.Text = Values[node.Id] ?? (node.GetAttribute("value") ?? "")
                 box.IntrinsicWidth = 150
                 box.IntrinsicHeight = 20
-            case "color", "file", "date", "time", "month", "week", "datetime-local":
-                box.Replaced = .placeholder
-                box.IntrinsicWidth = 150
-                box.IntrinsicHeight = style.Face.LineHeight
+            case "color":
+                box.Replaced = .colorWell
+                box.Text = dom.SanitizedValue("color", Values[node.Id] ?? (node.GetAttribute("value") ?? ""))
+                box.IntrinsicWidth = 50
+                box.IntrinsicHeight = 27
+            case "file":
+                box.Replaced = .fileInput
+                let chosen = Values[node.Id] ?? ""
+                box.Text = chosen.isEmpty ? (node.HasAttribute("multiple") ? "No files chosen" : "No file chosen") : chosen
+                let face = style.Face
+                box.IntrinsicWidth = face.Measure("Choose File") + 16 + 8 + face.Measure(box.Text)
+                box.IntrinsicHeight = face.LineHeight + 6
             default:
                 box.Replaced = .textInput
                 box.Text = Values[node.Id] ?? (node.GetAttribute("value") ?? "")

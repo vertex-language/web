@@ -1062,6 +1062,57 @@ func testDragAndDrop() {
 }
 
 @MainActor
+func testInputTypes() {
+    print("number, date and time, color and file inputs")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(400, 400))
+    view.LoadHTML("""
+    <style>body { margin: 0 } input { display: block; width: 150px; height: 20px; border: 0; padding: 0; margin: 0 }</style>
+    <input id=n type=number value=5 step=2 max=8>
+    <input id=d type=date value=2026-02-28><input id=t type=time value=23:59><input id=m type=month value=2026-12>
+    <input id=dt type=datetime-local value=2026-12-31T23:59><input id=bad type=date value=2026-13-01>
+    <input id=c type=color value=#ff0000><input id=f type=file>
+    """)
+    func node(_ id: string) -> html.Node { return view.QuerySelector("#" + id)! }
+    func key(_ id: string, _ code: string) {
+        view.Focus(node(id))
+        _ = view.Handle(.keyDown(web.Key(Key: code, Code: code)))
+    }
+    key("n", "ArrowUp")
+    check(view.ValueOf(node("n")) == "7", "ArrowUp steps a number by its step (got \(view.ValueOf(node("n"))))")
+    key("n", "ArrowUp")
+    check(view.ValueOf(node("n")) == "8", "and stops at max (got \(view.ValueOf(node("n"))))")
+    let nb = view.BoundsOf(node("n"))!
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(nb.X + nb.Width - 4, nb.Y + nb.Height - 3))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(nb.X + nb.Width - 4, nb.Y + nb.Height - 3))))
+    check(view.ValueOf(node("n")) == "6", "the spinner's lower half steps down (got \(view.ValueOf(node("n"))))")
+    key("d", "ArrowUp")
+    key("t", "ArrowUp")
+    key("m", "ArrowUp")
+    key("dt", "ArrowUp")
+    check(view.ValueOf(node("d")) == "2026-03-01" && view.ValueOf(node("t")) == "00:00" && view.ValueOf(node("m")) == "2027-01" && view.ValueOf(node("dt")) == "2027-01-01T00:00",
+          "the arrow keys step a date, a time, a month and a date-time across their ends (got \(view.ValueOf(node("d"))) \(view.ValueOf(node("t"))) \(view.ValueOf(node("m"))) \(view.ValueOf(node("dt"))))")
+    check(view.ValueOf(node("bad")) == "", "a date that isn't one is no value")
+    var picked = ""
+    var changes = 0
+    view.OnPickColor { n, current in picked = current }
+    _ = view.Document!.AddEventListener(node("c"), "change", { e in changes += 1 })
+    let cb = view.BoundsOf(node("c"))!
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(cb.X + 5, cb.Y + 5))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(cb.X + 5, cb.Y + 5))))
+    check(picked == "#ff0000", "a color well asks the host for a color")
+    view.SetControlValue(node("c"), "#00FF00")
+    check(view.ValueOf(node("c")) == "#00ff00" && changes == 1 && view.BoxFor(node("c"))!.Text == "#00ff00", "and shows what it answers, with change")
+    var asked = false
+    view.OnPickFiles { n, multiple, accept in asked = true }
+    let fb = view.BoundsOf(node("f"))!
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(fb.X + 5, fb.Y + 5))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(fb.X + 5, fb.Y + 5))))
+    view.SetFiles(node("f"), ["/tmp/notes/a.txt"])
+    check(asked && view.BoxFor(node("f"))!.Text == "a.txt" && view.FilesOf(node("f")) == ["/tmp/notes/a.txt"], "a file input asks for files and shows the one chosen")
+}
+
+@MainActor
 func testPointerEventsAndUserSelect() {
     print("pointer-events and user-select")
     let view = web.Page()
@@ -1303,6 +1354,7 @@ func main() async -> int32 {
     testSmoothScrollAndSnap()
     testDialogsAndPopovers()
     testDragAndDrop()
+    testInputTypes()
     testPointerEventsAndUserSelect()
     testRange()
     await testDeferredImages()
