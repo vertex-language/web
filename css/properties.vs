@@ -65,6 +65,14 @@ public enum Prop: int32 {
     case borderImageWidth
     case borderImageOutset
     case borderImageRepeat
+    case columnCount
+    case columnWidth
+    case columnRuleWidth
+    case columnRuleStyle
+    case columnRuleColor
+    case columnFill
+    case columnSpan
+    case breakInside
     case outlineWidth
     case outlineColor
     case accentColor
@@ -304,6 +312,9 @@ let propNames: [string: Prop] = [
     "border-image-source": .borderImageSource, "border-image-slice": .borderImageSlice,
     "border-image-width": .borderImageWidth, "border-image-outset": .borderImageOutset,
     "border-image-repeat": .borderImageRepeat,
+    "column-count": .columnCount, "column-width": .columnWidth, "column-rule-width": .columnRuleWidth,
+    "column-rule-style": .columnRuleStyle, "column-rule-color": .columnRuleColor, "column-fill": .columnFill,
+    "column-span": .columnSpan, "break-inside": .breakInside, "page-break-inside": .breakInside,
     "transform": .transform, "-webkit-transform": .transform, "transform-origin": .transformOrigin,
     "-webkit-transform-origin": .transformOrigin, "translate": .translate, "rotate": .rotate, "scale": .scale,
     "transition-property": .transitionProperty, "transition-duration": .transitionDuration,
@@ -652,9 +663,9 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
          "font-variant", "font-stretch", "font-feature-settings", "src", "unicode-range",
          "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
          "hyphens", "direction",
-         "unicode-bidi", "writing-mode", "columns", "column-count", "column-width", "caption-side",
+         "unicode-bidi", "writing-mode", "caption-side",
          "empty-cells", "speak", "orphans", "widows", "page-break-before", "page-break-after",
-         "break-inside", "font-display",
+         "font-display",
          "box-decoration-break",
          "text-size-adjust", "-webkit-text-size-adjust", "-webkit-tap-highlight-color",
          "list-style-image", "font-kerning",
@@ -662,6 +673,23 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
          "font-optical-sizing",
          "unused-placeholder-property":
         break
+    case "columns":
+        // A count and a width, in either order, either auto.
+        var count: Value = .auto
+        var width: Value = .auto
+        for t in tokens {
+            if t.Kind == .number && t.NumberVal >= 1 { count = .number(t.NumberVal.rounded(.down)); continue }
+            if t.Kind == .ident && lower(t.Value) == "auto" { continue }
+            guard let w = parseLengthValue(t, allowAuto: false) else { return [] }
+            width = w
+        }
+        set(.columnCount, count)
+        set(.columnWidth, width)
+    case "column-rule":
+        let parts = parseBorderShorthand(tokens)
+        set(.columnRuleWidth, parts.width)
+        set(.columnRuleStyle, parts.style)
+        set(.columnRuleColor, parts.color)
     case "border-image", "-webkit-border-image":
         // An image, slices with fill, then / widths and / outsets, and
         // the repeats, in any order around the slices.
@@ -776,6 +804,8 @@ func longhandsOf(_ name: string) -> [Prop] {
     case "border-style": return borderStyleProps
     case "border-color": return borderColorProps
     case "mask", "-webkit-mask": return [.maskImage]
+    case "columns": return [.columnCount, .columnWidth]
+    case "column-rule": return [.columnRuleWidth, .columnRuleStyle, .columnRuleColor]
     case "border-image", "-webkit-border-image": return [.borderImageSource, .borderImageSlice, .borderImageWidth, .borderImageOutset, .borderImageRepeat]
     case "border": return borderWidthProps + borderStyleProps + borderColorProps
     // One side's width, style and color: what var() in border-top waits
@@ -1578,7 +1608,30 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
     case .marginTop, .marginRight, .marginBottom, .marginLeft:
         if let c = calcValue(tokens) { return c }
         return parseLengthValue(t, allowAuto: true)
+    case .columnCount:
+        if kw == "auto" { return .auto }
+        if t.Kind == .number && t.NumberVal >= 1 { return .number(t.NumberVal.rounded(.down)) }
+        return nil
+    case .columnWidth:
+        if kw == "auto" { return .auto }
+        return calcValue(tokens) ?? parseLengthValue(t, allowAuto: false)
+    case .columnRuleWidth:
+        return parseBorderWidth(t)
+    case .columnRuleStyle:
+        return parseBorderStyle(t)
+    case .columnRuleColor:
+        return parseColorValue(t)
+    case .columnFill:
+        return kw == "balance" || kw == "auto" || kw == "balance-all" ? .keyword(kw) : nil
+    case .columnSpan:
+        return kw == "none" || kw == "all" ? .keyword(kw) : nil
+    case .breakInside:
+        switch kw {
+        case "auto", "avoid", "avoid-column", "avoid-page", "avoid-region": return .keyword(kw)
+        default: return nil
+        }
     case .paddingTop, .paddingRight, .paddingBottom, .paddingLeft, .textIndent, .rowGap, .columnGap:
+        if (prop == .rowGap || prop == .columnGap) && kw == "normal" { return .normal }
         if let c = calcValue(tokens) { return c }
         return parseLengthValue(t, allowAuto: false)
     case .borderTopWidth, .borderRightWidth, .borderBottomWidth, .borderLeftWidth, .outlineWidth:

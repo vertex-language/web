@@ -127,6 +127,12 @@ public final class Box {
     /// The content height known before the content is laid out, when
     /// the height is given: what children's percentages measure against.
     public var DefiniteInnerHeight: float32? = nil
+    /// A multi-column box's columns as laid out: how many hold content,
+    /// their width, the gap between them, and how tall they are.
+    public var ColumnsUsed: int = 0
+    public var ColumnWidthUsed: float32 = 0
+    public var ColumnGapUsed: float32 = 0
+    public var ColumnHeightUsed: float32 = 0
 
     public init(kind: BoxKind, style: cascade.ComputedStyle, node: html.Node?) {
         Id = nextBoxId
@@ -165,7 +171,7 @@ public final class Box {
     /// margins do not collapse through it and floats stay inside.
     public var IsFormattingRoot: bool {
         if Kind != .block { return true }
-        if Style.IsOutOfFlow || Style.ClipsOverflow || Style.IsFlexContainer || Style.IsGridContainer || Style.ContainLayout { return true }
+        if Style.IsOutOfFlow || Style.ClipsOverflow || Style.IsFlexContainer || Style.IsGridContainer || Style.ContainLayout || Style.IsMultiColumn { return true }
         if Style.Display == .table || Style.Display == .tableCell || Style.Display == .inlineBlock { return true }
         return false
     }

@@ -479,6 +479,57 @@ func testControls() {
     check(l.rect("pic")!.Height == 48, "while an image's width scales its height by its ratio")
 }
 
+func testColumns() {
+    print("Multi-column")
+    guard let l = layoutOf("""
+    <body style='margin:0'>
+    <div id=mc style='width:620px;column-count:3;column-gap:10px'>
+    <div id=d0 style='height:50px'></div><div id=d1 style='height:50px'></div><div id=d2 style='height:50px'></div>
+    <div id=d3 style='height:50px'></div><div id=d4 style='height:50px'></div><div id=d5 style='height:50px'></div>
+    </div>
+    <div id=after style='height:10px'></div>
+    </body>
+    """) else { check(false, "layout"); return }
+    let d2 = l.rect("d2")!
+    let d5 = l.rect("d5")!
+    check(l.rect("d0")! == draw.Rect(0, 0, 200, 50) && l.rect("d1")!.Y == 50, "the first column takes the first blocks, at the column's width (got \(l.rect("d0")!))")
+    check(d2 == draw.Rect(210, 0, 200, 50) && d5 == draw.Rect(420, 50, 200, 50), "the columns balance, the gap between them (got \(d2) \(d5))")
+    check(l.rect("mc")!.Height == 100 && l.rect("after")!.Y == 100, "the box is as tall as its columns (got \(l.rect("mc")!.Height))")
+
+    guard let w = layoutOf("<body style='margin:0;font-size:16px'><div id=mc style='width:620px;columns:150px'><div style='height:10px'></div></div></body>") else { check(false, "layout"); return }
+    check(near(w.box("mc")!.ColumnWidthUsed, 196) && w.box("mc")!.ColumnGapUsed == 16, "column-width fits as many as it can, the gap normal 1em (got \(w.box("mc")!.ColumnWidthUsed))")
+
+    guard let t = layoutOf("<body style='margin:0'><div style='width:400px;column-count:2;column-gap:20px;font-size:16px;line-height:20px'><p id=p style='margin:0'>one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty</p></div></body>") else { check(false, "layout"); return }
+    let lines = t.box("p")!.Lines
+    var inSecond = 0
+    var maxBottom: float32 = 0
+    for line in lines {
+        if line.X >= 190 { inSecond += 1 }
+        if line.Y + line.Height > maxBottom { maxBottom = line.Y + line.Height }
+    }
+    check(lines.count >= 2 && inSecond > 0 && inSecond <= (lines.count + 1) / 2, "a paragraph's lines run on into the next column (got \(inSecond) of \(lines.count))")
+    check(near(maxBottom, float32((lines.count + 1) / 2) * 20), "and the columns share them evenly (got \(maxBottom))")
+
+    guard let a = layoutOf("""
+    <body style='margin:0'><div id=mc style='width:400px;column-count:2;column-gap:0'>
+    <div style='height:60px'></div>
+    <div id=mid style='break-inside:avoid'><div style='height:30px'></div><div style='height:30px'></div></div>
+    <div style='height:60px'></div>
+    </div></body>
+    """) else { check(false, "layout"); return }
+    check(a.rect("mid")!.Y == 60 && a.rect("mid")!.X == 0 && a.rect("mc")!.Height == 120, "break-inside: avoid keeps a block in one column (got \(a.rect("mid")!) \(a.rect("mc")!.Height))")
+
+    guard let o = layoutOf("""
+    <body style='margin:0'><div id=mc style='width:400px;height:100px;column-count:2;column-gap:0;column-fill:auto'>
+    <div style='height:50px'></div><div style='height:50px'></div><div style='height:50px'></div><div style='height:50px'></div><div id=last style='height:50px'></div>
+    </div></body>
+    """) else { check(false, "layout"); return }
+    check(o.rect("last")!.X == 400 && o.rect("last")!.Y == 0 && o.box("mc")!.ColumnsUsed == 3, "under a set height, content past the last column makes more (got \(o.rect("last")!))")
+
+    guard let f = layoutOf("<body style='margin:0'><div id=mc style='float:left;column-count:2;column-gap:10px'><div style='width:100px;height:40px'></div><div style='width:100px;height:40px'></div></div></body>") else { check(false, "layout"); return }
+    check(f.rect("mc")!.Width == 210 && f.rect("mc")!.Height == 40, "a shrink-to-fit box makes room for every column (got \(f.rect("mc")!))")
+}
+
 func main() -> int32 {
     testBlockLayout()
     testImages()
@@ -491,6 +542,7 @@ func main() -> int32 {
     testPseudoElements()
     testGrid()
     testPositioning()
+    testColumns()
     if failures == 0 {
         print("ALL LAYOUT CHECKS PASSED")
         return 0

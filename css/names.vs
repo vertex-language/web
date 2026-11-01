@@ -19,7 +19,7 @@ let shorthandNames: [string] = [
     "inset-block-start", "inset-block-end", "inline-size", "block-size", "min-inline-size", "max-inline-size",
     "min-block-size", "max-block-size", "border-inline", "border-block", "border-inline-start", "border-inline-end",
     "border-block-start", "border-block-end", "border-inline-end-width", "border-block-start-width",
-    "border-block-end-width", "grid-template", "grid", "place-self", "place-content", "text-wrap", "overscroll-behavior", "contain-intrinsic-size", "scroll-padding", "scroll-margin", "scroll-padding-block", "scroll-padding-inline", "scroll-margin-block", "scroll-margin-inline", "transition", "-webkit-transition", "animation", "-webkit-animation", "container", "mask", "-webkit-mask", "border-image", "-webkit-border-image"
+    "border-block-end-width", "grid-template", "grid", "place-self", "place-content", "text-wrap", "overscroll-behavior", "contain-intrinsic-size", "scroll-padding", "scroll-margin", "scroll-padding-block", "scroll-padding-inline", "scroll-margin-block", "scroll-margin-inline", "transition", "-webkit-transition", "animation", "-webkit-animation", "container", "mask", "-webkit-mask", "border-image", "-webkit-border-image", "columns", "column-rule"
 ]
 
 /// Properties the engine knows and parses past, but does not apply yet:
@@ -32,9 +32,9 @@ let unappliedNames: [string] = [
     "unicode-range",
     "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
     "hyphens",
-    "direction", "unicode-bidi", "writing-mode", "columns", "column-count", "column-width",
+    "direction", "unicode-bidi", "writing-mode",
     "caption-side", "empty-cells", "speak", "orphans", "widows", "page-break-before",
-    "page-break-after", "break-inside", "font-display",
+    "page-break-after", "font-display",
     "box-decoration-break", "text-size-adjust", "-webkit-text-size-adjust",
     "-webkit-tap-highlight-color",
     "list-style-image", "font-kerning", "text-align-last", "text-justify",

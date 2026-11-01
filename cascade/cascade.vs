@@ -1467,7 +1467,24 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
     case .flexBasis: if let l = length(v, s, ctx) { s.FlexBasis = l }
     case .order: if case .number(let n) = v { s.Order = int32(n) } else { s.Order = 0 }
     case .rowGap: if let l = length(v, s, ctx) { s.RowGap = l }
-    case .columnGap: if let l = length(v, s, ctx) { s.ColumnGap = l }
+    case .columnGap:
+        if case .normal = v {
+            s.ColumnGap = .px(0)
+            s.ColumnGapNormal = true
+        } else if let l = length(v, s, ctx) {
+            s.ColumnGap = l
+            s.ColumnGapNormal = false
+        }
+    case .columnCount:
+        if case .number(let n) = v { s.ColumnCount = int32(n) } else { s.ColumnCount = 0 }
+    case .columnWidth:
+        if case .auto = v { s.ColumnWidth = nil } else if let p = pixels(v, s, ctx) { s.ColumnWidth = p > 0 ? p : 1 }
+    case .columnRuleWidth: if let p = pixels(v, s, ctx) { s.ColumnRuleWidth = p }
+    case .columnRuleStyle: if let k = keywordOf(v) { s.ColumnRuleStyle = borderStyleOf(k) }
+    case .columnRuleColor: s.ColumnRuleColor = colorOf(v)
+    case .columnFill: s.ColumnBalance = keywordOf(v) != "auto"
+    case .columnSpan: s.ColumnSpanAll = keywordOf(v) == "all"
+    case .breakInside: s.BreakInsideAvoid = (keywordOf(v) ?? "auto").hasPrefix("avoid")
     case .tableLayout: if let k = keywordOf(v) { s.TableLayout = k == "fixed" ? .fixed : .auto }
     case .gridTemplateColumns:
         if case .tracks(let t) = v { s.GridColumns = resolveTracks(t, s, ctx) } else { s.GridColumns = [] }
@@ -2160,7 +2177,15 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .flexBasis: b.FlexBasis = a.FlexBasis
     case .order: b.Order = a.Order
     case .rowGap: b.RowGap = a.RowGap
-    case .columnGap: b.ColumnGap = a.ColumnGap
+    case .columnGap: b.ColumnGap = a.ColumnGap; b.ColumnGapNormal = a.ColumnGapNormal
+    case .columnCount: b.ColumnCount = a.ColumnCount
+    case .columnWidth: b.ColumnWidth = a.ColumnWidth
+    case .columnRuleWidth: b.ColumnRuleWidth = a.ColumnRuleWidth
+    case .columnRuleStyle: b.ColumnRuleStyle = a.ColumnRuleStyle
+    case .columnRuleColor: b.ColumnRuleColor = a.ColumnRuleColor
+    case .columnFill: b.ColumnBalance = a.ColumnBalance
+    case .columnSpan: b.ColumnSpanAll = a.ColumnSpanAll
+    case .breakInside: b.BreakInsideAvoid = a.BreakInsideAvoid
     case .tableLayout: b.TableLayout = a.TableLayout
     case .gridTemplateColumns: b.GridColumns = a.GridColumns
     case .gridTemplateRows: b.GridRows = a.GridRows

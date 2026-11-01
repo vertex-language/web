@@ -682,6 +682,20 @@ final class DisplayListBuilder {
             styledRing(rect, widths, colors, radii, [styleName(s.BorderTopStyle), styleName(s.BorderRightStyle),
                                                      styleName(s.BorderBottomStyle), styleName(s.BorderLeftStyle)])
         }
+        // column-rule: down the middle of each gap between columns
+        // that hold content, as tall as the columns.
+        if s.IsMultiColumn && box.ColumnsUsed > 1 && s.ColumnRuleWidth > 0 && s.ColumnRuleStyle != .none && s.ColumnRuleStyle != .hidden {
+            let w = s.ColumnRuleWidth
+            let c = color(s.ColumnRuleColor ?? s.Color)
+            let style = styleName(s.ColumnRuleStyle)
+            var i = 1
+            while i < box.ColumnsUsed {
+                let mid = x + box.ContentX + float32(i) * (box.ColumnWidthUsed + box.ColumnGapUsed) - box.ColumnGapUsed / 2
+                let rule = draw.Rect(mid - w / 2, y + box.ContentY, w, box.ColumnHeightUsed)
+                styledRing(rule, draw.Edges(0, 0, 0, w), [c, c, c, c], draw.Radii.zero, [style, style, style, style])
+                i += 1
+            }
+        }
     }
 
     /// A box's border-image, or nil where its image isn't loaded: the

@@ -206,6 +206,8 @@ public final class Layout {
             height = layoutFlex(box, contentWidth: contentWidth, flow: flow)
         } else if box.Style.IsGridContainer {
             height = layoutGrid(box, contentWidth: contentWidth, flow: flow)
+        } else if box.Style.IsMultiColumn && box.Kind == .block {
+            height = layoutColumns(box, contentWidth: contentWidth, flow: flow)
         } else if box.HasInlineChildren {
             height = layoutInline(box, contentWidth: contentWidth, flow: flow)
         } else {
@@ -536,6 +538,18 @@ public final class Layout {
                 let m = c.Margin.Horizontal
                 if w.min + m > minW { minW = w.min + m }
                 if w.max + m > maxW { maxW = w.max + m }
+            }
+        }
+        if s.IsMultiColumn && box.Kind == .block {
+            // Columns side by side: each as wide as the content needs,
+            // or column-width where that is given (Multi-column 1 §3.4).
+            let gap = s.ColumnGapNormal ? s.FontSize : s.ColumnGap.Or(0, base: 0)
+            let n = float32(s.ColumnCount > 0 ? s.ColumnCount : 1)
+            if let cw = s.ColumnWidth {
+                minW = minW > cw ? minW : cw
+                maxW = n * (maxW > cw ? maxW : cw) + (n - 1) * gap
+            } else {
+                maxW = n * maxW + (n - 1) * gap
             }
         }
         if let max = s.MaxWidth.Pixels {

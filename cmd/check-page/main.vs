@@ -1407,6 +1407,26 @@ func testBorderImage() {
     check(at(205, 30).R < 64 && at(254, 30).R > 190, "the longhands cut a gradient into slices (got \(at(205, 30)) \(at(254, 30)))")
 }
 
+@MainActor
+func testColumnsPaint() {
+    print("Multi-column painting")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(300, 100))
+    view.LoadHTML("""
+    <body style="margin: 0; background: white">
+    <div style="width: 300px; column-count: 2; column-gap: 20px; column-rule: 4px solid rgb(255,0,0); font-size: 16px; line-height: 20px">
+    <p id=p style="margin: 0">alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu</p>
+    </div>
+    </body>
+    """)
+    var px = [uint8](repeating: 0, count: 300 * 100 * 4)
+    view.Draw(into: &px, width: 300, height: 100, scale: 1)
+    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 300, x, y) }
+    check(at(150, 5) == draw.Color(255, 0, 0) && at(140, 5) != draw.Color(255, 0, 0), "column-rule runs down the middle of the gap (got \(at(150, 5)) \(at(140, 5)))")
+    check(countDark(px, 300, draw.IRect(160, 0, 140, 40)) > 20, "the text goes on in the second column")
+    check(view.ElementAt(draw.Point(170, 10))?.GetAttribute("id") == "p", "a click on text in the second column lands on its paragraph")
+}
+
 func main() async -> int32 {
     testStacking()
     testTextFeatures()
@@ -1432,6 +1452,7 @@ func main() async -> int32 {
     testPointerEventsAndUserSelect()
     testCompositing()
     testBorderImage()
+    testColumnsPaint()
     testRange()
     await testDeferredImages()
     await testSVGImages()

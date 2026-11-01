@@ -85,6 +85,26 @@ public final class ComputedStyle {
     public var BorderImageOutsets: [BorderImageSide] = [.times(0), .times(0), .times(0), .times(0)]
     public var BorderImageRepeat: [string] = ["stretch", "stretch"]
 
+    /// Multi-column: column-count (0 for auto), column-width (nil for
+    /// auto), the rule between columns, whether the columns balance,
+    /// and whether column-gap is normal (1em here).
+    public var ColumnCount: int32 = 0
+    public var ColumnWidth: float32? = nil
+    public var ColumnRuleWidth: float32 = 3
+    public var ColumnRuleStyle: BorderStyle = .none
+    public var ColumnRuleColor: draw.Color? = nil
+    public var ColumnBalance: bool = true
+    public var ColumnGapNormal: bool = true
+    public var ColumnSpanAll: bool = false
+    /// break-inside: avoid and its kin.
+    public var BreakInsideAvoid: bool = false
+
+    /// Whether a block flows its content into columns.
+    public var IsMultiColumn: bool {
+        if ColumnCount == 0 && ColumnWidth == nil { return false }
+        return !IsFlexContainer && !IsGridContainer && Display != .table && Display != .inlineTable && Display != .tableCell
+    }
+
     public var HasBorderImage: bool { return !BorderImageURL.isEmpty || BorderImageGradient != nil }
     /// transform's functions, and the translate, rotate and scale
     /// properties, each empty for none; TransformMatrix puts them
