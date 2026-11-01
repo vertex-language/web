@@ -348,6 +348,9 @@ public struct BackgroundImage {
     /// slice 261 pixels down; `right 10px` is 10 pixels in from the right.
     public var OffsetX: float32 = 0
     public var OffsetY: float32 = 0
+    /// Image pixels to a CSS pixel: 2 for image-set()'s `2x` candidate,
+    /// which draws at half its pixel size.
+    public var Density: float32 = 1
 
     public init(url: string) {
         URL = url

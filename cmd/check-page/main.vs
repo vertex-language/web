@@ -1555,6 +1555,89 @@ func testTextClip() {
     check(other == 0, "and the transparent fill leaves no text color over it (\(other) other pixels)")
 }
 
+@MainActor
+func testGradientLengths() {
+    print("Gradient stops at lengths")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(100, 60))
+    view.LoadHTML("""
+    <body style="margin: 0; background: white">
+    <div style="height: 20px; background: linear-gradient(to right, rgb(255,0,0) 20px, rgb(0,0,255) 20px)"></div>
+    <div style="height: 20px; background: linear-gradient(to right, rgb(255,0,0) calc(100% - 10px), rgb(0,0,255) calc(100% - 10px))"></div>
+    <div style="height: 20px; background: radial-gradient(circle 50px at 0 0, rgb(255,0,0) 10px, rgb(0,0,255) 10px)"></div>
+    </body>
+    """)
+    var px = [uint8](repeating: 0, count: 100 * 60 * 4)
+    view.Draw(into: &px, width: 100, height: 60, scale: 1)
+    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 100, x, y) }
+    let red = draw.Color(255, 0, 0)
+    let blue = draw.Color(0, 0, 255)
+    check(at(10, 10) == red && at(30, 10) == blue, "a stop at 20px is 20 pixels along (got \(at(10, 10)) \(at(30, 10)))")
+    check(at(85, 30) == red && at(95, 30) == blue, "calc(100% - 10px) is 10 pixels from the end (got \(at(85, 30)) \(at(95, 30)))")
+    check(at(3, 43) == red && at(20, 55) == blue, "a radial stop at 10px is 10 pixels out (got \(at(3, 43)) \(at(20, 55)))")
+    // At two device pixels to a CSS pixel, the lengths scale too.
+    var px2 = [uint8](repeating: 0, count: 200 * 120 * 4)
+    view.Draw(into: &px2, width: 200, height: 120, scale: 2)
+    // Interpolation in a color space.
+    let iv = web.Page()
+    iv.SetViewportSize(draw.Size(101, 30))
+    iv.LoadHTML("""
+    <body style="margin: 0; background: white">
+    <div style="height: 10px; background: linear-gradient(to right in oklab, rgb(255,0,0), rgb(0,0,255))"></div>
+    <div style="height: 10px; background: color-mix(in oklab, rgb(255,0,0), rgb(0,0,255))"></div>
+    <div style="height: 10px; background: linear-gradient(to right in hsl longer hue, rgb(255,0,0), rgb(0,0,255))"></div>
+    </body>
+    """)
+    var ip = [uint8](repeating: 0, count: 101 * 30 * 4)
+    iv.Draw(into: &ip, width: 101, height: 30, scale: 1)
+    let mid = pixelAt(ip, 101, 50, 5)
+    let mix = pixelAt(ip, 101, 50, 15)
+    check(abs(int(mid.R) - int(mix.R)) <= 3 && abs(int(mid.G) - int(mix.G)) <= 3 && abs(int(mid.B) - int(mix.B)) <= 3 && (mid.G > 20 || mid.R != 127),
+          "a gradient in oklab is color-mix(in oklab) halfway (got \(mid), mix \(mix))")
+    let hue = pixelAt(ip, 101, 50, 25)
+    check(hue.G > 200 && hue.R < 60 && hue.B < 60, "in hsl longer hue goes round through green (got \(hue))")
+    check(pixelAt(px2, 200, 36, 20) == red && pixelAt(px2, 200, 44, 20) == blue, "and at scale 2, 40 device pixels along (got \(pixelAt(px2, 200, 36, 20)) \(pixelAt(px2, 200, 44, 20)))")
+}
+
+@MainActor
+func testImageSet() {
+    print("image-set()")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(40, 20))
+    view.LoadHTML("""
+    <body style="margin: 0; background: white">
+    <div style="width: 20px; height: 20px; background: image-set(url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR4nGP4z8AARwzEcQCukw/x0F8jngAAAABJRU5ErkJggg==) 1x, url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEElEQVR4nGNgYPiPAw0pCQCpcD/BFMrqcwAAAABJRU5ErkJggg==) 2x) no-repeat"></div>
+    </body>
+    """)
+    var px = [uint8](repeating: 0, count: 40 * 20 * 4)
+    view.Draw(into: &px, width: 40, height: 20, scale: 1)
+    check(pixelAt(px, 40, 2, 2) == draw.Color(0, 0, 255) && pixelAt(px, 40, 6, 6) == draw.Color(255, 255, 255),
+          "the 2x candidate is chosen and drawn at half its pixel size (got \(pixelAt(px, 40, 2, 2)) \(pixelAt(px, 40, 6, 6)))")
+}
+
+@MainActor
+func testTypedAttr() {
+    print("Typed attr()")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(200, 100))
+    view.LoadHTML("""
+    <style>
+    .bar { height: 10px; width: attr(data-w px, 5px); background: attr(data-color type(<color>), black) }
+    .label::after { content: attr(data-n) }
+    </style>
+    <div id=a class=bar data-w=120 data-color="rgb(0, 128, 0)"></div>
+    <div id=b class=bar></div>
+    <div id=c style="width: attr(data-pct %); height: 10px" data-pct=50></div>
+    """)
+    check(view.BoxFor(view.QuerySelector("#a")!)!.Width == 120, "attr(data-w px) is a length (got \(view.BoxFor(view.QuerySelector("#a")!)!.Width))")
+    check(view.BoxFor(view.QuerySelector("#a")!)!.Style.BackgroundColor == draw.Color(0, 128, 0), "attr(… type(<color>)) parses the value as a color")
+    check(view.BoxFor(view.QuerySelector("#b")!)!.Width == 5 && view.BoxFor(view.QuerySelector("#b")!)!.Style.BackgroundColor == draw.Color(0, 0, 0),
+          "a missing attribute takes the fallback")
+    check(view.BoxFor(view.QuerySelector("#c")!)!.Width == 92, "attr(… %) in an inline style is a percentage of the 184px body (got \(view.BoxFor(view.QuerySelector("#c")!)!.Width))")
+    view.Document!.ElementFor(view.QuerySelector("#a")!).SetAttribute("data-w", "30")
+    check(view.BoxFor(view.QuerySelector("#a")!)!.Width == 30, "changing the attribute restyles (got \(view.BoxFor(view.QuerySelector("#a")!)!.Width))")
+}
+
 func main() async -> int32 {
     testStacking()
     testTextFeatures()
@@ -1584,6 +1667,9 @@ func main() async -> int32 {
     testRightToLeftPaint()
     testFixed()
     testTextClip()
+    testGradientLengths()
+    testImageSet()
+    testTypedAttr()
     testRange()
     await testDeferredImages()
     await testSVGImages()

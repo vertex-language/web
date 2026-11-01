@@ -390,8 +390,19 @@ func parseColorMix(_ b: [uint8], _ start: int, _ end: int) -> draw.Color? {
     let alphaScale = total < 100 ? total / 100 : 1
     w1 = w1 / total
     w2 = w2 / total
-    var a = fromSRGB(space, srgbOf(one.color))
-    var c = fromSRGB(space, srgbOf(two.color))
+    var mixed = mixIn(space, hueMethod, one.color, two.color, w2)
+    mixed.A = unitByte(float64(mixed.A) / 255 * alphaScale)
+    return mixed
+}
+
+/// Two colors mixed in a space, t of the way from the first to the
+/// second, hues going round as hueMethod says: color-mix(), and a
+/// gradient's `in <space>`.
+func mixIn(_ space: string, _ hueMethod: string, _ first: draw.Color, _ second: draw.Color, _ t: float64) -> draw.Color {
+    let w1 = 1 - t
+    let w2 = t
+    var a = fromSRGB(space, srgbOf(first))
+    var c = fromSRGB(space, srgbOf(second))
     let h = hueIndex(space)
     if h >= 0 {
         // An achromatic color's hue is powerless: it takes the other's.
@@ -425,7 +436,7 @@ func parseColorMix(_ b: [uint8], _ start: int, _ end: int) -> draw.Color? {
         }
         i += 1
     }
-    return toDrawColor(space, SpaceColor(c: out, alpha: alpha * alphaScale, missing: [false, false, false]))
+    return toDrawColor(space, SpaceColor(c: out, alpha: alpha, missing: [false, false, false]))
 }
 
 /// One color of a color-mix(), with its percentage before or after it.

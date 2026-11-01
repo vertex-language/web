@@ -1,6 +1,9 @@
 package cascade
 
-import "web/css"
+import (
+    "web/css"
+    "web/html"
+)
 
 // Custom properties and var() (CSS Custom Properties for Cascading
 // Variables 1). A custom property (--x) cascades like any property and
@@ -34,7 +37,7 @@ struct SplitDecls {
                 continue
             }
             let props = css.LonghandsOf(d.Property)
-            if usesVar(d.Tokens) {
+            if usesVar(d.Tokens) || usesAttr(d) {
                 if props.isEmpty { continue }
                 longhands = longhands.filter { l in l.Important != d.Important || !props.contains(l.Prop) }
                 pending = pending.filter { p in p.Important != d.Important || !overlap(css.LonghandsOf(p.Property), props) }
@@ -61,6 +64,72 @@ func overlap(_ a: [css.Prop], _ b: [css.Prop]) -> bool {
 func usesVar(_ tokens: [css.Token]) -> bool {
     for t in tokens where t.Kind == .function && css.lower(t.Value) == "var" { return true }
     return false
+}
+
+/// Whether a declaration calls attr() where it is substituted like var()
+/// (CSS Values 5): anywhere but content, which reads its own.
+func usesAttr(_ d: css.Declaration) -> bool {
+    return d.Property != "content" && !attrNames(d.Tokens).isEmpty
+}
+
+/// The attributes the attr() calls in tokens name.
+func attrNames(_ tokens: [css.Token]) -> [string] {
+    var out: [string] = []
+    var i = 0
+    while i + 1 < tokens.count {
+        if tokens[i].Kind == .function && css.lower(tokens[i].Value) == "attr" && tokens[i + 1].Kind == .ident {
+            out.append(css.lower(tokens[i + 1].Value))
+        }
+        i += 1
+    }
+    return out
+}
+
+/// attr(name <type>?, <fallback>?) for an element: the attribute as a
+/// string; with type(...) parsed as CSS; with a unit (px, %, em, number)
+/// a number in it. Absent, the fallback; with none, an empty string
+/// untyped and nothing typed (the declaration fails).
+func attrTokens(_ args: [css.Token], _ node: html.Node) -> [css.Token]? {
+    guard let name = args.first, name.Kind == .ident else { return nil }
+    var kind = ""
+    var fallback: [css.Token]? = nil
+    var k = 1
+    while k < args.count {
+        let a = args[k]
+        if a.Kind == .comma {
+            fallback = Array(args[(k + 1)...])
+            break
+        }
+        if a.Kind == .function && css.lower(a.Value) == "type" { kind = "type" }
+        else if a.Kind == .ident && kind.isEmpty { kind = css.lower(a.Value) }
+        else if a.Kind == .delim && a.Value == "%" { kind = "%" }
+        k += 1
+    }
+    guard let value = node.GetAttribute(css.lower(name.Value)) else {
+        if let f = fallback { return f }
+        return kind.isEmpty || kind == "raw-string" || kind == "string" ? [css.Token(kind: .string, value: "")] : nil
+    }
+    switch kind {
+    case "", "raw-string", "string":
+        return [css.Token(kind: .string, value: value)]
+    case "type":
+        let parsed = css.Tokenize(value).filter { $0.Kind != .eof }
+        return parsed.isEmpty ? fallback : parsed
+    default:
+        // A unit: the attribute is a number in it.
+        let b = [uint8](value.utf8)
+        var start = 0
+        while start < b.count && b[start] == 32 { start += 1 }
+        var end = b.count
+        while end > start && b[end - 1] == 32 { end -= 1 }
+        if start == end { return fallback }
+        let n = css.parseNumber(b, start, end)
+        let text = stringOf(b, start, end)
+        if n == 0 && text != "0" && !text.hasPrefix("0.") && !text.hasPrefix("-0") && text != ".0" { return fallback }
+        if kind == "number" { return [css.Token(kind: .number, numberVal: n)] }
+        if kind == "%" { return [css.Token(kind: .percentage, numberVal: n)] }
+        return [css.Token(kind: .dimension, unit: kind, numberVal: n)]
+    }
 }
 
 /// The custom properties an element sees: those its own rules declare,
@@ -91,14 +160,38 @@ final class CustomScope {
 /// Tokens with every var() replaced by its custom property's value, or
 /// its fallback; nil where one refers to nothing and has no fallback, or
 /// the references run too deep (a cycle).
-func substitute(_ tokens: [css.Token], _ scope: CustomScope?, _ depth: int = 0) -> [css.Token]? {
+func substitute(_ tokens: [css.Token], _ scope: CustomScope?, _ depth: int = 0, node: html.Node? = nil) -> [css.Token]? {
     if depth > 24 { return nil }
-    if !usesVar(tokens) { return tokens }
+    let attrs = node != nil && !attrNames(tokens).isEmpty
+    if !usesVar(tokens) && !attrs { return tokens }
     var out: [css.Token] = []
     var i = 0
     while i < tokens.count {
         let t = tokens[i]
-        if t.Kind != .function || css.lower(t.Value) != "var" {
+        let fname = t.Kind == .function ? css.lower(t.Value) : ""
+        if fname == "attr", let n = node {
+            // attr()'s arguments, to the matching parenthesis.
+            var args: [css.Token] = []
+            var level = 1
+            var j = i + 1
+            while j < tokens.count {
+                let a = tokens[j]
+                if a.Kind == .function || a.Kind == .openParen { level += 1 }
+                if a.Kind == .closeParen {
+                    level -= 1
+                    if level == 0 { break }
+                }
+                args.append(a)
+                j += 1
+            }
+            guard var sub = attrTokens(args, n) else { return nil }
+            if let resolved = substitute(sub, scope, depth + 1, node: node) { sub = resolved }
+            if !sub.isEmpty { sub[0].SpaceBefore = t.SpaceBefore }
+            out.append(contentsOf: sub)
+            i = j + 1
+            continue
+        }
+        if fname != "var" {
             out.append(t)
             i += 1
             continue
@@ -139,10 +232,10 @@ func substitute(_ tokens: [css.Token], _ scope: CustomScope?, _ depth: int = 0) 
         }
         var value: [css.Token]? = nil
         if let v = scope?.lookup(name.Value) {
-            value = substitute(v, scope, depth + 1)
+            value = substitute(v, scope, depth + 1, node: node)
         }
         if value == nil, let f = fallback {
-            value = substitute(f, scope, depth + 1)
+            value = substitute(f, scope, depth + 1, node: node)
         }
         guard var sub = value else { return nil }
         if !sub.isEmpty { sub[0].SpaceBefore = t.SpaceBefore }
@@ -176,8 +269,8 @@ func customScope(_ decls: [CustomDecl], parent: CustomScope?) -> CustomScope? {
 
 /// A declaration that waited for var(), substituted and parsed. One
 /// whose substitution fails is `unset`, as the spec has it.
-func expand(_ d: css.Declaration, _ scope: CustomScope?) -> [css.Longhand] {
-    var tokens = substitute(d.Tokens, scope) ?? [css.Token(kind: .ident, value: "unset")]
+func expand(_ d: css.Declaration, _ scope: CustomScope?, _ node: html.Node? = nil) -> [css.Longhand] {
+    var tokens = substitute(d.Tokens, scope, node: node) ?? [css.Token(kind: .ident, value: "unset")]
     if tokens.isEmpty { tokens = [css.Token(kind: .ident, value: "unset")] }
     let parsed = css.Longhands(css.Declaration(property: d.Property, value: css.Serialize(tokens), important: d.Important, tokens: tokens))
     if !parsed.isEmpty { return parsed }

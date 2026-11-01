@@ -707,8 +707,8 @@ final class DisplayListBuilder {
                     items.append(.gradient(shown, g, clip.radii))
                 }
             } else if !bg.URL.isEmpty, let img = images[bg.URL], img.Width > 0 && img.Height > 0 {
-                var tw = float32(img.Width)
-                var th = float32(img.Height)
+                var tw = float32(img.Width) / bg.Density
+                var th = float32(img.Height) / bg.Density
                 switch bg.Size {
                 case .cover:
                     let scale = maxf(paddingBox.Width / tw, paddingBox.Height / th)
@@ -1564,8 +1564,7 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
             let dr = device(gr)
             if dr.IsEmpty { continue }
             if var g = item.Gradient {
-                if let r = g.Radial { g.Radial = r.Scaled(scale) }
-                if let c = g.Conic { g.Conic = c.Scaled(scale) }
+                g = g.Scaled(scale)
                 canvas.FillGradient(dr, radii: item.Radii.Scaled(scale), g)
             }
         case .layer:
@@ -1633,8 +1632,7 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
                 let gw = draw.RoundToInt(area.Width)
                 let gh = draw.RoundToInt(area.Height)
                 if gw <= 0 || gh <= 0 { continue }
-                if let rs = g.Radial { g.Radial = rs.Scaled(scale) }
-                if let cs = g.Conic { g.Conic = cs.Scaled(scale) }
+                g = g.Scaled(scale)
                 var pixels = [uint8](repeating: 0, count: int(gw) * int(gh) * 4)
                 draw.WithCanvas(&pixels, width: gw, height: gh) { gc in
                     gc.FillGradient(draw.IRect(0, 0, gw, gh), radii: draw.Radii.zero, g)
@@ -1724,8 +1722,7 @@ func applyClipAndMask(_ layer: draw.Layer, _ item: PaintItem, scale: float32, dx
         alpha.Free()
     }
     if var g = item.Gradient {
-        if let r = g.Radial { g.Radial = r.Scaled(scale) }
-        if let c = g.Conic { g.Conic = c.Scaled(scale) }
+        g = g.Scaled(scale)
         layer.MaskGradient(box, g)
     }
     if let img = item.MaskImage {

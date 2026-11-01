@@ -169,6 +169,9 @@ public final class Page {
     var vectors: [string: svg.Document] = [:]
     /// The images the page names and hasn't decoded: LoadImages's.
     var pendingImages: [string] = []
+    /// Images styles name that loading was tried for, found or not:
+    /// what loadStyleImages doesn't ask for again.
+    var triedImages: [string: bool] = [:]
     var fontFaces: [string] = []
 
     var size: draw.Size
@@ -374,7 +377,9 @@ public final class Page {
         }
         for url in resolver.Author.ImageURLs { wanted.append(url) }
         pendingImages = []
+        triedImages = [:]
         for src in wanted {
+            triedImages[src] = true
             if images[src] == nil && vectors[src] == nil {
                 if src.hasPrefix("data:") {
                     if let decoded = format.DecodeDataURL(src) { images[src] = drawable(decoded) }
@@ -773,6 +778,7 @@ public final class Page {
             containerPasses = 0
         }
         if needsPaint {
+            if let r = root { loadStyleImages(r) }
             if let r = root {
                 var state = paint.State()
                 state.Focused = focused?.Id ?? 0
@@ -1266,4 +1272,36 @@ func decodeImage(_ bytes: [uint8]) -> draw.Image? {
 
 func drawable(_ img: image.RGBA) -> draw.Image {
     return draw.Image(width: int32(img.Width), height: int32(img.Height), pixels: img.Pixels)
+}
+
+extension Page {
+    /// Loads the images laid-out boxes' styles name and the page hasn't
+    /// tried yet: a background, mask or border image in an inline style,
+    /// or one a .vsx component's style gives after the page loaded.
+    func loadStyleImages(_ box: layout.Box) {
+        var wanted: [string] = []
+        func visit(_ b: layout.Box) {
+            let s = b.Style
+            if let bg = s.BackgroundImage, !bg.URL.isEmpty { wanted.append(bg.URL) }
+            if !s.MaskURL.isEmpty { wanted.append(s.MaskURL) }
+            if !s.BorderImageURL.isEmpty { wanted.append(s.BorderImageURL) }
+            for c in b.Children { visit(c) }
+            for p in b.Positioned where p.Parent?.Id != b.Id { visit(p) }
+        }
+        visit(box)
+        for src in wanted where triedImages[src] == nil && images[src] == nil && vectors[src] == nil {
+            triedImages[src] = true
+            if src.hasPrefix("data:") {
+                if let decoded = format.DecodeDataURL(src) { images[src] = drawable(decoded) }
+            } else if Configuration.DefersImages {
+                pendingImages.append(src)
+            } else if let bytes = Configuration.Fetcher.Fetch(Resolve(src)) {
+                if let doc = svg.ParseDocument(bytes) {
+                    vectors[src] = doc
+                } else if let decoded = decodeImage(bytes) {
+                    images[src] = decoded
+                }
+            }
+        }
+    }
 }

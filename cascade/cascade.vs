@@ -217,9 +217,14 @@ public final class RuleSet {
                 if unit == .vw || unit == .vh || unit == .vmin || unit == .vmax { UsesViewport = true }
             }
             if case .url(let u) = d.Value { ImageURLs.append(u) }
+            if case .list(let parts) = d.Value, let first = parts.first, case .url(let u) = first { ImageURLs.append(u) }
             if case .length(_, let unit) = d.Value, unit == .cqw || unit == .cqh || unit == .cqmin || unit == .cqmax { UsesContainerUnits = true }
         }
         features.note(decls)
+        // attr() outside content: a change to the attribute restyles.
+        for p in split.pending {
+            for name in attrNames(p.Tokens) { features.all.attributes.insert(name) }
+        }
         for text in rule.Selectors {
             let parsed = selector.ParseSelectors(text)
             for sel in parsed {
@@ -791,11 +796,11 @@ public final class StyleResolver {
         var declarations: [css.Longhand] = []
         for r in matched {
             for d in r.Declarations where !d.Important { declarations.append(d) }
-            for p in r.Pending where !p.Important { declarations.append(contentsOf: expand(p, scope)) }
+            for p in r.Pending where !p.Important { declarations.append(contentsOf: expand(p, scope, node)) }
         }
         for r in matched {
             for d in r.Declarations where d.Important { declarations.append(d) }
-            for p in r.Pending where p.Important { declarations.append(contentsOf: expand(p, scope)) }
+            for p in r.Pending where p.Important { declarations.append(contentsOf: expand(p, scope, node)) }
         }
         for d in declarations where d.Prop == .zoom || d.Prop == .colorScheme || d.Prop == .direction { apply(d, style, ctx) }
         ctx.dark = style.UsesDark(pageDark: Dark)
@@ -883,16 +888,16 @@ public final class StyleResolver {
 
         for r in matched {
             for d in r.Declarations where !d.Important { declarations.append(d) }
-            for p in r.Pending where !p.Important { declarations.append(contentsOf: expand(p, scope)) }
+            for p in r.Pending where !p.Important { declarations.append(contentsOf: expand(p, scope, node)) }
         }
         for d in inline.longhands where !d.Important { declarations.append(d) }
-        for p in inline.pending where !p.Important { declarations.append(contentsOf: expand(p, scope)) }
+        for p in inline.pending where !p.Important { declarations.append(contentsOf: expand(p, scope, node)) }
         for r in matched {
             for d in r.Declarations where d.Important { declarations.append(d) }
-            for p in r.Pending where p.Important { declarations.append(contentsOf: expand(p, scope)) }
+            for p in r.Pending where p.Important { declarations.append(contentsOf: expand(p, scope, node)) }
         }
         for d in inline.longhands where d.Important { declarations.append(d) }
-        for p in inline.pending where p.Important { declarations.append(contentsOf: expand(p, scope)) }
+        for p in inline.pending where p.Important { declarations.append(contentsOf: expand(p, scope, node)) }
         for r in uaImportant {
             for d in r.Declarations where d.Important { declarations.append(d) }
         }
@@ -943,6 +948,9 @@ public final class StyleResolver {
         }
         let decls = SplitDecls(css.ParseDeclarations(text))
         inlineByText[text] = decls
+        for p in decls.pending {
+            for name in attrNames(p.Tokens) { Author.features.all.attributes.insert(name) }
+        }
         return decls
     }
 
@@ -1167,6 +1175,11 @@ func apply(_ given: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
         var layer: BackgroundImage? = nil
         if case .url(let u) = v { layer = BackgroundImage(url: u) }
         if case .gradient(let g) = v { layer = BackgroundImage(gradient: g) }
+        if case .list(let parts) = v, parts.count == 2, case .url(let u) = parts[0], case .number(let d) = parts[1] {
+            var made = BackgroundImage(url: u)
+            made.Density = d > 0 ? d : 1
+            layer = made
+        }
         if let old = s.BackgroundImage, var made = layer {
             made.RepeatX = old.RepeatX
             made.RepeatY = old.RepeatY

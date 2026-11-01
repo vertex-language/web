@@ -557,6 +557,13 @@ func longhands(_ d: Declaration) -> [Longhand] {
             if t.Kind == .url {
                 set(.backgroundImage, .url(t.Value))
                 sawImage = true
+            } else if t.Kind == .function && isImageSetName(lower(t.Value)) {
+                if let v = imageSetValue(tokens, i) {
+                    set(.backgroundImage, v)
+                    sawImage = true
+                }
+                i = closeParen(tokens, from: i + 1) + 1
+                continue
             } else if t.Kind == .function && isGradientName(lower(t.Value)) {
                 let end = closeParen(tokens, from: i + 1)
                 if let g = parseGradient(tokens, i + 1, end) {
@@ -1724,6 +1731,7 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
     case .backgroundImage:
         if kw == "none" { return .none }
         if t.Kind == .url { return .url(t.Value) }
+        if t.Kind == .function && isImageSetName(lower(t.Value)) { return imageSetValue(tokens, 0) }
         if t.Kind == .function && isGradientName(lower(t.Value)) {
             if let g = parseGradient(tokens, 1, closeParen(tokens, from: 1)) { return .gradient(g) }
         }
@@ -1944,6 +1952,11 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
     case .maskImage, .borderImageSource:
         if kw == "none" { return Value.none }
         if t.Kind == .url { return .url(t.Value) }
+        if t.Kind == .function && isImageSetName(lower(t.Value)) {
+            // A mask or border image is drawn at its pixels: the url alone.
+            if case .list(let parts) = imageSetValue(tokens, 0) ?? .none { return parts[0] }
+            return imageSetValue(tokens, 0)
+        }
         if t.Kind == .function && isGradientName(lower(t.Value)) {
             if let g = parseGradient(tokens, 1, closeParen(tokens, from: 1)) { return .gradient(g) }
         }
@@ -2277,6 +2290,62 @@ func parseClipShape(_ name: string, _ tokens: [Token]) -> ClipShape? {
     }
 }
 
+/// The density image-set() picks for: the device's pixels to a CSS
+/// pixel, 2 for the Retina displays the engine mostly draws on. A host
+/// may set it.
+public var ImageSetDensity: float32 = 2
+
+/// image-set() (and -webkit-image-set()) at tokens[i], its function
+/// token: the candidate for ImageSetDensity -- the least dense at or
+/// above it, else the densest -- as `.list([.url, .number(density)])`,
+/// or a gradient candidate as itself.
+func imageSetValue(_ tokens: [Token], _ i: int) -> Value? {
+    let end = closeParen(tokens, from: i + 1)
+    var best: Value? = nil
+    var bestDensity: float32 = -1
+    for item in splitArgs(tokens, i + 1, end) {
+        if item.isEmpty { continue }
+        var image: Value? = nil
+        var density: float32 = 1
+        var k = 0
+        if item[0].Kind == .string || item[0].Kind == .url {
+            image = .url(item[0].Value)
+            k = 1
+        } else if item[0].Kind == .function && isGradientName(lower(item[0].Value)) {
+            let close = closeParen(item, from: 1)
+            if let g = parseGradient(item, 1, close) { image = .gradient(g) }
+            k = close + 1
+        }
+        while k < item.count {
+            let t = item[k]
+            if t.Kind == .dimension {
+                switch lower(t.Unit) {
+                case "x", "dppx": density = t.NumberVal
+                case "dpi": density = t.NumberVal / 96
+                case "dpcm": density = t.NumberVal * 2.54 / 96
+                default: break
+                }
+            }
+            k += 1
+        }
+        guard let img = image, density > 0 else { continue }
+        let better = bestDensity < 0
+            || (density >= ImageSetDensity && (bestDensity < ImageSetDensity || density < bestDensity))
+            || (bestDensity < ImageSetDensity && density > bestDensity)
+        if better {
+            best = img
+            bestDensity = density
+        }
+    }
+    guard let b = best else { return nil }
+    if case .url(_) = b { return .list([b, .number(bestDensity)]) }
+    return b
+}
+
+func isImageSetName(_ name: string) -> bool {
+    return name == "image-set" || name == "-webkit-image-set"
+}
+
 func isGradientName(_ name: string) -> bool {
     return name == "linear-gradient" || name == "-webkit-linear-gradient" || name == "repeating-linear-gradient" ||
         name == "radial-gradient" || name == "-webkit-radial-gradient" || name == "repeating-radial-gradient" ||
@@ -2321,6 +2390,28 @@ func parseGradient(_ tokens: [Token], _ start: int, _ end: int) -> draw.LinearGr
         i += 1
     }
     if !current.isEmpty { args.append(current) }
+    if args.isEmpty { return nil }
+    // `in <space> [<method> hue]`, with the direction or shape or on its
+    // own: the colors between stops are mixed in that space.
+    var space = ""
+    var hueMethod = "shorter"
+    var h = 0
+    while h < args[0].count {
+        if args[0][h].Kind == .ident && lower(args[0][h].Value) == "in" && h + 1 < args[0].count && args[0][h + 1].Kind == .ident {
+            space = lower(args[0][h + 1].Value)
+            if space == "xyz" { space = "xyz-d65" }
+            var take = 2
+            if h + 3 < args[0].count && args[0][h + 3].Kind == .ident && lower(args[0][h + 3].Value) == "hue" {
+                hueMethod = lower(args[0][h + 2].Value)
+                take = 4
+            }
+            args[0].removeSubrange(h..<(h + take))
+            if args[0].isEmpty { args.removeFirst() }
+            break
+        }
+        h += 1
+    }
+    if !space.isEmpty && (space == "rgb" || !colorSpaces.contains(space)) { return nil }
     if args.isEmpty { return nil }
     var angle: float32 = 180
     var firstStop = 0
@@ -2415,6 +2506,7 @@ func parseGradient(_ tokens: [Token], _ start: int, _ end: int) -> draw.LinearGr
     }
     var stops: [draw.GradientStop] = []
     var positions: [float32] = []
+    var lengths = false
     var k = firstStop
     while k < args.count {
         let arg = args[k]
@@ -2422,28 +2514,62 @@ func parseGradient(_ tokens: [Token], _ start: int, _ end: int) -> draw.LinearGr
         guard let m = parseColorAt(arg, 0) else { k += 1; continue }
         var color = draw.Color.black
         if case .color(let c) = m.0 { color = c }
-        var pos: float32 = -1
-        var second: float32 = -1
+        // Up to two positions: a fraction of the line, and pixels along
+        // it (a length, or calc()'s length part), resolved when drawn.
+        var places: [(frac: float32, px: float32)] = []
         var p = m.1
-        while p < arg.count && p < m.1 + 2 {
+        while p < arg.count && places.count < 2 {
             let pt = arg[p]
-            var v: float32 = -1
-            if pt.Kind == .percentage { v = pt.NumberVal / 100 }
-            else if pt.Kind == .number { v = pt.NumberVal }
-            else if conic && pt.Kind == .dimension, let a = angleRadians(pt.NumberVal, lower(pt.Unit)) { v = a / 6.2831853 }
-            if p == m.1 { pos = v } else { second = v }
+            if pt.Kind == .percentage {
+                places.append((frac: pt.NumberVal / 100, px: 0))
+            } else if pt.Kind == .number {
+                places.append((frac: pt.NumberVal, px: 0))
+            } else if conic && pt.Kind == .dimension, let a = angleRadians(pt.NumberVal, lower(pt.Unit)) {
+                places.append((frac: a / 6.2831853, px: 0))
+            } else if !conic, pt.Kind == .dimension, let len = stopLength(pt.NumberVal, lower(pt.Unit)) {
+                places.append((frac: 0, px: len))
+            } else if !conic && pt.Kind == .function {
+                let end = closeParen(arg, from: p + 1)
+                guard case .calc(let terms) = calcValue(Array(arg[p..<(end < arg.count ? end + 1 : arg.count)])) ?? .none else { break }
+                var frac: float32 = 0
+                var px: float32 = 0
+                for t in terms {
+                    if t.Unit == .percent { frac += t.Number / 100 }
+                    else if let u = t.Unit, let len = stopLength(t.Number, unitName(u)) { px += len }
+                }
+                places.append((frac: frac, px: px))
+                p = end
+            } else {
+                break
+            }
             p += 1
         }
-        stops.append(draw.GradientStop(color, at: pos))
-        positions.append(pos)
-        // `red 10% 20%`: a stop at each, one color between.
-        if second >= 0 {
-            stops.append(draw.GradientStop(color, at: second))
-            positions.append(second)
+        for place in places {
+            var stop = draw.GradientStop(color, at: place.frac)
+            stop.Length = place.px
+            if place.px != 0 { lengths = true }
+            stops.append(stop)
+            positions.append(place.frac)
+        }
+        // `red 10% 20%` gives a stop at each, one color between; no
+        // position, a stop placed later.
+        if places.isEmpty {
+            stops.append(draw.GradientStop(color, at: -1))
+            positions.append(-1)
         }
         k += 1
     }
     if stops.isEmpty { return nil }
+    if lengths {
+        if !space.isEmpty && space != "srgb" { stops = interpolatedStops(stops, space, hueMethod) }
+        // Placed once the line's length is known (draw's FixStops).
+        var g = draw.LinearGradient(angle: angle, stops: stops)
+        g.Radial = shape
+        g.Conic = conicShape
+        g.Repeating = fname.hasPrefix("repeating-")
+        g.Unresolved = true
+        return g
+    }
     // Missing positions: the first is 0, the last 1, the rest spread
     // evenly between the ones given.
     if stops[0].Position < 0 { stops[0].Position = 0 }
@@ -2471,11 +2597,65 @@ func parseGradient(_ tokens: [Token], _ start: int, _ end: int) -> draw.LinearGr
         if stops[i3].Position < stops[i3 - 1].Position { stops[i3].Position = stops[i3 - 1].Position }
         i3 += 1
     }
+    if !space.isEmpty && space != "srgb" { stops = interpolatedStops(stops, space, hueMethod) }
     var g = draw.LinearGradient(angle: angle, stops: stops)
     g.Radial = shape
     g.Conic = conicShape
     g.Repeating = fname.hasPrefix("repeating-")
     return g
+}
+
+/// A gradient's stops with the colors between each pair mixed in a
+/// color space: sixteen steps a pair, drawn as sRGB between them. Stops
+/// whose positions wait on the line's length get steps without one,
+/// which FixStops spreads evenly between them.
+func interpolatedStops(_ stops: [draw.GradientStop], _ space: string, _ hueMethod: string) -> [draw.GradientStop] {
+    if stops.count < 2 { return stops }
+    let steps = 16
+    var out: [draw.GradientStop] = [stops[0]]
+    var i = 1
+    while i < stops.count {
+        let a = stops[i - 1]
+        let b = stops[i]
+        let known = a.Length == 0 && b.Length == 0 && a.Position >= 0 && b.Position >= 0
+        if a.Color != b.Color && (!known || b.Position > a.Position) {
+            var k = 1
+            while k < steps {
+                let t = float64(k) / float64(steps)
+                let pos: float32 = known ? a.Position + (b.Position - a.Position) * float32(t) : -1
+                out.append(draw.GradientStop(mixIn(space, hueMethod, a.Color, b.Color, t), at: pos))
+                k += 1
+            }
+        }
+        out.append(b)
+        i += 1
+    }
+    return out
+}
+
+/// A gradient stop's length in pixels: absolute units, and em and rem
+/// at the default 16px (a stop knows no font size).
+func stopLength(_ n: float32, _ unit: string) -> float32? {
+    switch unit {
+    case "px": return n
+    case "pt": return n * 4 / 3
+    case "pc": return n * 16
+    case "in": return n * 96
+    case "cm": return n * 96 / 2.54
+    case "mm": return n * 96 / 25.4
+    case "q": return n * 96 / 101.6
+    case "em", "rem": return n * 16
+    default: return nil
+    }
+}
+
+func unitName(_ u: Unit) -> string {
+    switch u {
+    case .px: return "px"
+    case .em: return "em"
+    case .rem: return "rem"
+    default: return ""
+    }
 }
 
 /// A radial gradient's first argument -- its shape, size and `at`
