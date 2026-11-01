@@ -1324,6 +1324,32 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
             s.TransformOriginX = ops[0].Lengths[0]
             s.TransformOriginY = ops[0].Lengths[1]
         }
+    case .backdropFilter:
+        if case .none = v { s.BackdropBlur = 0 } else if let r = pixels(v, s, ctx), r > 0 { s.BackdropBlur = r } else { s.BackdropBlur = 0 }
+    case .clipPath:
+        s.ClipPath = nil
+        if case .clipShape(let shape) = v {
+            var args: [css.Length] = []
+            for a in shape.Args {
+                if case .keyword(let k) = a {
+                    args.append(k == "farthest-side" ? .none : .auto)
+                } else if let l = length(a, s, ctx) {
+                    args.append(l)
+                } else {
+                    args.append(.px(0))
+                }
+            }
+            s.ClipPath = ClipPath(Kind: shape.Kind, Args: args)
+        }
+    case .maskImage:
+        s.MaskGradient = nil
+        s.MaskURL = ""
+        if case .url(let u) = v { s.MaskURL = u }
+        if case .gradient(let g) = v { s.MaskGradient = g }
+    case .mixBlendMode:
+        s.BlendMode = blendModeOf(keywordOf(v) ?? "normal")
+    case .isolation:
+        s.Isolated = keywordOf(v) == "isolate"
     case .filter:
         if case .none = v { s.FilterBlur = 0 } else if let r = pixels(v, s, ctx), r > 0 { s.FilterBlur = r } else { s.FilterBlur = 0 }
     case .overflowX: if let k = keywordOf(v) { s.OverflowX = overflowOf(k) }
@@ -1610,6 +1636,26 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
     case .tabSize: if case .number(let n) = v { s.TabSize = int32(n) }
     case .content:
         if case .families(let parts) = v { s.Content = parts } else { s.Content = nil }
+    }
+}
+
+/// mix-blend-mode's keyword as a draw blend mode. The non-separable
+/// modes (hue, saturation, color, luminosity) and plus-lighter are not
+/// drawn and blend as normal.
+func blendModeOf(_ k: string) -> draw.BlendMode {
+    switch k {
+    case "multiply": return .multiply
+    case "screen": return .screen
+    case "overlay": return .overlay
+    case "darken": return .darken
+    case "lighten": return .lighten
+    case "color-dodge": return .colorDodge
+    case "color-burn": return .colorBurn
+    case "hard-light": return .hardLight
+    case "soft-light": return .softLight
+    case "difference": return .difference
+    case "exclusion": return .exclusion
+    default: return .normal
     }
 }
 
@@ -1966,6 +2012,11 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
         }
     case .opacity: b.Opacity = a.Opacity
     case .filter: b.FilterBlur = a.FilterBlur
+    case .backdropFilter: b.BackdropBlur = a.BackdropBlur
+    case .clipPath: b.ClipPath = a.ClipPath
+    case .maskImage: b.MaskGradient = a.MaskGradient; b.MaskURL = a.MaskURL
+    case .mixBlendMode: b.BlendMode = a.BlendMode
+    case .isolation: b.Isolated = a.Isolated
     case .transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay,
          .animationName, .animationDuration, .animationTimingFunction, .animationDelay,
          .animationIterationCount, .animationDirection, .animationFillMode, .animationPlayState:

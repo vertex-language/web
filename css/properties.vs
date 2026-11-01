@@ -55,6 +55,11 @@ public enum Prop: int32 {
     case overflowY
     case boxShadow
     case filter
+    case backdropFilter
+    case clipPath
+    case maskImage
+    case mixBlendMode
+    case isolation
     case outlineWidth
     case outlineColor
     case accentColor
@@ -223,8 +228,19 @@ public enum Value {
     case transforms([TransformFunction])
     case tracks([GridTrack])
     case placement(GridPlacement)
+    case clipShape(ClipShape)
     case inherit
     case initial
+}
+
+/// A clip-path's basic shape before its lengths are resolved: Kind is
+/// inset, circle, ellipse or polygon. Args are, by kind, the four insets
+/// and a corner radius; a radius and the centre's x and y; two radii
+/// and the centre; or each point's x then y. A radius may be the
+/// keyword closest-side or farthest-side.
+public struct ClipShape {
+    public var Kind: string
+    public var Args: [Value]
 }
 
 /// One term of a calc(): a number in a unit, or unitless.
@@ -274,6 +290,10 @@ let propNames: [string: Prop] = [
     "background-color": .backgroundColor, "background-image": .backgroundImage, "opacity": .opacity,
     "background-repeat": .backgroundRepeat, "background-size": .backgroundSize, "background-position": .backgroundPosition,
     "overflow-x": .overflowX, "overflow-y": .overflowY, "box-shadow": .boxShadow, "filter": .filter, "-webkit-filter": .filter,
+    "backdrop-filter": .backdropFilter, "-webkit-backdrop-filter": .backdropFilter,
+    "clip-path": .clipPath, "-webkit-clip-path": .clipPath,
+    "mask-image": .maskImage, "-webkit-mask-image": .maskImage,
+    "mix-blend-mode": .mixBlendMode, "isolation": .isolation,
     "transform": .transform, "-webkit-transform": .transform, "transform-origin": .transformOrigin,
     "-webkit-transform-origin": .transformOrigin, "translate": .translate, "rotate": .rotate, "scale": .scale,
     "transition-property": .transitionProperty, "transition-duration": .transitionDuration,
@@ -620,12 +640,11 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
          "transform-style", "transform-box", "counter-reset", "counter-increment",
          "background-attachment",
          "font-variant", "font-stretch", "font-feature-settings", "src", "unicode-range",
-         "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing", "filter", "backdrop-filter",
-         "clip-path", "isolation",
+         "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
          "hyphens", "direction",
          "unicode-bidi", "writing-mode", "columns", "column-count", "column-width", "caption-side",
          "empty-cells", "speak", "orphans", "widows", "page-break-before", "page-break-after",
-         "break-inside", "font-display", "mix-blend-mode",
+         "break-inside", "font-display",
          "border-image", "box-decoration-break",
          "text-size-adjust", "-webkit-text-size-adjust", "-webkit-tap-highlight-color",
          "list-style-image", "font-kerning",
@@ -633,6 +652,20 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
          "font-optical-sizing",
          "unused-placeholder-property":
         break
+    case "mask", "-webkit-mask":
+        // Only the image of the mask is drawn: the first url() or
+        // gradient in it.
+        var i = 0
+        while i < tokens.count {
+            if tokens[i].Kind == .url || (tokens[i].Kind == .function && isGradientName(lower(tokens[i].Value))) {
+                let end = tokens[i].Kind == .url ? i + 1 : closeParen(tokens, from: i + 1) + 1
+                if let v = parseValue(.maskImage, Array(tokens[i..<(end < tokens.count ? end : tokens.count)])) { set(.maskImage, v) }
+                return out
+            }
+            if tokens[i].Kind == .comma { break }
+            i += 1
+        }
+        set(.maskImage, .none)
     default:
         // margin-inline-start and friends, in a left-to-right, top-to-bottom world.
         if let mapped = logicalProp(name) {
@@ -702,6 +735,7 @@ func longhandsOf(_ name: string) -> [Prop] {
     case "border-width": return borderWidthProps
     case "border-style": return borderStyleProps
     case "border-color": return borderColorProps
+    case "mask", "-webkit-mask": return [.maskImage]
     case "border": return borderWidthProps + borderStyleProps + borderColorProps
     // One side's width, style and color: what var() in border-top waits
     // to expand into.
@@ -1694,7 +1728,38 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
         return parseRotateProperty(tokens)
     case .scale:
         return parseScaleProperty(tokens)
-    case .filter:
+    case .clipPath:
+        if kw == "none" { return Value.none }
+        var i = 0
+        while i < tokens.count {
+            if tokens[i].Kind == .function {
+                let end = closeParen(tokens, from: i + 1)
+                if let shape = parseClipShape(lower(tokens[i].Value), Array(tokens[(i + 1)..<end])) { return .clipShape(shape) }
+                return nil
+            }
+            i += 1
+        }
+        // A geometry box alone, or a url() to an SVG <clipPath>: not
+        // drawn.
+        return Value.none
+    case .maskImage:
+        if kw == "none" { return Value.none }
+        if t.Kind == .url { return .url(t.Value) }
+        if t.Kind == .function && isGradientName(lower(t.Value)) {
+            if let g = parseGradient(tokens, 1, closeParen(tokens, from: 1)) { return .gradient(g) }
+        }
+        return nil
+    case .mixBlendMode:
+        switch kw {
+        case "normal", "multiply", "screen", "overlay", "darken", "lighten", "color-dodge", "color-burn",
+             "hard-light", "soft-light", "difference", "exclusion", "plus-lighter",
+             "hue", "saturation", "color", "luminosity":
+            return .keyword(kw)
+        default: return nil
+        }
+    case .isolation:
+        return kw == "auto" || kw == "isolate" ? .keyword(kw) : nil
+    case .filter, .backdropFilter:
         // Only blur() is drawn; the other filter functions are dropped.
         if kw == "none" { return Value.none }
         var i = 0
@@ -1903,6 +1968,113 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
             i += 1
         }
         return .families(parts)
+    }
+}
+
+/// A basic shape's arguments: inset(), circle(), ellipse() or
+/// polygon(), with the shapes' "at" positions and inset's "round".
+func parseClipShape(_ name: string, _ tokens: [Token]) -> ClipShape? {
+    var i = 0
+    // One length or percentage, calc() too, or nil.
+    func length() -> Value? {
+        if i >= tokens.count { return nil }
+        let t = tokens[i]
+        if t.Kind == .function {
+            let end = closeParen(tokens, from: i + 1)
+            let v = calcValue(Array(tokens[i..<(end < tokens.count ? end + 1 : tokens.count)]))
+            if v != nil { i = end + 1 }
+            return v
+        }
+        if let v = parseLengthValue(t, allowAuto: false) {
+            i += 1
+            return v
+        }
+        return nil
+    }
+    func word() -> string {
+        return i < tokens.count && tokens[i].Kind == .ident ? lower(tokens[i].Value) : ""
+    }
+    // "at x y", the centre, which defaults to the box's.
+    func position() -> [Value]? {
+        var x: Value = .length(50, .percent)
+        var y: Value = .length(50, .percent)
+        if word() != "at" { return [x, y] }
+        i += 1
+        var got: [Value] = []
+        var sawY = false
+        while i < tokens.count && got.count < 2 {
+            switch word() {
+            case "left": got.append(.length(0, .percent)); i += 1
+            case "right": got.append(.length(100, .percent)); i += 1
+            case "top": got.append(.length(0, .percent)); sawY = got.count == 1; i += 1
+            case "bottom": got.append(.length(100, .percent)); sawY = got.count == 1; i += 1
+            case "center": got.append(.length(50, .percent)); i += 1
+            default:
+                guard let v = length() else { return nil }
+                got.append(v)
+            }
+        }
+        if got.count == 1 {
+            if sawY { y = got[0] } else { x = got[0] }
+        } else if got.count == 2 {
+            // "top left" names y first.
+            if sawY { y = got[0]; x = got[1] } else { x = got[0]; y = got[1] }
+        }
+        return [x, y]
+    }
+    switch name {
+    case "inset":
+        var sides: [Value] = []
+        while sides.count < 4, let v = length() { sides.append(v) }
+        if sides.isEmpty { return nil }
+        while sides.count < 4 {
+            // As margin takes one to four.
+            switch sides.count {
+            case 1: sides.append(sides[0])
+            case 2: sides.append(sides[0])
+            default: sides.append(sides[1])
+            }
+        }
+        var radius: Value = .length(0, .px)
+        if word() == "round" {
+            i += 1
+            radius = length() ?? radius
+        }
+        return ClipShape(Kind: "inset", Args: sides + [radius])
+    case "circle", "ellipse":
+        var radii: [Value] = []
+        let wanted = name == "circle" ? 1 : 2
+        while radii.count < wanted {
+            let w = word()
+            if w == "closest-side" || w == "farthest-side" {
+                radii.append(.keyword(w))
+                i += 1
+            } else if let v = length() {
+                radii.append(v)
+            } else {
+                break
+            }
+        }
+        while radii.count < wanted { radii.append(.keyword("closest-side")) }
+        guard let at = position() else { return nil }
+        return ClipShape(Kind: name, Args: radii + at)
+    case "polygon":
+        // An optional fill rule, then points split by commas.
+        if word() == "nonzero" || word() == "evenodd" {
+            i += 1
+            if i < tokens.count && tokens[i].Kind == .comma { i += 1 }
+        }
+        var points: [Value] = []
+        while i < tokens.count {
+            guard let x = length(), let y = length() else { return nil }
+            points.append(x)
+            points.append(y)
+            if i < tokens.count && tokens[i].Kind == .comma { i += 1 }
+        }
+        if points.count < 6 { return nil }
+        return ClipShape(Kind: "polygon", Args: points)
+    default:
+        return nil
     }
 }
 

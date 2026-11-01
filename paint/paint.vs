@@ -12,6 +12,80 @@ import (
     "web/svg"
 )
 
+/// A clip-path's shape on the page, in CSS pixels: Kind is inset (Rect
+/// and its corners), ellipse (a centre and two radii) or polygon.
+public struct ClipRegion {
+    public var Kind: string
+    public var Rect: draw.Rect = draw.Rect.zero
+    public var Radii: draw.Radii = draw.Radii.zero
+    public var CX: float32 = 0
+    public var CY: float32 = 0
+    public var RX: float32 = 0
+    public var RY: float32 = 0
+    public var Points: [draw.Point] = []
+
+    init(_ kind: string) {
+        Kind = kind
+    }
+}
+
+/// A clip-path's shape against a box at x, y: percentages are of its
+/// size, and a circle's of the box's diagonal over root two.
+func clipRegion(_ cp: cascade.ClipPath, x: float32, y: float32, width w: float32, height h: float32) -> ClipRegion? {
+    let a = cp.Args
+    func at(_ i: int, _ base: float32) -> float32 { return i < a.count ? a[i].Or(0, base: base) : 0 }
+    switch cp.Kind {
+    case "inset":
+        if a.count < 5 { return nil }
+        var r = ClipRegion("inset")
+        let top = at(0, h)
+        let right = at(1, w)
+        let bottom = at(2, h)
+        let left = at(3, w)
+        r.Rect = draw.Rect(x + left, y + top, maxf(w - left - right, 0), maxf(h - top - bottom, 0))
+        r.Radii = draw.Radii(all: at(4, minf(w, h)))
+        return r
+    case "circle", "ellipse":
+        let circle = cp.Kind == "circle"
+        let n = circle ? 1 : 2
+        if a.count < n + 2 { return nil }
+        var r = ClipRegion("ellipse")
+        r.CX = x + at(n, w)
+        r.CY = y + at(n + 1, h)
+        let left = r.CX - x
+        let rightSide = x + w - r.CX
+        let top = r.CY - y
+        let bottomSide = y + h - r.CY
+        // A radius: a length, or the distance to the nearest or the
+        // farthest side (each axis's own for an ellipse).
+        func radius(_ i: int, _ base: float32, _ near: float32, _ far: float32) -> float32 {
+            if a[i] == .auto { return near }
+            if a[i] == .none { return far }
+            return a[i].Or(0, base: base)
+        }
+        if circle {
+            let diagonal = math.Sqrt(w * w + h * h) / math.Sqrt(2)
+            let rr = radius(0, diagonal, minf(minf(left, rightSide), minf(top, bottomSide)), maxf(maxf(left, rightSide), maxf(top, bottomSide)))
+            r.RX = rr
+            r.RY = rr
+        } else {
+            r.RX = radius(0, w, minf(left, rightSide), maxf(left, rightSide))
+            r.RY = radius(1, h, minf(top, bottomSide), maxf(top, bottomSide))
+        }
+        return r
+    case "polygon":
+        var r = ClipRegion("polygon")
+        var i = 0
+        while i + 1 < a.count {
+            r.Points.append(draw.Point(x + at(i, w), y + at(i + 1, h)))
+            i += 2
+        }
+        return r
+    default:
+        return nil
+    }
+}
+
 /// A positioned box waiting its turn in a stacking context.
 struct Stacked {
     var box: layout.Box
@@ -32,8 +106,14 @@ public enum PaintKind: Equatable {
     /// What follows, to the matching unlayer, is painted apart, then
     /// blurred by Blur and put back through Transform: filter: blur()
     /// and transform. Rect is the box they are on.
+    /// After the blur, a layer is cut to Shape (clip-path), kept as
+    /// much as Gradient or MaskImage is opaque over MaskRect
+    /// (mask-image), and mixed onto what is under it by Blend.
     case layer
     case unlayer
+    /// What is painted so far under Rect, blurred by Blur and kept
+    /// inside Rect's corners Radii: backdrop-filter.
+    case backdrop
     /// Where an element marked data-viewport is painted: what comes after
     /// is drawn over it. Node is the element's id. Paints nothing.
     case mark
@@ -76,6 +156,13 @@ public struct PaintItem {
     public var Blur: float32
     /// A layer's transform, in the page's CSS pixels.
     public var Transform: draw.Affine = draw.Affine.identity
+    /// A layer's clip-path, mask and blend mode. Unbounded layers take
+    /// all that shows, not just the box: what overflows it blends too.
+    public var Shape: ClipRegion? = nil
+    public var MaskImage: draw.Image? = nil
+    public var MaskRect: draw.Rect = draw.Rect.zero
+    public var Blend: draw.BlendMode = .normal
+    public var Unbounded: bool = false
 
     /// For a mark: the element's node id.
     public var Node: int64 = 0
@@ -304,12 +391,29 @@ final class DisplayListBuilder {
             : draw.Affine.identity
         // A transform that flattens the box shows nothing of it.
         if transform.Determinant == 0 { opacity = savedOpacity; return }
-        let blurred = s.FilterBlur > 0 || !transform.IsIdentity
+        if s.BackdropBlur > 0 {
+            var b = PaintItem(.backdrop)
+            b.Rect = draw.Rect(x, y, box.Width, box.Height)
+            b.Radii = s.HasBorderRadius ? s.Radii(width: box.Width, height: box.Height) : draw.Radii.zero
+            b.Blur = s.BackdropBlur
+            items.append(b)
+        }
+        let blurred = s.FilterBlur > 0 || !transform.IsIdentity || s.HasCompositing
         if blurred {
             var layer = PaintItem(.layer)
             layer.Rect = draw.Rect(x, y, box.Width, box.Height)
             layer.Blur = s.FilterBlur
             layer.Transform = transform
+            if let cp = s.ClipPath { layer.Shape = clipRegion(cp, x: x, y: y, width: box.Width, height: box.Height) }
+            layer.MaskRect = layer.Rect
+            layer.Gradient = s.MaskGradient
+            if !s.MaskURL.isEmpty {
+                // An image not loaded masks everything away, as a
+                // browser's does until it arrives.
+                layer.MaskImage = images[s.MaskURL] ?? draw.Image(width: 0, height: 0, pixels: [])
+            }
+            layer.Blend = s.BlendMode
+            layer.Unbounded = s.BlendMode != .normal || s.Isolated
             items.append(layer)
         }
         let clips = s.ClipsOverflow
@@ -444,7 +548,7 @@ final class DisplayListBuilder {
                 if phase == .inlineContent { stacked.append(Stacked(box: child, x: sx, y: sy)) }
                 continue
             }
-            if child.Style.ClipsOverflow || child.Style.Opacity < 1 || child.Style.FilterBlur > 0 {
+            if child.Style.ClipsOverflow || child.Style.Opacity < 1 || child.Style.FilterBlur > 0 || child.Style.HasCompositing {
                 // A clipping or translucent box paints as a whole, in
                 // the phase its background would go in.
                 if phase == .blockBackgrounds { paintBox(child, x: sx, y: sy, skipBackground: skipBackground) }
@@ -1180,6 +1284,7 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
     var layerCanvases: [draw.Canvas] = []
     var layerBlurs: [float32] = []
     var layerTransforms: [draw.Affine] = []
+    var layerItems: [PaintItem] = []
     func inflate(_ r: draw.IRect, _ by: float32) -> draw.IRect {
         let d = int32(by + 0.5)
         return draw.IRect(r.X - d, r.Y - d, r.Width + 2 * d, r.Height + 2 * d)
@@ -1292,8 +1397,8 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
             // The box and as far as its blur reaches, within reach of
             // what shows.
             let reach = item.Blur * scale * 3
-            var bounds = inflate(device(item.Rect), reach)
             var shows = canvas.Clip
+            var bounds = item.Unbounded ? shows : inflate(device(item.Rect), reach)
             // CSS pixels to the canvas's, where the layer is: what its
             // transform is conjugated by.
             let toDevice = draw.Affine(scale, 0, 0, scale, dx, dy)
@@ -1321,6 +1426,7 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
             layerCanvases.append(canvas)
             layerBlurs.append(item.Blur * scale)
             layerTransforms.append(t)
+            layerItems.append(item)
             canvas = layer.Canvas
         case .unlayer:
             guard let parent = layerCanvases.popLast() else { continue }
@@ -1330,9 +1436,27 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
                 let sigma = layerBlurs.popLast() ?? 0
                 let t = layerTransforms.popLast() ?? draw.Affine.identity
                 layer.Blur(sigma)
-                layer.Composite(onto: canvas, transform: t)
+                var blend = draw.BlendMode.normal
+                if let effects = layerItems.popLast() {
+                    applyClipAndMask(layer, effects, scale: scale, dx: dx, dy: dy)
+                    blend = effects.Blend
+                }
+                layer.Composite(onto: canvas, transform: t, blend: blend)
                 layer.Free()
             }
+        case .backdrop:
+            let box = device(item.Rect)
+            let sigma = item.Blur * scale
+            // What shows under the box, and as far round it as the blur
+            // reaches, so its edges blur with what is beside them.
+            let area = inflate(box, sigma * 3).Intersect(canvas.Clip)
+            if area.IsEmpty || box.Intersect(canvas.Clip).IsEmpty { continue }
+            let under = draw.Layer(area)
+            under.CopyFrom(canvas)
+            under.Blur(sigma)
+            under.MaskRounded(box, radii: item.Radii.Scaled(scale))
+            under.Composite(onto: canvas, transform: draw.Affine.identity)
+            under.Free()
         case .mark:
             break
         case .translate:
@@ -1357,6 +1481,58 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
             v.Render(on: canvas, into: draw.Rect(r.X * scale + dx, r.Y * scale + dy, r.Width * scale, r.Height * scale),
                      scale: scale, currentColor: item.Color, fill: item.Fill, fillNone: item.FillNone)
         }
+    }
+}
+
+/// Cuts a layer to its item's clip-path and keeps it as much as its
+/// mask is opaque, in the canvas's pixels.
+func applyClipAndMask(_ layer: draw.Layer, _ item: PaintItem, scale: float32, dx: float32, dy: float32) {
+    func px(_ v: float32, _ d: float32) -> float32 { return v * scale + d }
+    func device(_ r: draw.Rect) -> draw.IRect {
+        let x0 = draw.RoundToInt(px(r.X, dx))
+        let y0 = draw.RoundToInt(px(r.Y, dy))
+        return draw.IRect(x0, y0, draw.RoundToInt(px(r.X + r.Width, dx)) - x0, draw.RoundToInt(px(r.Y + r.Height, dy)) - y0)
+    }
+    if let shape = item.Shape {
+        switch shape.Kind {
+        case "inset":
+            layer.MaskRounded(device(shape.Rect), radii: shape.Radii.Scaled(scale))
+        case "ellipse":
+            layer.MaskEllipse(cx: px(shape.CX, dx), cy: px(shape.CY, dy), rx: shape.RX * scale, ry: shape.RY * scale)
+        default:
+            var points: [draw.Point] = []
+            for p in shape.Points { points.append(draw.Point(px(p.X, dx), px(p.Y, dy))) }
+            layer.MaskPolygon(points)
+        }
+    }
+    let box = device(item.MaskRect)
+    if var g = item.Gradient {
+        if let r = g.Radial { g.Radial = r.Scaled(scale) }
+        if let c = g.Conic { g.Conic = c.Scaled(scale) }
+        layer.MaskGradient(box, g)
+    }
+    if let img = item.MaskImage {
+        let area = box.Intersect(layer.Rect)
+        if area.IsEmpty || img.Width <= 0 || img.Height <= 0 {
+            layer.Mask { _, _ in 0 }
+            return
+        }
+        // The image at its own size from the box's top left, repeated
+        // across it: mask-size auto, mask-repeat repeat.
+        let alpha = draw.Layer(area)
+        let tw = float32(img.Width)
+        let th = float32(img.Height)
+        var ty = item.MaskRect.Y
+        while ty < item.MaskRect.Y + item.MaskRect.Height {
+            var tx = item.MaskRect.X
+            while tx < item.MaskRect.X + item.MaskRect.Width {
+                alpha.Canvas.DrawImage(img, into: device(draw.Rect(tx, ty, tw, th)))
+                tx += tw
+            }
+            ty += th
+        }
+        layer.MaskBy(alpha)
+        alpha.Free()
     }
 }
 

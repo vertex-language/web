@@ -1333,6 +1333,51 @@ func testStacking() {
     check(view.ElementAt(draw.Point(20, 15))?.Id == view.QuerySelector("#b")!.Id, "and what is in it takes the click")
 }
 
+@MainActor
+func testCompositing() {
+    print("clip-path, mask-image, mix-blend-mode, isolation, backdrop-filter")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(300, 120))
+    view.LoadHTML("""
+    <style>
+    body { margin: 0; background: white }
+    div { position: absolute; width: 40px; height: 40px }
+    .in { position: static }
+    </style>
+    <div style="left: 0; top: 0; background: rgb(255,0,0); clip-path: circle(50%)"></div>
+    <div style="left: 50px; top: 0; background: rgb(0,0,255); -webkit-clip-path: inset(10px round 5px)"></div>
+    <div style="left: 100px; top: 0; background: rgb(0,128,0); clip-path: polygon(0 0, 100% 0, 0 100%)"></div>
+    <div style="left: 150px; top: 0; background: black; mask-image: linear-gradient(to right, black, transparent)"></div>
+    <div style="left: 200px; top: 0; background: rgb(0,0,255); clip-path: ellipse(closest-side 10px at 20px 20px)"></div>
+    <div style="left: 0; top: 60px; background: rgb(255,255,0)"><div class=in style="background: rgb(0,255,255); mix-blend-mode: multiply"></div></div>
+    <div style="left: 50px; top: 60px; background: rgb(255,0,0)"><div class=in style="background: white; mix-blend-mode: difference"></div></div>
+    <div style="left: 100px; top: 60px; background: linear-gradient(to right, black 50%, white 50%)"></div>
+    <div style="left: 100px; top: 60px; backdrop-filter: blur(4px)"></div>
+    <div style="left: 150px; top: 60px; background: rgb(255,255,0)"><div class=in style="isolation: isolate"><div class=in style="background: rgb(0,255,255); mix-blend-mode: multiply"></div></div></div>
+    """)
+    var px = [uint8](repeating: 0, count: 300 * 120 * 4)
+    view.Draw(into: &px, width: 300, height: 120, scale: 1)
+    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 300, x, y) }
+    let white = draw.Color(255, 255, 255)
+    check(at(20, 20) == draw.Color(255, 0, 0) && at(2, 2) == white && at(37, 37) == white,
+          "clip-path: circle() keeps the circle (got \(at(20, 20)) \(at(2, 2)))")
+    check(at(70, 20) == draw.Color(0, 0, 255) && at(52, 20) == white && at(70, 5) == white && at(60, 10) == white,
+          "inset() with round cuts the sides and the corners (got \(at(70, 20)) \(at(52, 20)) \(at(60, 10)))")
+    check(at(105, 5) == draw.Color(0, 128, 0) && at(135, 35) == white,
+          "polygon() keeps the triangle (got \(at(105, 5)) \(at(135, 35)))")
+    check(at(152, 20).R < 30 && at(188, 20).R > 225 && at(170, 20).R > 90 && at(170, 20).R < 170,
+          "mask-image: a gradient fades the box out (got \(at(152, 20)) \(at(170, 20)) \(at(188, 20)))")
+    check(at(220, 20) == draw.Color(0, 0, 255) && at(220, 5) == white && at(201, 20) == draw.Color(0, 0, 255),
+          "ellipse() with closest-side and a length (got \(at(220, 5)) \(at(201, 20)))")
+    check(at(20, 80) == draw.Color(0, 255, 0), "mix-blend-mode: multiply (got \(at(20, 80)))")
+    check(at(70, 80) == draw.Color(0, 255, 255), "mix-blend-mode: difference (got \(at(70, 80)))")
+    let left = at(118, 80)
+    let right = at(121, 80)
+    check(left.R > 40 && left.R < 200 && right.R > 60 && right.R < 215 && at(110, 80).R < 40 && at(130, 80).R > 215,
+          "backdrop-filter: blur() blurs what is behind, inside the box (got \(left) \(right) \(at(110, 80)) \(at(130, 80)))")
+    check(at(170, 80) == draw.Color(0, 255, 255), "isolation: isolate keeps a blend inside its group (got \(at(170, 80)))")
+}
+
 func main() async -> int32 {
     testStacking()
     testTextFeatures()
@@ -1356,6 +1401,7 @@ func main() async -> int32 {
     testDragAndDrop()
     testInputTypes()
     testPointerEventsAndUserSelect()
+    testCompositing()
     testRange()
     await testDeferredImages()
     await testSVGImages()

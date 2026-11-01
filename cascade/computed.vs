@@ -63,6 +63,16 @@ public final class ComputedStyle {
     public var Opacity: float32 = 1
     /// filter: blur()'s radius, in CSS pixels; 0 for none.
     public var FilterBlur: float32 = 0
+    /// backdrop-filter: blur()'s radius, in CSS pixels; 0 for none.
+    public var BackdropBlur: float32 = 0
+    /// clip-path's basic shape, or nil for none.
+    public var ClipPath: ClipPath? = nil
+    /// mask-image: a gradient, or an image's URL; neither for none.
+    public var MaskGradient: draw.LinearGradient? = nil
+    public var MaskURL: string = ""
+    public var BlendMode: draw.BlendMode = .normal
+    /// isolation: isolate.
+    public var Isolated: bool = false
     /// transform's functions, and the translate, rotate and scale
     /// properties, each empty for none; TransformMatrix puts them
     /// together about transform-origin.
@@ -375,6 +385,12 @@ public struct TransformOp {
 extension ComputedStyle {
     /// Whether any transform applies: the box paints and hits through
     /// TransformMatrix.
+    /// Whether the box is painted apart and put back through a clip,
+    /// a mask, a blend mode or a backdrop: it paints as a whole.
+    public var HasCompositing: bool {
+        return ClipPath != nil || MaskGradient != nil || !MaskURL.isEmpty || BlendMode != .normal || Isolated || BackdropBlur > 0
+    }
+
     public var HasTransform: bool {
         return !Transform.isEmpty || !Translate.isEmpty || !Rotate.isEmpty || !Scale.isEmpty
     }
@@ -425,4 +441,12 @@ func gridAreasOf(_ text: string) -> (areas: [string: GridArea], columns: int32, 
         y += 1
     }
     return (areas: areas, columns: int32(rows.isEmpty ? 0 : rows[0].count), rows: int32(rows.count))
+}
+
+/// A clip-path's basic shape, its lengths resolved but for percentages,
+/// which are of the box's size: Kind and Args as css.ClipShape has them,
+/// with closest-side as auto and farthest-side as none.
+public struct ClipPath: Equatable {
+    public var Kind: string
+    public var Args: [css.Length]
 }
