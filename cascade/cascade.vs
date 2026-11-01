@@ -1346,6 +1346,43 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
         s.MaskURL = ""
         if case .url(let u) = v { s.MaskURL = u }
         if case .gradient(let g) = v { s.MaskGradient = g }
+    case .borderImageSource:
+        s.BorderImageURL = ""
+        s.BorderImageGradient = nil
+        if case .url(let u) = v { s.BorderImageURL = u }
+        if case .gradient(let g) = v { s.BorderImageGradient = g }
+    case .borderImageSlice:
+        if case .list(let parts) = v {
+            var sides: [css.Length] = []
+            var fill = false
+            for p in parts {
+                switch p {
+                case .number(let n): sides.append(.px(n))
+                case .length(let n, _): sides.append(.percent(n))
+                default: fill = true
+                }
+            }
+            s.BorderImageSlice = fourOf(sides, .percent(100))
+            s.BorderImageFill = fill
+        }
+    case .borderImageWidth, .borderImageOutset:
+        if case .list(let parts) = v {
+            var sides: [BorderImageSide] = []
+            for p in parts {
+                switch p {
+                case .number(let n): sides.append(.times(n))
+                case .auto: sides.append(.auto)
+                default: sides.append(.length(length(p, s, ctx) ?? .px(0)))
+                }
+            }
+            if d.Prop == .borderImageWidth { s.BorderImageWidths = fourOf(sides, .times(1)) } else { s.BorderImageOutsets = fourOf(sides, .times(0)) }
+        }
+    case .borderImageRepeat:
+        if case .list(let parts) = v {
+            var modes: [string] = []
+            for p in parts { modes.append(keywordOf(p) ?? "stretch") }
+            s.BorderImageRepeat = [modes[0], modes.count > 1 ? modes[1] : modes[0]]
+        }
     case .mixBlendMode:
         s.BlendMode = blendModeOf(keywordOf(v) ?? "normal")
     case .isolation:
@@ -1636,6 +1673,17 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
     case .tabSize: if case .number(let n) = v { s.TabSize = int32(n) }
     case .content:
         if case .families(let parts) = v { s.Content = parts } else { s.Content = nil }
+    }
+}
+
+/// One to four sides as margin takes them: top, right, bottom, left.
+func fourOf<T>(_ given: [T], _ fallback: T) -> [T] {
+    switch given.count {
+    case 0: return [fallback, fallback, fallback, fallback]
+    case 1: return [given[0], given[0], given[0], given[0]]
+    case 2: return [given[0], given[1], given[0], given[1]]
+    case 3: return [given[0], given[1], given[2], given[1]]
+    default: return [given[0], given[1], given[2], given[3]]
     }
 }
 
@@ -2017,6 +2065,11 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .maskImage: b.MaskGradient = a.MaskGradient; b.MaskURL = a.MaskURL
     case .mixBlendMode: b.BlendMode = a.BlendMode
     case .isolation: b.Isolated = a.Isolated
+    case .borderImageSource: b.BorderImageURL = a.BorderImageURL; b.BorderImageGradient = a.BorderImageGradient
+    case .borderImageSlice: b.BorderImageSlice = a.BorderImageSlice; b.BorderImageFill = a.BorderImageFill
+    case .borderImageWidth: b.BorderImageWidths = a.BorderImageWidths
+    case .borderImageOutset: b.BorderImageOutsets = a.BorderImageOutsets
+    case .borderImageRepeat: b.BorderImageRepeat = a.BorderImageRepeat
     case .transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay,
          .animationName, .animationDuration, .animationTimingFunction, .animationDelay,
          .animationIterationCount, .animationDirection, .animationFillMode, .animationPlayState:

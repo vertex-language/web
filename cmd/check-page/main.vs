@@ -1378,6 +1378,35 @@ func testCompositing() {
     check(at(170, 80) == draw.Color(0, 255, 255), "isolation: isolate keeps a blend inside its group (got \(at(170, 80)))")
 }
 
+@MainActor
+func testBorderImage() {
+    print("border-image")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(260, 70))
+    view.LoadHTML("""
+    <style>
+    body { margin: 0; background: white }
+    div { position: absolute; top: 10px; width: 20px; height: 20px; border: 10px solid rgb(255,0,0) }
+    </style>
+    <div style="left: 0; border-image: linear-gradient(rgb(0,0,255), rgb(0,0,255)) 10"></div>
+    <div style="left: 50px; border-image: linear-gradient(rgb(0,128,0), rgb(0,128,0)) 10 fill"></div>
+    <div style="left: 100px; border-image: url(missing.png) 10"></div>
+    <div style="left: 150px; border-image: linear-gradient(rgb(0,0,255), rgb(0,0,255)) 10 / 10px / 5px round"></div>
+    <div style="left: 200px; border-image-source: linear-gradient(to right, rgb(0,0,0), rgb(255,255,255)); border-image-slice: 25%"></div>
+    """)
+    var px = [uint8](repeating: 0, count: 260 * 70 * 4)
+    view.Draw(into: &px, width: 260, height: 70, scale: 1)
+    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 260, x, y) }
+    let white = draw.Color(255, 255, 255)
+    check(at(5, 15) == draw.Color(0, 0, 255) && at(20, 30) == white,
+          "a gradient border image takes the border's place, the middle left empty (got \(at(5, 15)) \(at(20, 30)))")
+    check(at(70, 30) == draw.Color(0, 128, 0), "fill draws the middle (got \(at(70, 30)))")
+    check(at(105, 15) == draw.Color(255, 0, 0), "an image that isn't loaded leaves the border's own style (got \(at(105, 15)))")
+    check(at(147, 30) == draw.Color(0, 0, 255) && at(143, 30) == white, "border-image-outset draws outside the box (got \(at(147, 30)) \(at(143, 30)))")
+    // The 40px gradient cut at 10px: the left edge is the darkest part.
+    check(at(205, 30).R < 64 && at(254, 30).R > 190, "the longhands cut a gradient into slices (got \(at(205, 30)) \(at(254, 30)))")
+}
+
 func main() async -> int32 {
     testStacking()
     testTextFeatures()
@@ -1402,6 +1431,7 @@ func main() async -> int32 {
     testInputTypes()
     testPointerEventsAndUserSelect()
     testCompositing()
+    testBorderImage()
     testRange()
     await testDeferredImages()
     await testSVGImages()

@@ -73,6 +73,19 @@ public final class ComputedStyle {
     public var BlendMode: draw.BlendMode = .normal
     /// isolation: isolate.
     public var Isolated: bool = false
+    /// border-image: its source (a URL or a gradient, neither for none),
+    /// the four slices (numbers as pixels, or percentages of the image)
+    /// and fill, the widths and outsets, and the horizontal and
+    /// vertical repeats.
+    public var BorderImageURL: string = ""
+    public var BorderImageGradient: draw.LinearGradient? = nil
+    public var BorderImageSlice: [css.Length] = [.percent(100), .percent(100), .percent(100), .percent(100)]
+    public var BorderImageFill: bool = false
+    public var BorderImageWidths: [BorderImageSide] = [.times(1), .times(1), .times(1), .times(1)]
+    public var BorderImageOutsets: [BorderImageSide] = [.times(0), .times(0), .times(0), .times(0)]
+    public var BorderImageRepeat: [string] = ["stretch", "stretch"]
+
+    public var HasBorderImage: bool { return !BorderImageURL.isEmpty || BorderImageGradient != nil }
     /// transform's functions, and the translate, rotate and scale
     /// properties, each empty for none; TransformMatrix puts them
     /// together about transform-origin.
@@ -449,4 +462,13 @@ func gridAreasOf(_ text: string) -> (areas: [string: GridArea], columns: int32, 
 public struct ClipPath: Equatable {
     public var Kind: string
     public var Args: [css.Length]
+}
+
+/// One side of border-image-width or border-image-outset: a length, a
+/// multiple of the border's width, or (widths only) the slice's own
+/// size.
+public enum BorderImageSide: Equatable {
+    case length(css.Length)
+    case times(float32)
+    case auto
 }

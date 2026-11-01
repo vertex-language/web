@@ -111,6 +111,9 @@ public enum PaintKind: Equatable {
     /// (mask-image), and mixed onto what is under it by Blend.
     case layer
     case unlayer
+    /// Image (or Gradient, sized to Rect) cut by Slice and drawn round
+    /// Rect, Widths in from its sides: border-image.
+    case borderImage
     /// What is painted so far under Rect, blurred by Blur and kept
     /// inside Rect's corners Radii: backdrop-filter.
     case backdrop
@@ -163,6 +166,12 @@ public struct PaintItem {
     public var MaskRect: draw.Rect = draw.Rect.zero
     public var Blend: draw.BlendMode = .normal
     public var Unbounded: bool = false
+    /// A border image's slices (in its pixels, or a gradient's CSS
+    /// pixels), whether its middle is drawn, and its repeats.
+    public var Slice: draw.Edges = draw.Edges.zero
+    public var SliceFill: bool = false
+    public var SliceAcross: draw.SliceRepeat = .stretch
+    public var SliceDown: draw.SliceRepeat = .stretch
 
     /// For a mark: the element's node id.
     public var Node: int64 = 0
@@ -661,7 +670,9 @@ final class DisplayListBuilder {
             }
         }
         let widths = box.Border
-        if widths.Top > 0 || widths.Right > 0 || widths.Bottom > 0 || widths.Left > 0 {
+        if s.HasBorderImage, let bi = borderImage(box, x: x, y: y) {
+            items.append(bi)
+        } else if widths.Top > 0 || widths.Right > 0 || widths.Bottom > 0 || widths.Left > 0 {
             var colors: [draw.Color] = []
             var side = 0
             while side < 4 {
@@ -670,6 +681,63 @@ final class DisplayListBuilder {
             }
             styledRing(rect, widths, colors, radii, [styleName(s.BorderTopStyle), styleName(s.BorderRightStyle),
                                                      styleName(s.BorderBottomStyle), styleName(s.BorderLeftStyle)])
+        }
+    }
+
+    /// A box's border-image, or nil where its image isn't loaded: the
+    /// border's own style shows then.
+    func borderImage(_ box: layout.Box, x: float32, y: float32) -> PaintItem? {
+        let s = box.Style
+        let bw = box.Border
+        let border: [float32] = [bw.Top, bw.Right, bw.Bottom, bw.Left]
+        func side(_ v: cascade.BorderImageSide, _ i: int, _ base: float32, _ auto: float32) -> float32 {
+            switch v {
+            case .times(let n): return n * border[i]
+            case .length(let l): return l.Or(0, base: base)
+            case .auto: return auto
+            }
+        }
+        let o = s.BorderImageOutsets
+        let area = draw.Rect(x - side(o[3], 3, 0, 0), y - side(o[0], 0, 0, 0),
+                             box.Width + side(o[1], 1, 0, 0) + side(o[3], 3, 0, 0), box.Height + side(o[0], 0, 0, 0) + side(o[2], 2, 0, 0))
+        var it = PaintItem(.borderImage)
+        it.Rect = area
+        // The image's size: its own, or for a gradient the area's.
+        var iw = area.Width
+        var ih = area.Height
+        if var g = s.BorderImageGradient {
+            if opacity < 1 {
+                var i = 0
+                while i < g.Stops.count {
+                    g.Stops[i].Color = color(g.Stops[i].Color)
+                    i += 1
+                }
+            }
+            it.Gradient = g
+        } else if let img = images[s.BorderImageURL], img.Width > 0 && img.Height > 0 {
+            it.Image = img
+            iw = float32(img.Width)
+            ih = float32(img.Height)
+        } else {
+            return nil
+        }
+        let sl = s.BorderImageSlice
+        it.Slice = draw.Edges(sl[0].Or(0, base: ih), sl[1].Or(0, base: iw), sl[2].Or(0, base: ih), sl[3].Or(0, base: iw))
+        it.SliceFill = s.BorderImageFill
+        let w = s.BorderImageWidths
+        it.Widths = draw.Edges(side(w[0], 0, area.Height, it.Slice.Top), side(w[1], 1, area.Width, it.Slice.Right),
+                               side(w[2], 2, area.Height, it.Slice.Bottom), side(w[3], 3, area.Width, it.Slice.Left))
+        it.SliceAcross = sliceRepeat(s.BorderImageRepeat[0])
+        it.SliceDown = sliceRepeat(s.BorderImageRepeat[1])
+        return it
+    }
+
+    func sliceRepeat(_ k: string) -> draw.SliceRepeat {
+        switch k {
+        case "repeat": return .tile
+        case "round": return .round
+        case "space": return .space
+        default: return .stretch
         }
     }
 
@@ -1443,6 +1511,31 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
                 }
                 layer.Composite(onto: canvas, transform: t, blend: blend)
                 layer.Free()
+            }
+        case .borderImage:
+            let r = item.Rect
+            let area = draw.Rect(r.X * scale + dx, r.Y * scale + dy, r.Width * scale, r.Height * scale)
+            let w = item.Widths
+            let widths = draw.Edges(w.Top * scale, w.Right * scale, w.Bottom * scale, w.Left * scale)
+            if let img = item.Image {
+                canvas.DrawNineSlice(img, into: area, slice: item.Slice, widths: widths, fill: item.SliceFill,
+                                     horizontal: item.SliceAcross, vertical: item.SliceDown)
+            } else if var g = item.Gradient {
+                // The gradient drawn at the canvas's scale, then cut as
+                // an image is.
+                let gw = draw.RoundToInt(area.Width)
+                let gh = draw.RoundToInt(area.Height)
+                if gw <= 0 || gh <= 0 { continue }
+                if let rs = g.Radial { g.Radial = rs.Scaled(scale) }
+                if let cs = g.Conic { g.Conic = cs.Scaled(scale) }
+                var pixels = [uint8](repeating: 0, count: int(gw) * int(gh) * 4)
+                draw.WithCanvas(&pixels, width: gw, height: gh) { gc in
+                    gc.FillGradient(draw.IRect(0, 0, gw, gh), radii: draw.Radii.zero, g)
+                }
+                let sl = item.Slice
+                canvas.DrawNineSlice(draw.Image(width: gw, height: gh, pixels: pixels), into: area,
+                                     slice: draw.Edges(sl.Top * scale, sl.Right * scale, sl.Bottom * scale, sl.Left * scale),
+                                     widths: widths, fill: item.SliceFill, horizontal: item.SliceAcross, vertical: item.SliceDown)
             }
         case .backdrop:
             let box = device(item.Rect)

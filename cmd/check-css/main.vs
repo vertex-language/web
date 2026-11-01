@@ -407,7 +407,7 @@ func testNames() {
     var unknown: [string] = []
     for n in applied where !css.IsKnownProperty(n) && css.Longhands(css.Declaration(property: n, value: "initial", important: false, tokens: [])).isEmpty && !["outline", "place-items", "flex-flow", "inset", "grid-gap", "border-top", "border-right", "border-bottom", "border-left"].contains(n) { unknown.append(n) }
     check(unknown.isEmpty, "every applied name is one the engine expands (got \(unknown))")
-    check(applied.contains("margin") && applied.contains("color") && applied.contains("transition") && applied.contains("clip-path") && unapplied.contains("border-image"), "the lists hold what they should")
+    check(applied.contains("margin") && applied.contains("color") && applied.contains("transition") && applied.contains("clip-path") && applied.contains("border-image") && unapplied.contains("writing-mode"), "the lists hold what they should")
 }
 
 func main() -> int32 {

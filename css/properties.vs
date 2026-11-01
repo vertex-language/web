@@ -60,6 +60,11 @@ public enum Prop: int32 {
     case maskImage
     case mixBlendMode
     case isolation
+    case borderImageSource
+    case borderImageSlice
+    case borderImageWidth
+    case borderImageOutset
+    case borderImageRepeat
     case outlineWidth
     case outlineColor
     case accentColor
@@ -229,6 +234,8 @@ public enum Value {
     case tracks([GridTrack])
     case placement(GridPlacement)
     case clipShape(ClipShape)
+    /// Several values, as border-image-slice's sides and the rest.
+    case list([Value])
     case inherit
     case initial
 }
@@ -294,6 +301,9 @@ let propNames: [string: Prop] = [
     "clip-path": .clipPath, "-webkit-clip-path": .clipPath,
     "mask-image": .maskImage, "-webkit-mask-image": .maskImage,
     "mix-blend-mode": .mixBlendMode, "isolation": .isolation,
+    "border-image-source": .borderImageSource, "border-image-slice": .borderImageSlice,
+    "border-image-width": .borderImageWidth, "border-image-outset": .borderImageOutset,
+    "border-image-repeat": .borderImageRepeat,
     "transform": .transform, "-webkit-transform": .transform, "transform-origin": .transformOrigin,
     "-webkit-transform-origin": .transformOrigin, "translate": .translate, "rotate": .rotate, "scale": .scale,
     "transition-property": .transitionProperty, "transition-duration": .transitionDuration,
@@ -645,13 +655,43 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
          "unicode-bidi", "writing-mode", "columns", "column-count", "column-width", "caption-side",
          "empty-cells", "speak", "orphans", "widows", "page-break-before", "page-break-after",
          "break-inside", "font-display",
-         "border-image", "box-decoration-break",
+         "box-decoration-break",
          "text-size-adjust", "-webkit-text-size-adjust", "-webkit-tap-highlight-color",
          "list-style-image", "font-kerning",
          "text-align-last", "text-justify", "font-variant-numeric", "font-variant-ligatures",
          "font-optical-sizing",
          "unused-placeholder-property":
         break
+    case "border-image", "-webkit-border-image":
+        // An image, slices with fill, then / widths and / outsets, and
+        // the repeats, in any order around the slices.
+        var source: Value = .none
+        var repeats: [Token] = []
+        var groups: [[Token]] = [[]]
+        var i = 0
+        while i < tokens.count {
+            let t = tokens[i]
+            let w = t.Kind == .ident ? lower(t.Value) : ""
+            if t.Kind == .url {
+                source = .url(t.Value)
+            } else if t.Kind == .function && isGradientName(lower(t.Value)) {
+                let end = closeParen(tokens, from: i + 1)
+                if let v = parseValue(.borderImageSource, Array(tokens[i..<(end < tokens.count ? end + 1 : tokens.count)])) { source = v }
+                i = end
+            } else if w == "stretch" || w == "repeat" || w == "round" || w == "space" {
+                repeats.append(t)
+            } else if t.Kind == .delim && t.Value == "/" {
+                groups.append([])
+            } else {
+                groups[groups.count - 1].append(t)
+            }
+            i += 1
+        }
+        set(.borderImageSource, source)
+        set(.borderImageSlice, groups[0].isEmpty ? .list([.length(100, .percent)]) : (parseValue(.borderImageSlice, groups[0]) ?? .list([.length(100, .percent)])))
+        set(.borderImageWidth, groups.count > 1 && !groups[1].isEmpty ? (parseValue(.borderImageWidth, groups[1]) ?? .list([.number(1)])) : .list([.number(1)]))
+        set(.borderImageOutset, groups.count > 2 && !groups[2].isEmpty ? (parseValue(.borderImageOutset, groups[2]) ?? .list([.number(0)])) : .list([.number(0)]))
+        set(.borderImageRepeat, repeats.isEmpty ? .list([.keyword("stretch")]) : (parseValue(.borderImageRepeat, repeats) ?? .list([.keyword("stretch")])))
     case "mask", "-webkit-mask":
         // Only the image of the mask is drawn: the first url() or
         // gradient in it.
@@ -736,6 +776,7 @@ func longhandsOf(_ name: string) -> [Prop] {
     case "border-style": return borderStyleProps
     case "border-color": return borderColorProps
     case "mask", "-webkit-mask": return [.maskImage]
+    case "border-image", "-webkit-border-image": return [.borderImageSource, .borderImageSlice, .borderImageWidth, .borderImageOutset, .borderImageRepeat]
     case "border": return borderWidthProps + borderStyleProps + borderColorProps
     // One side's width, style and color: what var() in border-top waits
     // to expand into.
@@ -1742,7 +1783,42 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
         // A geometry box alone, or a url() to an SVG <clipPath>: not
         // drawn.
         return Value.none
-    case .maskImage:
+    case .borderImageSlice:
+        // One to four numbers or percentages, and fill.
+        var sides: [Value] = []
+        var fill = false
+        for tk in tokens {
+            if tk.Kind == .ident && lower(tk.Value) == "fill" { fill = true; continue }
+            if tk.Kind == .number && tk.NumberVal >= 0 { sides.append(.number(tk.NumberVal)); continue }
+            if tk.Kind == .percentage && tk.NumberVal >= 0 { sides.append(.length(tk.NumberVal, .percent)); continue }
+            return nil
+        }
+        if sides.isEmpty || sides.count > 4 { return nil }
+        if fill { sides.append(.keyword("fill")) }
+        return .list(sides)
+    case .borderImageWidth, .borderImageOutset:
+        // One to four lengths or numbers (multiples of the border's
+        // width); widths may be auto or percentages too.
+        var sides: [Value] = []
+        for tk in tokens {
+            if tk.Kind == .number && tk.NumberVal >= 0 { sides.append(.number(tk.NumberVal)); continue }
+            if prop == .borderImageWidth && tk.Kind == .ident && lower(tk.Value) == "auto" { sides.append(.auto); continue }
+            if prop == .borderImageOutset && tk.Kind == .percentage { return nil }
+            if let v = parseLengthValue(tk, allowAuto: false) { sides.append(v); continue }
+            return nil
+        }
+        if sides.isEmpty || sides.count > 4 { return nil }
+        return .list(sides)
+    case .borderImageRepeat:
+        var modes: [Value] = []
+        for tk in tokens {
+            let w = tk.Kind == .ident ? lower(tk.Value) : ""
+            if w != "stretch" && w != "repeat" && w != "round" && w != "space" { return nil }
+            modes.append(.keyword(w))
+        }
+        if modes.isEmpty || modes.count > 2 { return nil }
+        return .list(modes)
+    case .maskImage, .borderImageSource:
         if kw == "none" { return Value.none }
         if t.Kind == .url { return .url(t.Value) }
         if t.Kind == .function && isGradientName(lower(t.Value)) {
