@@ -76,6 +76,7 @@ public enum Prop: int32 {
     case direction
     case unicodeBidi
     case backgroundAttachment
+    case transitionBehavior
     case textFillColor
     case outlineWidth
     case outlineColor
@@ -323,7 +324,7 @@ let propNames: [string: Prop] = [
     "column-rule-style": .columnRuleStyle, "column-rule-color": .columnRuleColor, "column-fill": .columnFill,
     "column-span": .columnSpan, "break-inside": .breakInside, "page-break-inside": .breakInside,
     "direction": .direction, "unicode-bidi": .unicodeBidi,
-    "background-attachment": .backgroundAttachment,
+    "background-attachment": .backgroundAttachment, "transition-behavior": .transitionBehavior,
     "-webkit-text-fill-color": .textFillColor, "text-fill-color": .textFillColor,
     "transform": .transform, "-webkit-transform": .transform, "transform-origin": .transformOrigin,
     "-webkit-transform-origin": .transformOrigin, "translate": .translate, "rotate": .rotate, "scale": .scale,
@@ -1870,7 +1871,7 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
         return parseOverflow(t)
     case .boxShadow:
         return parseShadows(tokens)
-    case .transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay,
+    case .transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay, .transitionBehavior,
          .animationName, .animationDuration, .animationTimingFunction, .animationDelay,
          .animationIterationCount, .animationDirection, .animationFillMode, .animationPlayState:
         return parseAnimationLonghand(prop, tokens)

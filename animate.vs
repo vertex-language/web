@@ -140,6 +140,10 @@ final class Animator {
     /// The page's time, in seconds, as the host last gave it.
     var now: float64 = 0
     var elements: [int64: ElementAnimations] = [:]
+    /// Each styled element's last style, for transitions that only the
+    /// new style declares; dropped once the element leaves the document.
+    var previous: [int64: cascade.ComputedStyle] = [:]
+    var previousNodes: [int64: html.Node] = [:]
     var pass: int = 0
     var resolver: cascade.StyleResolver
     /// Events to dispatch once the frame's style is settled.
@@ -174,6 +178,21 @@ final class Animator {
             }
         }
         for id in gone { elements[id] = nil }
+        // Styles of elements no longer in the document.
+        var detached: [int64] = []
+        for (id, n) in previousNodes where !connected(n) { detached.append(id) }
+        for id in detached {
+            previous[id] = nil
+            previousNodes[id] = nil
+        }
+    }
+
+    /// Whether a node is still in a document: its top ancestor is the
+    /// document, or the root element (whose parent the tree leaves nil).
+    func connected(_ n: html.Node) -> bool {
+        var top = n
+        while let p = top.Parent { top = p }
+        return top.Kind == html.NodeKind.document || top.TagName == "html"
     }
 
     /// Moves to a frame's time: what was waiting starts, what is done
@@ -228,13 +247,19 @@ final class Animator {
         let spec = style.Transition
         let anims = style.Animation
         let known = elements[node.Id]
+        // The style it had: what a transition the new style declares
+        // starts from (the before-change style), even where the old one
+        // declared none.
+        let prior = previous[node.Id]
+        previous[node.Id] = style
+        previousNodes[node.Id] = node
         // Elements with nothing to run, and nothing running, cost nothing.
         if known == nil && !spec.Runs && !anims.HasAnimations { return }
         let e = known ?? ElementAnimations(node: node)
         let first = known == nil
         if first { elements[node.Id] = e }
         e.seen = pass
-        updateTransitions(e, style, first: first)
+        updateTransitions(e, style, first: first, prior: prior)
         updateAnimations(e, style, parent)
 
         // Transitions, then animations over them.
@@ -261,7 +286,7 @@ final class Animator {
         if e.transitions.isEmpty && e.animations.isEmpty && !spec.Runs { elements[node.Id] = nil }
     }
 
-    func updateTransitions(_ e: ElementAnimations, _ style: cascade.ComputedStyle, first: bool) {
+    func updateTransitions(_ e: ElementAnimations, _ style: cascade.ComputedStyle, first: bool, prior: cascade.ComputedStyle?) {
         let spec = style.Transition
         var covered: [string] = []
         var i = 0
@@ -270,14 +295,17 @@ final class Animator {
             let duration = float64(cascade.Cycled(spec.Durations, i))
             let delay = float64(cascade.Cycled(spec.Delays, i))
             let easing = cascade.Cycled(spec.Timings, i)
+            let discrete = cascade.Cycled(spec.Behaviors, i) == "allow-discrete"
             i += 1
             if name == "none" { continue }
             for prop in cascade.AnimatablePropertiesNamed(name) {
+                if cascade.IsDiscreteProperty(prop.Prop) && !discrete { continue }
                 guard let value = cascade.AnimatedValue(prop.Prop, of: style) else { continue }
                 covered.append(prop.Name)
-                let old = e.base[prop.Name]
+                var old = e.base[prop.Name]
+                if old == nil, let p = prior { old = cascade.AnimatedValue(prop.Prop, of: p) }
                 e.base[prop.Name] = value
-                guard let before = old, !first else { continue }
+                guard let before = old else { continue }
                 if cascade.SameValue(before, value) { continue }
                 if duration <= 0 && delay + duration <= 0 {
                     e.transitions[prop.Name] = nil

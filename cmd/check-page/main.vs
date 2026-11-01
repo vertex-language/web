@@ -544,6 +544,40 @@ func testAnimations() {
     check(abs(opacity(c) - 0.5) < 0.01, "steps() moves in steps (got \(opacity(c)))")
     _ = view.Advance(time: 6)
     check(opacity(c) == 1 && !view.NeedsAnimation(), "without a fill an ended animation lets go, and the page asks for no more frames")
+
+    // A transition only the new state declares, and discrete ones.
+    let v2 = web.Page()
+    v2.SetViewportSize(draw.Size(300, 200))
+    v2.LoadHTML("""
+    <style>
+    #h { opacity: 1 } #h.on { opacity: 0; transition: opacity 1s linear }
+    #x { opacity: 1; display: block; transition: opacity 1s linear, display 1s allow-discrete }
+    #x.gone { opacity: 0; display: none }
+    #v { visibility: visible; transition: visibility 1s } #v.off { visibility: hidden }
+    #n { transition: display 1s } #n.gone { display: none }
+    </style>
+    <div id=h>h</div><div id=x>x</div><div id=v>v</div><div id=n>n</div>
+    """)
+    let d2 = v2.Document!
+    _ = v2.Advance(time: 0)
+    // Styled once, as a page that has been drawn is.
+    _ = v2.BoxFor(v2.QuerySelector("#h")!)
+    for id in ["#h", "#x", "#v", "#n"] {
+        let n = v2.QuerySelector(id)!
+        d2.ElementFor(n).ClassList.Add(id == "#h" ? "on" : (id == "#v" ? "off" : "gone"))
+    }
+    // Drawn after the change, which restyles; the next frame starts them.
+    _ = v2.BoxFor(v2.QuerySelector("#h")!)
+    _ = v2.Advance(time: 0)
+    _ = v2.Advance(time: 0.5)
+    let h = v2.BoxFor(v2.QuerySelector("#h")!)!.Style.Opacity
+    check(abs(h - 0.5) < 0.01, "a transition the new state alone declares runs from the old value (got \(h))")
+    check(v2.BoxFor(v2.QuerySelector("#x")!) != nil, "display: none with allow-discrete waits for the transition's end, showing it fade")
+    check(v2.BoxFor(v2.QuerySelector("#v")!)!.Style.Visibility == .visible, "visibility stays visible while it transitions to hidden")
+    check(v2.BoxFor(v2.QuerySelector("#n")!) == nil, "display without allow-discrete changes at once")
+    _ = v2.Advance(time: 1.5)
+    check(v2.BoxFor(v2.QuerySelector("#x")!) == nil && v2.BoxFor(v2.QuerySelector("#v")!)!.Style.Visibility == .hidden,
+          "and at the end it is gone, and hidden")
 }
 
 @MainActor

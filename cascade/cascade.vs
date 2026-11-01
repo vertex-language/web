@@ -1211,7 +1211,7 @@ func apply(_ given: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
         }
     case .opacity:
         if case .number(let n) = v { s.Opacity = n < 0 ? 0 : (n > 1 ? 1 : n) }
-    case .transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay,
+    case .transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay, .transitionBehavior,
          .animationName, .animationDuration, .animationTimingFunction, .animationDelay,
          .animationIterationCount, .animationDirection, .animationFillMode, .animationPlayState:
         applyAnimationProperty(d.Prop, v, s)
@@ -2104,7 +2104,7 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .borderImageWidth: b.BorderImageWidths = a.BorderImageWidths
     case .borderImageOutset: b.BorderImageOutsets = a.BorderImageOutsets
     case .borderImageRepeat: b.BorderImageRepeat = a.BorderImageRepeat
-    case .transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay,
+    case .transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay, .transitionBehavior,
          .animationName, .animationDuration, .animationTimingFunction, .animationDelay,
          .animationIterationCount, .animationDirection, .animationFillMode, .animationPlayState:
         copyAnimationProperty(p, from: a, to: b)

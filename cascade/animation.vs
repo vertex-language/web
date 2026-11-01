@@ -249,6 +249,9 @@ public struct TransitionSpec {
     public var Durations: [float32] = [0]
     public var Timings: [Easing] = [Easing.ease]
     public var Delays: [float32] = [0]
+    /// transition-behavior: allow-discrete lets display and the other
+    /// discrete properties transition.
+    public var Behaviors: [string] = ["normal"]
 
     public init() {}
 
@@ -298,6 +301,7 @@ func applyAnimationProperty(_ prop: css.Prop, _ v: css.Value, _ s: ComputedStyle
     case .transitionDuration: s.Transition.Durations = numbers
     case .transitionTimingFunction: s.Transition.Timings = items.map { Easing.Parse($0) }
     case .transitionDelay: s.Transition.Delays = numbers
+    case .transitionBehavior: s.Transition.Behaviors = items
     case .animationName: s.Animation.Names = items
     case .animationDuration: s.Animation.Durations = numbers
     case .animationTimingFunction: s.Animation.Timings = items.map { Easing.Parse($0) }
@@ -316,6 +320,7 @@ func copyAnimationProperty(_ prop: css.Prop, from a: ComputedStyle, to b: Comput
     case .transitionDuration: b.Transition.Durations = a.Transition.Durations
     case .transitionTimingFunction: b.Transition.Timings = a.Transition.Timings
     case .transitionDelay: b.Transition.Delays = a.Transition.Delays
+    case .transitionBehavior: b.Transition.Behaviors = a.Transition.Behaviors
     case .animationName: b.Animation.Names = a.Animation.Names
     case .animationDuration: b.Animation.Durations = a.Animation.Durations
     case .animationTimingFunction: b.Animation.Timings = a.Animation.Timings
@@ -339,6 +344,8 @@ public enum AnimValue {
     case length(css.Length)
     case transforms([TransformOp])
     case radii(draw.Radii)
+    /// A keyword that interpolates discretely: visibility's, display's.
+    case keyword(string)
 }
 
 /// The properties that animate, by name, each with its css.Prop.
@@ -349,6 +356,8 @@ public struct AnimatableProperty {
 
 public let AnimatableProperties: [AnimatableProperty] = [
     AnimatableProperty(Name: "opacity", Prop: .opacity),
+    AnimatableProperty(Name: "visibility", Prop: .visibility),
+    AnimatableProperty(Name: "display", Prop: .display),
     AnimatableProperty(Name: "color", Prop: .color),
     AnimatableProperty(Name: "background-color", Prop: .backgroundColor),
     AnimatableProperty(Name: "border-top-color", Prop: .borderTopColor),
@@ -419,8 +428,16 @@ public func AnimatablePropertiesNamed(_ name: string) -> [AnimatableProperty] {
 }
 
 /// A property's value in a style.
+/// Whether a property transitions only with transition-behavior:
+/// allow-discrete.
+public func IsDiscreteProperty(_ p: css.Prop) -> bool {
+    return p == .display
+}
+
 public func AnimatedValue(_ p: css.Prop, of s: ComputedStyle) -> AnimValue? {
     switch p {
+    case .visibility: return .keyword(s.Visibility == .visible ? "visible" : (s.Visibility == .hidden ? "hidden" : "collapse"))
+    case .display: return .keyword(displayName(s.Display))
     case .opacity: return .number(s.Opacity)
     case .color: return .color(s.Color)
     case .backgroundColor: return .color(s.BackgroundColor)
@@ -472,6 +489,9 @@ public func AnimatedValue(_ p: css.Prop, of s: ComputedStyle) -> AnimValue? {
 /// Puts an animated value into a style.
 public func SetAnimatedValue(_ p: css.Prop, _ v: AnimValue, on s: ComputedStyle) {
     switch v {
+    case .keyword(let k):
+        if p == .visibility { s.Visibility = k == "hidden" ? .hidden : (k == "collapse" ? .collapse : .visible) }
+        if p == .display { s.Display = displayOf(k) }
     case .number(let n):
         switch p {
         case .opacity: s.Opacity = math.Saturate(n)
@@ -546,6 +566,7 @@ public func SameValue(_ a: AnimValue, _ b: AnimValue) -> bool {
     case (.color(let x), .color(let y)): return x == y
     case (.length(let x), .length(let y)): return x == y
     case (.radii(let x), .radii(let y)): return x == y
+    case (.keyword(let x), .keyword(let y)): return x == y
     case (.transforms(let x), .transforms(let y)):
         if x.count != y.count { return false }
         var i = 0
@@ -595,6 +616,15 @@ func identityOp(like op: TransformOp) -> TransformOp {
 /// mix (auto) and lists whose functions differ switch halfway.
 public func Interpolate(_ a: AnimValue, _ b: AnimValue, _ t: float32) -> AnimValue {
     switch (a, b) {
+    case (.keyword(let x), .keyword(let y)):
+        // Visible all the way while either end is (visibility), and the
+        // shown display all the way to or from none; else halfway.
+        if t <= 0 { return a }
+        if t >= 1 { return b }
+        if x == "visible" || y == "visible" { return .keyword("visible") }
+        if x == "none" { return b }
+        if y == "none" { return a }
+        return t < 0.5 ? a : b
     case (.number(let x), .number(let y)): return .number(lerp(x, y, t))
     case (.color(let x), .color(let y)):
         // Mixed with premultiplied alpha, as CSS interpolates colors.
@@ -662,5 +692,31 @@ extension StyleResolver {
             }
         }
         return out
+    }
+}
+
+/// A display's keyword, as displayOf reads it.
+func displayName(_ d: Display) -> string {
+    switch d {
+    case .none: return "none"
+    case .block: return "block"
+    case .inline: return "inline"
+    case .inlineBlock: return "inline-block"
+    case .flex: return "flex"
+    case .inlineFlex: return "inline-flex"
+    case .grid: return "grid"
+    case .inlineGrid: return "inline-grid"
+    case .listItem: return "list-item"
+    case .table: return "table"
+    case .inlineTable: return "inline-table"
+    case .tableRow: return "table-row"
+    case .tableCell: return "table-cell"
+    case .tableRowGroup: return "table-row-group"
+    case .tableHeaderGroup: return "table-header-group"
+    case .tableFooterGroup: return "table-footer-group"
+    case .tableCaption: return "table-caption"
+    case .tableColumn: return "table-column"
+    case .tableColumnGroup: return "table-column-group"
+    case .contents: return "contents"
     }
 }

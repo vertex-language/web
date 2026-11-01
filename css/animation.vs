@@ -6,7 +6,7 @@ package css
 // timing functions as their text (`cubic-bezier(0.2,0,0,1)`), names and
 // keywords as written. The cascade reads them back (cascade/animation.vs).
 
-let transitionProps: [Prop] = [.transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay]
+let transitionProps: [Prop] = [.transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay, .transitionBehavior]
 let animationProps: [Prop] = [
     .animationName, .animationDuration, .animationTimingFunction, .animationDelay,
     .animationIterationCount, .animationDirection, .animationFillMode, .animationPlayState,
@@ -83,7 +83,8 @@ func parseAnimationLonghand(_ prop: Prop, _ tokens: [Token]) -> Value? {
             // Names and keywords: one identifier each.
             guard item.count == 1, item[0].Kind == .ident || item[0].Kind == .string else { return nil }
             let word = item[0].Kind == .string ? item[0].Value : item[0].Value
-            if prop == .transitionProperty || prop == .animationDirection || prop == .animationFillMode || prop == .animationPlayState {
+            if prop == .transitionBehavior && lower(word) != "normal" && lower(word) != "allow-discrete" { return nil }
+            if prop == .transitionProperty || prop == .transitionBehavior || prop == .animationDirection || prop == .animationFillMode || prop == .animationPlayState {
                 items.append(lower(word))
             } else {
                 items.append(word)
@@ -100,14 +101,21 @@ func parseTransitionShorthand(_ tokens: [Token]) -> [(Prop, Value)]? {
     var durations: [string] = []
     var timings: [string] = []
     var delays: [string] = []
+    var behaviors: [string] = []
     for item in commaItems(tokens) {
         var property = "all"
         var times: [float32] = []
         var timing = "ease"
+        var behavior = "normal"
         var i = 0
         while i < item.count {
             if let s = timeOf(item[i]) { times.append(s); i += 1; continue }
             if let m = timingAt(item, i) { timing = m.0; i += m.1; continue }
+            if item[i].Kind == .ident && (lower(item[i].Value) == "allow-discrete" || lower(item[i].Value) == "normal") {
+                behavior = lower(item[i].Value)
+                i += 1
+                continue
+            }
             if item[i].Kind == .ident { property = lower(item[i].Value); i += 1; continue }
             return nil
         }
@@ -116,6 +124,7 @@ func parseTransitionShorthand(_ tokens: [Token]) -> [(Prop, Value)]? {
         durations.append("\(times.count > 0 ? times[0] : 0)")
         delays.append("\(times.count > 1 ? times[1] : 0)")
         timings.append(timing)
+        behaviors.append(behavior)
     }
     if props.isEmpty { return nil }
     return [
@@ -123,6 +132,7 @@ func parseTransitionShorthand(_ tokens: [Token]) -> [(Prop, Value)]? {
         (.transitionDuration, .string(durations.joined(separator: "|"))),
         (.transitionTimingFunction, .string(timings.joined(separator: "|"))),
         (.transitionDelay, .string(delays.joined(separator: "|"))),
+        (.transitionBehavior, .string(behaviors.joined(separator: "|"))),
     ]
 }
 
