@@ -36,6 +36,8 @@ public func HitTest(_ box: Box, _ px: float32, _ py: float32, originX: float32, 
 func hitTestBox(_ box: Box, _ px: float32, _ py: float32, originX: float32, originY: float32) -> Hit? {
     let x = originX + box.X + box.OffsetX
     let y = originY + box.Y + box.OffsetY
+    // clip-path cuts what takes the pointer as it cuts what shows.
+    if box.Style.ClipPath != nil, let region = ClipRegionOf(box, x: x, y: y), !region.Contains(px, py) { return nil }
     let inside = px >= x && py >= y && px < x + box.Width && py < y + box.Height
     let sx = x - box.ScrollX
     let sy = y - box.ScrollY

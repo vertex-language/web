@@ -12,78 +12,31 @@ import (
     "web/svg"
 )
 
-/// A clip-path's shape on the page, in CSS pixels: Kind is inset (Rect
-/// and its corners), ellipse (a centre and two radii) or polygon.
-public struct ClipRegion {
-    public var Kind: string
-    public var Rect: draw.Rect = draw.Rect.zero
-    public var Radii: draw.Radii = draw.Radii.zero
-    public var CX: float32 = 0
-    public var CY: float32 = 0
-    public var RX: float32 = 0
-    public var RY: float32 = 0
-    public var Points: [draw.Point] = []
-
-    init(_ kind: string) {
-        Kind = kind
+/// The size a background or mask tile takes in its area: background-
+/// size's (and mask-size's) cover, contain, lengths or auto, for an
+/// image w × h (an area-sized gradient where it has none of its own).
+func layerSize(_ size: cascade.BackgroundSize, _ area: draw.Rect, _ w: float32, _ h: float32, intrinsic: bool) -> (float32, float32) {
+    var tw = w
+    var th = h
+    switch size {
+    case .cover:
+        let k = maxf(area.Width / tw, area.Height / th)
+        tw *= k
+        th *= k
+    case .contain:
+        let k = minf(area.Width / tw, area.Height / th)
+        tw *= k
+        th *= k
+    case .length(let lw, let lh):
+        let rw = lw.Resolve(area.Width)
+        let rh = lh.Resolve(area.Height)
+        if let a = rw, let b = rh { tw = a; th = b }
+        else if let a = rw { th = intrinsic ? th * a / tw : area.Height; tw = a }
+        else if let b = rh { tw = intrinsic ? tw * b / th : area.Width; th = b }
+    case .auto:
+        break
     }
-}
-
-/// A clip-path's shape against a box at x, y: percentages are of its
-/// size, and a circle's of the box's diagonal over root two.
-func clipRegion(_ cp: cascade.ClipPath, x: float32, y: float32, width w: float32, height h: float32) -> ClipRegion? {
-    let a = cp.Args
-    func at(_ i: int, _ base: float32) -> float32 { return i < a.count ? a[i].Or(0, base: base) : 0 }
-    switch cp.Kind {
-    case "inset":
-        if a.count < 5 { return nil }
-        var r = ClipRegion("inset")
-        let top = at(0, h)
-        let right = at(1, w)
-        let bottom = at(2, h)
-        let left = at(3, w)
-        r.Rect = draw.Rect(x + left, y + top, maxf(w - left - right, 0), maxf(h - top - bottom, 0))
-        r.Radii = draw.Radii(all: at(4, minf(w, h)))
-        return r
-    case "circle", "ellipse":
-        let circle = cp.Kind == "circle"
-        let n = circle ? 1 : 2
-        if a.count < n + 2 { return nil }
-        var r = ClipRegion("ellipse")
-        r.CX = x + at(n, w)
-        r.CY = y + at(n + 1, h)
-        let left = r.CX - x
-        let rightSide = x + w - r.CX
-        let top = r.CY - y
-        let bottomSide = y + h - r.CY
-        // A radius: a length, or the distance to the nearest or the
-        // farthest side (each axis's own for an ellipse).
-        func radius(_ i: int, _ base: float32, _ near: float32, _ far: float32) -> float32 {
-            if a[i] == .auto { return near }
-            if a[i] == .none { return far }
-            return a[i].Or(0, base: base)
-        }
-        if circle {
-            let diagonal = math.Sqrt(w * w + h * h) / math.Sqrt(2)
-            let rr = radius(0, diagonal, minf(minf(left, rightSide), minf(top, bottomSide)), maxf(maxf(left, rightSide), maxf(top, bottomSide)))
-            r.RX = rr
-            r.RY = rr
-        } else {
-            r.RX = radius(0, w, minf(left, rightSide), maxf(left, rightSide))
-            r.RY = radius(1, h, minf(top, bottomSide), maxf(top, bottomSide))
-        }
-        return r
-    case "polygon":
-        var r = ClipRegion("polygon")
-        var i = 0
-        while i + 1 < a.count {
-            r.Points.append(draw.Point(x + at(i, w), y + at(i + 1, h)))
-            i += 2
-        }
-        return r
-    default:
-        return nil
-    }
+    return (tw, th)
 }
 
 /// A positioned box waiting its turn in a stacking context.
@@ -165,8 +118,13 @@ public struct PaintItem {
     public var Transform: draw.Affine = draw.Affine.identity
     /// A layer's clip-path, mask and blend mode. Unbounded layers take
     /// all that shows, not just the box: what overflows it blends too.
-    public var Shape: ClipRegion? = nil
+    public var Shape: layout.ClipRegion? = nil
     public var MaskImage: draw.Image? = nil
+    /// An SVG mask image, and its width in CSS pixels; whether the mask
+    /// is read by luminance rather than alpha.
+    public var MaskVector: svg.Drawing? = nil
+    public var MaskVectorWidth: float32 = 0
+    public var MaskLuminance: bool = false
     public var MaskRect: draw.Rect = draw.Rect.zero
     public var Blend: draw.BlendMode = .normal
     public var Unbounded: bool = false
@@ -301,8 +259,9 @@ public struct State {
     /// The focused field's selected bytes, or -1 for none.
     public var FieldSelectionStart: int = -1
     public var FieldSelectionEnd: int = -1
-    /// The page's images by URL, for backgrounds.
+    /// The page's images by URL, for backgrounds; its SVG images.
     public var Images: [string: draw.Image] = [:]
+    public var Vectors: [string: svg.Document] = [:]
     /// The selection, if any, and each text node's place in the document.
     public var SelectionStart: dom.TextPosition? = nil
     public var SelectionEnd: dom.TextPosition? = nil
@@ -337,6 +296,7 @@ public func Build(_ root: layout.Box, state: State, viewportWidth: float32, view
     b.fieldSelectionStart = state.FieldSelectionStart
     b.fieldSelectionEnd = state.FieldSelectionEnd
     b.images = state.Images
+    b.vectors = state.Vectors
     b.selectionStart = state.SelectionStart
     b.selectionEnd = state.SelectionEnd
     b.textOrder = state.TextOrder
@@ -363,6 +323,8 @@ final class DisplayListBuilder {
     var stacked: [Stacked] = []
     /// The page's images by URL, for backgrounds.
     var images: [string: draw.Image] = [:]
+    /// The page's SVG images by URL, for masks.
+    var vectors: [string: svg.Document] = [:]
     /// The selection, if any, and each text node's place in the document.
     var selectionStart: dom.TextPosition? = nil
     var selectionEnd: dom.TextPosition? = nil
@@ -395,6 +357,46 @@ final class DisplayListBuilder {
         }
         paintBox(root, x: 0, y: 0, skipBackground: skipBackgroundOf)
         return items
+    }
+
+    /// A mask layer's source and tiling: mask-image over the border box
+    /// (mask-origin's default), sized by mask-size, placed by
+    /// mask-position, repeated by mask-repeat.
+    func maskTiles(_ layer: inout PaintItem, _ s: cascade.ComputedStyle) {
+        let area = layer.MaskRect
+        var iw = area.Width
+        var ih = area.Height
+        var intrinsic = false
+        layer.Gradient = s.MaskGradient
+        if !s.MaskURL.isEmpty {
+            if let img = images[s.MaskURL], img.Width > 0 && img.Height > 0 {
+                layer.MaskImage = img
+                iw = float32(img.Width)
+                ih = float32(img.Height)
+                intrinsic = true
+            } else if let doc = vectors[s.MaskURL] {
+                layer.MaskVector = doc.Drawing
+                if doc.Width > 0 && doc.Height > 0 {
+                    iw = doc.Width
+                    ih = doc.Height
+                    intrinsic = true
+                }
+                layer.MaskVectorWidth = iw
+            } else {
+                // An image not loaded masks everything away, as a
+                // browser's does until it arrives.
+                layer.MaskImage = draw.Image(width: 0, height: 0, pixels: [])
+            }
+        }
+        let m = s.MaskLayer
+        let size = layerSize(m.Size, area, iw, ih, intrinsic: intrinsic)
+        layer.TileWidth = size.0
+        layer.TileHeight = size.1
+        layer.X = area.X + (area.Width - size.0) * m.PositionX + m.OffsetX
+        layer.Y = area.Y + (area.Height - size.1) * m.PositionY + m.OffsetY
+        layer.RepeatX = m.RepeatX
+        layer.RepeatY = m.RepeatY
+        layer.MaskLuminance = s.MaskMode == "luminance"
     }
 
     /// The text a box paints, black and opaque, for masking: what
@@ -453,14 +455,9 @@ final class DisplayListBuilder {
             layer.Rect = draw.Rect(x, y, box.Width, box.Height)
             layer.Blur = s.FilterBlur
             layer.Transform = transform
-            if let cp = s.ClipPath { layer.Shape = clipRegion(cp, x: x, y: y, width: box.Width, height: box.Height) }
+            if s.ClipPath != nil { layer.Shape = layout.ClipRegionOf(box, x: x, y: y) }
             layer.MaskRect = layer.Rect
-            layer.Gradient = s.MaskGradient
-            if !s.MaskURL.isEmpty {
-                // An image not loaded masks everything away, as a
-                // browser's does until it arrives.
-                layer.MaskImage = images[s.MaskURL] ?? draw.Image(width: 0, height: 0, pixels: [])
-            }
+            if s.MaskGradient != nil || !s.MaskURL.isEmpty { maskTiles(&layer, s) }
             layer.Blend = s.BlendMode
             layer.Unbounded = s.BlendMode != .normal || s.Isolated
             items.append(layer)
@@ -1707,10 +1704,32 @@ func applyClipAndMask(_ layer: draw.Layer, _ item: PaintItem, scale: float32, dx
             layer.MaskRounded(device(shape.Rect), radii: shape.Radii.Scaled(scale))
         case "ellipse":
             layer.MaskEllipse(cx: px(shape.CX, dx), cy: px(shape.CY, dy), rx: shape.RX * scale, ry: shape.RY * scale)
-        default:
+        case "polygon":
             var points: [draw.Point] = []
             for p in shape.Points { points.append(draw.Point(px(p.X, dx), px(p.Y, dy))) }
             layer.MaskPolygon(points)
+        default:
+            // path() and shape(): the contours in the canvas's pixels,
+            // filled into a layer of their own that keeps this one.
+            var path = draw.Path()
+            let pts = shape.Path.Points
+            let starts = shape.Path.Starts
+            var c = 0
+            while c < starts.count {
+                let from = starts[c]
+                let to = c + 1 < starts.count ? starts[c + 1] : pts.count
+                var i = from
+                while i < to {
+                    if i == from { path.MoveTo(px(pts[i].X, dx), px(pts[i].Y, dy)) } else { path.LineTo(px(pts[i].X, dx), px(pts[i].Y, dy)) }
+                    i += 1
+                }
+                path.Close()
+                c += 1
+            }
+            let alpha = draw.Layer(layer.Rect)
+            alpha.Canvas.FillPath(path, rule: shape.EvenOdd ? .evenOdd : .nonZero, draw.Color(0, 0, 0))
+            layer.MaskBy(alpha)
+            alpha.Free()
         }
     }
     let box = device(item.MaskRect)
@@ -1721,31 +1740,50 @@ func applyClipAndMask(_ layer: draw.Layer, _ item: PaintItem, scale: float32, dx
         layer.MaskBy(alpha)
         alpha.Free()
     }
-    if var g = item.Gradient {
-        g = g.Scaled(scale)
-        layer.MaskGradient(box, g)
-    }
-    if let img = item.MaskImage {
+    if item.Gradient != nil || item.MaskImage != nil || item.MaskVector != nil {
+        // The mask's tiles over its area, into a layer whose alpha (or
+        // luminance) keeps this one.
         let area = box.Intersect(layer.Rect)
-        if area.IsEmpty || img.Width <= 0 || img.Height <= 0 {
+        let tw = item.TileWidth * scale
+        let th = item.TileHeight * scale
+        if area.IsEmpty || tw < 0.5 || th < 0.5 || (item.MaskImage != nil && item.MaskImage!.Width <= 0) {
             layer.Mask { _, _ in 0 }
             return
         }
-        // The image at its own size from the box's top left, repeated
-        // across it: mask-size auto, mask-repeat repeat.
         let alpha = draw.Layer(area)
-        let tw = float32(img.Width)
-        let th = float32(img.Height)
-        var ty = item.MaskRect.Y
-        while ty < item.MaskRect.Y + item.MaskRect.Height {
-            var tx = item.MaskRect.X
-            while tx < item.MaskRect.X + item.MaskRect.Width {
-                alpha.Canvas.DrawImage(img, into: device(draw.Rect(tx, ty, tw, th)))
+        let ox = px(item.X, dx)
+        let oy = px(item.Y, dy)
+        var startX = ox
+        var startY = oy
+        if item.RepeatX { startX = ox - math.Ceil((ox - float32(area.X)) / tw) * tw }
+        if item.RepeatY { startY = oy - math.Ceil((oy - float32(area.Y)) / th) * th }
+        let g = item.Gradient?.Scaled(scale)
+        var ty = startY
+        var rows = 0
+        while ty < float32(area.Bottom) && rows < 4096 {
+            var tx = startX
+            var cols = 0
+            while tx < float32(area.Right) && cols < 4096 {
+                let x0 = draw.RoundToInt(tx)
+                let y0 = draw.RoundToInt(ty)
+                let tile = draw.IRect(x0, y0, draw.RoundToInt(tx + tw) - x0, draw.RoundToInt(ty + th) - y0)
+                if let img = item.MaskImage {
+                    alpha.Canvas.DrawImage(img, into: tile)
+                } else if let v = item.MaskVector {
+                    v.Render(on: alpha.Canvas, into: draw.Rect(tx, ty, tw, th), scale: tw / (item.MaskVectorWidth > 0 ? item.MaskVectorWidth : 1),
+                             currentColor: draw.Color(0, 0, 0), fill: nil, fillNone: false)
+                } else if let gg = g {
+                    alpha.Canvas.FillGradient(tile, radii: draw.Radii.zero, gg)
+                }
+                if !item.RepeatX { break }
                 tx += tw
+                cols += 1
             }
+            if !item.RepeatY { break }
             ty += th
+            rows += 1
         }
-        layer.MaskBy(alpha)
+        if item.MaskLuminance { layer.MaskByLuminance(alpha) } else { layer.MaskBy(alpha) }
         alpha.Free()
     }
 }

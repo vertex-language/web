@@ -508,3 +508,32 @@ func trim(_ s: string) -> string {
     while j > i && (b[j - 1] == 32 || b[j - 1] == 9 || b[j - 1] == 10 || b[j - 1] == 13) { j -= 1 }
     return css.stringOf(b, i, j)
 }
+
+/// SVG path data as a path, each point x, y taken to x * scale + dx,
+/// y * scale + dy: clip-path: path(), on a page.
+public func PathFromData(_ d: string, scale: float32, dx: float32, dy: float32) -> draw.Path {
+    var ops: [uint8] = []
+    var coords: [float32] = []
+    parsePath(d, &ops, &coords)
+    var path = draw.Path()
+    var i = 0
+    var k = 0
+    while i < ops.count {
+        switch ops[i] {
+        case opMove:
+            path.MoveTo(coords[k] * scale + dx, coords[k + 1] * scale + dy)
+            k += 2
+        case opLine:
+            path.LineTo(coords[k] * scale + dx, coords[k + 1] * scale + dy)
+            k += 2
+        case opCubic:
+            path.CubicTo(coords[k] * scale + dx, coords[k + 1] * scale + dy, coords[k + 2] * scale + dx, coords[k + 3] * scale + dy,
+                         coords[k + 4] * scale + dx, coords[k + 5] * scale + dy)
+            k += 6
+        default:
+            path.Close()
+        }
+        i += 1
+    }
+    return path
+}

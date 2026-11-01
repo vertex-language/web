@@ -70,6 +70,10 @@ public final class ComputedStyle {
     /// mask-image: a gradient, or an image's URL; neither for none.
     public var MaskGradient: draw.LinearGradient? = nil
     public var MaskURL: string = ""
+    /// mask-repeat, mask-size and mask-position, as a background layer
+    /// keeps them; mask-mode.
+    public var MaskLayer: BackgroundImage = emptyLayer()
+    public var MaskMode: string = "match-source"
     public var BlendMode: draw.BlendMode = .normal
     /// isolation: isolate.
     public var Isolated: bool = false
@@ -503,6 +507,11 @@ func gridAreasOf(_ text: string) -> (areas: [string: GridArea], columns: int32, 
 public struct ClipPath: Equatable {
     public var Kind: string
     public var Args: [css.Length]
+    /// css.ClipShape's: path data or shape() commands, the fill rule, and
+    /// the reference box.
+    public var Words: [string] = []
+    public var Rule: string = "nonzero"
+    public var Box: string = "border-box"
 }
 
 /// One side of border-image-width or border-image-outset: a length, a
@@ -512,4 +521,9 @@ public enum BorderImageSide: Equatable {
     case length(css.Length)
     case times(float32)
     case auto
+}
+
+/// A layer with no image: what mask-repeat, -size and -position start from.
+func emptyLayer() -> BackgroundImage {
+    return BackgroundImage(url: "")
 }

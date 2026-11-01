@@ -1410,6 +1410,47 @@ func testCompositing() {
     check(left.R > 40 && left.R < 200 && right.R > 60 && right.R < 215 && at(110, 80).R < 40 && at(130, 80).R > 215,
           "backdrop-filter: blur() blurs what is behind, inside the box (got \(left) \(right) \(at(110, 80)) \(at(130, 80)))")
     check(at(170, 80) == draw.Color(0, 255, 255), "isolation: isolate keeps a blend inside its group (got \(at(170, 80)))")
+
+    // path(), shape(), a geometry box, and clicks.
+    let more = web.Page()
+    more.SetViewportSize(draw.Size(200, 60))
+    more.LoadHTML("""
+    <style>body { margin: 0; background: white } div { position: absolute; top: 0; width: 40px; height: 40px }</style>
+    <div id=p style="left: 0; background: rgb(255,0,0); clip-path: path('M 0 0 L 40 0 L 0 40 Z')"></div>
+    <div id=s style="left: 50px; background: rgb(0,0,255); clip-path: shape(from 0 0, line to 100% 0, line to 0 100%, close)"></div>
+    <div id=c style="left: 100px; background: rgb(0,128,0); padding: 10px; border-radius: 30px; clip-path: content-box"></div>
+    """)
+    var mp = [uint8](repeating: 0, count: 200 * 60 * 4)
+    more.Draw(into: &mp, width: 200, height: 60, scale: 1)
+    func m(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(mp, 200, x, y) }
+    check(m(5, 5) == draw.Color(255, 0, 0) && m(35, 35) == draw.Color(255, 255, 255), "path() keeps its triangle (got \(m(5, 5)) \(m(35, 35)))")
+    check(m(55, 5) == draw.Color(0, 0, 255) && m(85, 35) == draw.Color(255, 255, 255), "shape() with percentages (got \(m(55, 5)) \(m(85, 35)))")
+    check(m(130, 30) == draw.Color(0, 128, 0) && m(105, 30) == draw.Color(255, 255, 255), "a geometry box alone clips to that box (got \(m(130, 30)) \(m(105, 30)))")
+    check(more.ElementAt(draw.Point(5, 5))?.GetAttribute("id") == "p" && more.ElementAt(draw.Point(35, 35))?.GetAttribute("id") != "p",
+          "a click outside the clip-path passes through")
+
+    // mask-size, -position, -repeat, -mode.
+    let mk = web.Page()
+    mk.SetViewportSize(draw.Size(100, 40))
+    mk.LoadHTML("""
+    <style>body { margin: 0; background: white } div { position: absolute; top: 0; width: 40px; height: 40px; background: rgb(255,0,0) }</style>
+    <div style="left: 0; mask: linear-gradient(black, black) center / 20px 20px no-repeat"></div>
+    <div style="left: 50px; mask-image: linear-gradient(to right, white, black); mask-mode: luminance"></div>
+    """)
+    var kp = [uint8](repeating: 0, count: 100 * 40 * 4)
+    mk.Draw(into: &kp, width: 100, height: 40, scale: 1)
+    func k(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(kp, 100, x, y) }
+    check(k(20, 20) == draw.Color(255, 0, 0) && k(5, 5) == draw.Color(255, 255, 255) && k(35, 20) == draw.Color(255, 255, 255),
+          "mask-size and mask-position place one tile, no-repeat (got \(k(20, 20)) \(k(5, 5)) \(k(35, 20)))")
+    check(k(52, 20).G < 40 && k(88, 20).G > 215, "mask-mode: luminance keeps what is bright (got \(k(52, 20)) \(k(88, 20)))")
+    // An SVG mask from a percent-encoded data: URL: a circle.
+    let sv = web.Page()
+    sv.SetViewportSize(draw.Size(40, 40))
+    sv.LoadHTML("<body style='margin:0;background:white'><div style='width:40px;height:40px;background:rgb(255,0,0);mask-image:url(\"data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2740%27 height=%2740%27%3E%3Ccircle cx=%2720%27 cy=%2720%27 r=%2715%27/%3E%3C/svg%3E\")'></div></body>")
+    var sp2 = [uint8](repeating: 0, count: 40 * 40 * 4)
+    sv.Draw(into: &sp2, width: 40, height: 40, scale: 1)
+    check(pixelAt(sp2, 40, 20, 20) == draw.Color(255, 0, 0) && pixelAt(sp2, 40, 2, 2) == draw.Color(255, 255, 255),
+          "an SVG mask image, from a data: URL (got \(pixelAt(sp2, 40, 20, 20)) \(pixelAt(sp2, 40, 2, 2)))")
 }
 
 @MainActor

@@ -77,6 +77,10 @@ public enum Prop: int32 {
     case unicodeBidi
     case backgroundAttachment
     case transitionBehavior
+    case maskRepeat
+    case maskSize
+    case maskPosition
+    case maskMode
     case textFillColor
     case outlineWidth
     case outlineColor
@@ -261,6 +265,15 @@ public enum Value {
 public struct ClipShape {
     public var Kind: string
     public var Args: [Value]
+    /// path(): its path data; shape(): its commands, SVG's letters (M L
+    /// H V C Q Z, lowercase for `by`), each taking its arguments from
+    /// Args in turn.
+    public var Words: [string] = []
+    /// nonzero or evenodd, for path(), shape() and polygon().
+    public var Rule: string = "nonzero"
+    /// The box the shape's percentages and position are of: border-box,
+    /// padding-box, content-box or margin-box.
+    public var Box: string = "border-box"
 }
 
 /// One term of a calc(): a number in a unit, or unitless.
@@ -325,6 +338,8 @@ let propNames: [string: Prop] = [
     "column-span": .columnSpan, "break-inside": .breakInside, "page-break-inside": .breakInside,
     "direction": .direction, "unicode-bidi": .unicodeBidi,
     "background-attachment": .backgroundAttachment, "transition-behavior": .transitionBehavior,
+    "mask-repeat": .maskRepeat, "-webkit-mask-repeat": .maskRepeat, "mask-size": .maskSize, "-webkit-mask-size": .maskSize,
+    "mask-position": .maskPosition, "-webkit-mask-position": .maskPosition, "mask-mode": .maskMode,
     "-webkit-text-fill-color": .textFillColor, "text-fill-color": .textFillColor,
     "transform": .transform, "-webkit-transform": .transform, "transform-origin": .transformOrigin,
     "-webkit-transform-origin": .transformOrigin, "translate": .translate, "rotate": .rotate, "scale": .scale,
@@ -786,19 +801,28 @@ func longhands(_ d: Declaration) -> [Longhand] {
         set(.borderImageOutset, groups.count > 2 && !groups[2].isEmpty ? (parseValue(.borderImageOutset, groups[2]) ?? .list([.number(0)])) : .list([.number(0)]))
         set(.borderImageRepeat, repeats.isEmpty ? .list([.keyword("stretch")]) : (parseValue(.borderImageRepeat, repeats) ?? .list([.keyword("stretch")])))
     case "mask", "-webkit-mask":
-        // Only the image of the mask is drawn: the first url() or
-        // gradient in it.
-        var i = 0
-        while i < tokens.count {
-            if tokens[i].Kind == .url || (tokens[i].Kind == .function && isGradientName(lower(tokens[i].Value))) {
-                let end = tokens[i].Kind == .url ? i + 1 : closeParen(tokens, from: i + 1) + 1
-                if let v = parseValue(.maskImage, Array(tokens[i..<(end < tokens.count ? end : tokens.count)])) { set(.maskImage, v) }
-                return out
+        // The background shorthand's syntax but for color, with a mode:
+        // read as background, and its longhands renamed.
+        let bg = longhands(Declaration(property: "background", value: d.Value, important: important, tokens: tokens))
+        var sawImage = false
+        for l in bg {
+            switch l.Prop {
+            case .backgroundImage:
+                set(.maskImage, l.Value)
+                sawImage = true
+            case .backgroundRepeat: set(.maskRepeat, l.Value)
+            case .backgroundSize: set(.maskSize, l.Value)
+            case .backgroundPosition: set(.maskPosition, l.Value)
+            default: break
             }
-            if tokens[i].Kind == .comma { break }
-            i += 1
         }
-        set(.maskImage, .none)
+        if !sawImage { set(.maskImage, .none) }
+        var mode: Value = .initial
+        for t in tokens where t.Kind == .ident {
+            let w = lower(t.Value)
+            if w == "alpha" || w == "luminance" || w == "match-source" { mode = .keyword(w) }
+        }
+        set(.maskMode, mode)
     default:
         // margin-inline-start and friends, in a left-to-right, top-to-bottom world.
         if let mapped = logicalProp(name) {
@@ -868,7 +892,7 @@ func longhandsOf(_ name: string) -> [Prop] {
     case "border-width": return borderWidthProps
     case "border-style": return borderStyleProps
     case "border-color": return borderColorProps
-    case "mask", "-webkit-mask": return [.maskImage]
+    case "mask", "-webkit-mask": return [.maskImage, .maskRepeat, .maskSize, .maskPosition, .maskMode]
     case "columns": return [.columnCount, .columnWidth]
     case "column-rule": return [.columnRuleWidth, .columnRuleStyle, .columnRuleColor]
     case "border-image", "-webkit-border-image": return [.borderImageSource, .borderImageSlice, .borderImageWidth, .borderImageOutset, .borderImageRepeat]
@@ -1736,15 +1760,17 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
             if let g = parseGradient(tokens, 1, closeParen(tokens, from: 1)) { return .gradient(g) }
         }
         return nil
-    case .backgroundRepeat:
+    case .maskMode:
+        return kw == "alpha" || kw == "luminance" || kw == "match-source" ? .keyword(kw) : nil
+    case .backgroundRepeat, .maskRepeat:
         switch kw {
         case "no-repeat", "repeat", "repeat-x", "repeat-y", "space", "round": return .keyword(kw)
         default: return nil
         }
-    case .backgroundSize:
+    case .backgroundSize, .maskSize:
         if kw == "cover" || kw == "contain" || kw == "auto" { return .keyword(kw) }
         return parseBackgroundSize(tokens)
-    case .backgroundPosition, .objectPosition:
+    case .backgroundPosition, .objectPosition, .maskPosition:
         return parseBackgroundPosition(tokens)
     case .outlineStyle:
         switch kw {
@@ -1902,17 +1928,41 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
         return parseScaleProperty(tokens)
     case .clipPath:
         if kw == "none" { return Value.none }
+        // A basic shape and a geometry box, in either order, or a box
+        // alone (its border radius kept).
+        var shape: ClipShape? = nil
+        var box = ""
         var i = 0
         while i < tokens.count {
-            if tokens[i].Kind == .function {
+            let t = tokens[i]
+            if t.Kind == .function {
                 let end = closeParen(tokens, from: i + 1)
-                if let shape = parseClipShape(lower(tokens[i].Value), Array(tokens[(i + 1)..<end])) { return .clipShape(shape) }
-                return nil
+                guard let s = parseClipShape(lower(t.Value), Array(tokens[(i + 1)..<end])) else { return nil }
+                shape = s
+                i = end + 1
+                continue
+            }
+            if t.Kind == .ident {
+                switch lower(t.Value) {
+                case "border-box", "padding-box", "content-box", "margin-box": box = lower(t.Value)
+                case "fill-box", "stroke-box", "view-box": box = "border-box"
+                default: return nil
+                }
+            } else if t.Kind == .url {
+                // A url() to an SVG <clipPath>: not drawn.
+                return Value.none
             }
             i += 1
         }
-        // A geometry box alone, or a url() to an SVG <clipPath>: not
-        // drawn.
+        if var s = shape {
+            if !box.isEmpty { s.Box = box }
+            return .clipShape(s)
+        }
+        if !box.isEmpty {
+            var s = ClipShape(Kind: "box", Args: [])
+            s.Box = box
+            return .clipShape(s)
+        }
         return Value.none
     case .borderImageSlice:
         // One to four numbers or percentages, and fill.
@@ -2270,9 +2320,78 @@ func parseClipShape(_ name: string, _ tokens: [Token]) -> ClipShape? {
         while radii.count < wanted { radii.append(.keyword("closest-side")) }
         guard let at = position() else { return nil }
         return ClipShape(Kind: name, Args: radii + at)
+    case "path":
+        // An optional fill rule, then the path data as a string.
+        var rule = "nonzero"
+        if word() == "nonzero" || word() == "evenodd" {
+            rule = word()
+            i += 1
+            if i < tokens.count && tokens[i].Kind == .comma { i += 1 }
+        }
+        guard i < tokens.count, tokens[i].Kind == .string else { return nil }
+        var shape = ClipShape(Kind: "path", Args: [])
+        shape.Words = [tokens[i].Value]
+        shape.Rule = rule
+        return shape
+    case "shape":
+        // shape(<fill-rule>? from x y, <command>#): commands as SVG's
+        // letters with their arguments.
+        var shape = ClipShape(Kind: "shape", Args: [])
+        if word() == "nonzero" || word() == "evenodd" {
+            shape.Rule = word()
+            i += 1
+        }
+        guard word() == "from" else { return nil }
+        i += 1
+        guard let fx = length(), let fy = length() else { return nil }
+        shape.Words.append("M")
+        shape.Args += [fx, fy]
+        while i < tokens.count {
+            if tokens[i].Kind == .comma { i += 1; continue }
+            let command = word()
+            i += 1
+            if command == "close" {
+                shape.Words.append("Z")
+                continue
+            }
+            let relative = word() == "by"
+            guard word() == "to" || word() == "by" else { return nil }
+            i += 1
+            func letter(_ l: string) -> string { return relative ? l.lowercased() : l }
+            switch command {
+            case "move", "line", "smooth", "arc":
+                guard let x = length(), let y = length() else { return nil }
+                shape.Words.append(letter(command == "move" ? "M" : "L"))
+                shape.Args += [x, y]
+                // The rest of an arc or smooth curve: drawn straight.
+                while i < tokens.count && tokens[i].Kind != .comma { i += 1 }
+            case "hline", "vline":
+                guard let v = length() else { return nil }
+                shape.Words.append(letter(command == "hline" ? "H" : "V"))
+                shape.Args.append(v)
+            case "curve":
+                guard let x = length(), let y = length(), word() == "with" else { return nil }
+                i += 1
+                guard let c1x = length(), let c1y = length() else { return nil }
+                if i < tokens.count && tokens[i].Kind == .delim && tokens[i].Value == "/" {
+                    i += 1
+                    guard let c2x = length(), let c2y = length() else { return nil }
+                    shape.Words.append(letter("C"))
+                    shape.Args += [c1x, c1y, c2x, c2y, x, y]
+                } else {
+                    shape.Words.append(letter("Q"))
+                    shape.Args += [c1x, c1y, x, y]
+                }
+            default:
+                return nil
+            }
+        }
+        return shape
     case "polygon":
         // An optional fill rule, then points split by commas.
+        var rule = "nonzero"
         if word() == "nonzero" || word() == "evenodd" {
+            rule = word()
             i += 1
             if i < tokens.count && tokens[i].Kind == .comma { i += 1 }
         }
@@ -2284,7 +2403,9 @@ func parseClipShape(_ name: string, _ tokens: [Token]) -> ClipShape? {
             if i < tokens.count && tokens[i].Kind == .comma { i += 1 }
         }
         if points.count < 6 { return nil }
-        return ClipShape(Kind: "polygon", Args: points)
+        var shape = ClipShape(Kind: "polygon", Args: points)
+        shape.Rule = rule
+        return shape
     default:
         return nil
     }

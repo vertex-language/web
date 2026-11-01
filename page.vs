@@ -380,19 +380,7 @@ public final class Page {
         triedImages = [:]
         for src in wanted {
             triedImages[src] = true
-            if images[src] == nil && vectors[src] == nil {
-                if src.hasPrefix("data:") {
-                    if let decoded = format.DecodeDataURL(src) { images[src] = drawable(decoded) }
-                } else if Configuration.DefersImages {
-                    pendingImages.append(src)
-                } else if let bytes = Configuration.Fetcher.Fetch(Resolve(src)) {
-                    if let doc = svg.ParseDocument(bytes) {
-                        vectors[src] = doc
-                    } else if let decoded = decodeImage(bytes) {
-                        images[src] = decoded
-                    }
-                }
-            }
+            if images[src] == nil && vectors[src] == nil { loadImage(src) }
         }
         title = doc.Title
         if let cb = onTitle { cb(title) }
@@ -790,6 +778,7 @@ public final class Page {
                     state.FieldSelectionEnd = r.end
                 }
                 state.Images = images
+                state.Vectors = vectors
                 if !frames.isEmpty || builder.HasFrames { state.Subpages = syncFrames() }
                 if let range = selectionRange() {
                     state.SelectionStart = range.start
@@ -1291,16 +1280,27 @@ extension Page {
         visit(box)
         for src in wanted where triedImages[src] == nil && images[src] == nil && vectors[src] == nil {
             triedImages[src] = true
-            if src.hasPrefix("data:") {
-                if let decoded = format.DecodeDataURL(src) { images[src] = drawable(decoded) }
-            } else if Configuration.DefersImages {
-                pendingImages.append(src)
-            } else if let bytes = Configuration.Fetcher.Fetch(Resolve(src)) {
-                if let doc = svg.ParseDocument(bytes) {
-                    vectors[src] = doc
-                } else if let decoded = decodeImage(bytes) {
-                    images[src] = decoded
-                }
+            loadImage(src)
+        }
+    }
+
+    /// Loads an image: a data: URL here and now (an SVG one as a
+    /// drawing), else through the fetcher, or later where images defer.
+    func loadImage(_ src: string) {
+        if src.hasPrefix("data:") {
+            guard let bytes = format.DataURLBytes(src) else { return }
+            if let doc = svg.ParseDocument(bytes) {
+                vectors[src] = doc
+            } else if let decoded = format.Decode(bytes) {
+                images[src] = drawable(decoded)
+            }
+        } else if Configuration.DefersImages {
+            pendingImages.append(src)
+        } else if let bytes = Configuration.Fetcher.Fetch(Resolve(src)) {
+            if let doc = svg.ParseDocument(bytes) {
+                vectors[src] = doc
+            } else if let decoded = decodeImage(bytes) {
+                images[src] = decoded
             }
         }
     }

@@ -1191,37 +1191,15 @@ func apply(_ given: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
             layer = made
         }
         s.BackgroundImage = layer
-    case .backgroundRepeat:
+    case .backgroundRepeat, .backgroundSize, .backgroundPosition:
         if let k = keywordOf(v) {
             var layer = s.BackgroundImage ?? BackgroundImage(url: "")
-            layer.RepeatX = k == "repeat" || k == "repeat-x" || k == "space" || k == "round"
-            layer.RepeatY = k == "repeat" || k == "repeat-y" || k == "space" || k == "round"
+            applyLayerKeyword(d.Prop, k, &layer, s, ctx)
             s.BackgroundImage = layer
         }
-    case .backgroundSize:
-        if let k = keywordOf(v) {
-            var layer = s.BackgroundImage ?? BackgroundImage(url: "")
-            if k == "cover" { layer.Size = .cover }
-            else if k == "contain" { layer.Size = .contain }
-            else if k == "auto" { layer.Size = .auto }
-            else {
-                let parts = words(k)
-                let w = lengthFromWord(parts[0], s, ctx)
-                let h = parts.count > 1 ? lengthFromWord(parts[1], s, ctx) : css.Length.auto
-                layer.Size = .length(w, h)
-            }
-            s.BackgroundImage = layer
-        }
-    case .backgroundPosition:
-        if let k = keywordOf(v) {
-            var layer = s.BackgroundImage ?? BackgroundImage(url: "")
-            let p = backgroundPosition(words(k), s)
-            layer.PositionX = p.fx
-            layer.OffsetX = p.ox
-            layer.PositionY = p.fy
-            layer.OffsetY = p.oy
-            s.BackgroundImage = layer
-        }
+    case .maskRepeat, .maskSize, .maskPosition:
+        if let k = keywordOf(v) { applyLayerKeyword(d.Prop, k, &s.MaskLayer, s, ctx) }
+    case .maskMode: s.MaskMode = keywordOf(v) ?? "match-source"
     case .opacity:
         if case .number(let n) = v { s.Opacity = n < 0 ? 0 : (n > 1 ? 1 : n) }
     case .transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay, .transitionBehavior,
@@ -1356,7 +1334,11 @@ func apply(_ given: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
                     args.append(.px(0))
                 }
             }
-            s.ClipPath = ClipPath(Kind: shape.Kind, Args: args)
+            var cp = ClipPath(Kind: shape.Kind, Args: args)
+            cp.Words = shape.Words
+            cp.Rule = shape.Rule
+            cp.Box = shape.Box
+            s.ClipPath = cp
         }
     case .maskImage:
         s.MaskGradient = nil
@@ -1731,6 +1713,31 @@ func fourOf<T>(_ given: [T], _ fallback: T) -> [T] {
     case 2: return [given[0], given[1], given[0], given[1]]
     case 3: return [given[0], given[1], given[2], given[1]]
     default: return [given[0], given[1], given[2], given[3]]
+    }
+}
+
+/// A background's or a mask's repeat, size or position into its layer.
+func applyLayerKeyword(_ p: css.Prop, _ k: string, _ layer: inout BackgroundImage, _ s: ComputedStyle, _ ctx: ApplyContext) {
+    switch p {
+    case .backgroundRepeat, .maskRepeat:
+        layer.RepeatX = k == "repeat" || k == "repeat-x" || k == "space" || k == "round"
+        layer.RepeatY = k == "repeat" || k == "repeat-y" || k == "space" || k == "round"
+    case .backgroundSize, .maskSize:
+        if k == "cover" { layer.Size = .cover }
+        else if k == "contain" { layer.Size = .contain }
+        else if k == "auto" { layer.Size = .auto }
+        else {
+            let parts = words(k)
+            let w = lengthFromWord(parts[0], s, ctx)
+            let h = parts.count > 1 ? lengthFromWord(parts[1], s, ctx) : css.Length.auto
+            layer.Size = .length(w, h)
+        }
+    default:
+        let pos = backgroundPosition(words(k), s)
+        layer.PositionX = pos.fx
+        layer.OffsetX = pos.ox
+        layer.PositionY = pos.fy
+        layer.OffsetY = pos.oy
     }
 }
 
@@ -2110,6 +2117,16 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .backdropFilter: b.BackdropBlur = a.BackdropBlur
     case .clipPath: b.ClipPath = a.ClipPath
     case .maskImage: b.MaskGradient = a.MaskGradient; b.MaskURL = a.MaskURL
+    case .maskRepeat:
+        b.MaskLayer.RepeatX = a.MaskLayer.RepeatX
+        b.MaskLayer.RepeatY = a.MaskLayer.RepeatY
+    case .maskSize: b.MaskLayer.Size = a.MaskLayer.Size
+    case .maskPosition:
+        b.MaskLayer.PositionX = a.MaskLayer.PositionX
+        b.MaskLayer.PositionY = a.MaskLayer.PositionY
+        b.MaskLayer.OffsetX = a.MaskLayer.OffsetX
+        b.MaskLayer.OffsetY = a.MaskLayer.OffsetY
+    case .maskMode: b.MaskMode = a.MaskMode
     case .mixBlendMode: b.BlendMode = a.BlendMode
     case .isolation: b.Isolated = a.Isolated
     case .borderImageSource: b.BorderImageURL = a.BorderImageURL; b.BorderImageGradient = a.BorderImageGradient
