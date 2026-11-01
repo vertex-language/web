@@ -211,6 +211,11 @@ public final class Layout {
             let floatsBottom = flow.floats.bottom - box.ContentY
             if floatsBottom > height { height = floatsBottom }
         }
+        // Size containment, and content-visibility: hidden: the content
+        // doesn't size the box; contain-intrinsic-height stands in.
+        if box.Style.ContainSize || box.Style.ContentVisibility == "hidden" {
+            height = box.Style.ContainIntrinsicHeight?.Resolve(0) ?? 0
+        }
         return height
     }
 
@@ -477,6 +482,10 @@ public final class Layout {
         let edges = box.Padding.Horizontal + box.Border.Horizontal
         if box.Kind == .replaced {
             return replacedIntrinsicWidths(box, ignoringWidth: ignoringWidth)
+        }
+        if (s.ContainSize || s.ContentVisibility == "hidden") && (ignoringWidth || s.Width.IsAuto) {
+            let w = (s.ContainIntrinsicWidth?.Resolve(0) ?? 0) + edges
+            return (min: w, max: w)
         }
         if let w = s.Width.Pixels, !ignoringWidth {
             let bw = s.BoxSizing == .borderBox ? w : w + edges

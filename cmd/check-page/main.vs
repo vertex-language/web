@@ -855,6 +855,98 @@ func testTextWrap() {
 }
 
 @MainActor
+func testScrollbarsZoomAndContainment() {
+    print("zoom, color-scheme, scrollbars, caret, appearance, resize, containment")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(400, 300))
+    view.LoadHTML("""
+    <style>
+    body { margin: 0; background: white }
+    #z { zoom: 2; width: 50px; height: 10px; font-size: 10px; border-left: 1px solid black }
+    #zc { width: 1rem; height: 1em }
+    #dk { color-scheme: dark; color: light-dark(rgb(1, 1, 1), rgb(2, 2, 2)) } #lt { color-scheme: light; color: light-dark(rgb(1, 1, 1), rgb(2, 2, 2)) }
+    #sc { position: absolute; left: 300px; top: 0; width: 60px; height: 60px; overflow: auto; scrollbar-color: rgb(255, 0, 0) rgb(0, 0, 255) }
+    #cb { appearance: none; width: 16px; height: 16px; position: absolute; left: 0; top: 200px; margin: 0 }
+    #ta { position: absolute; left: 100px; top: 150px; width: 100px; height: 40px; padding: 0; border: 1px solid black; box-sizing: border-box }
+    #cv { content-visibility: hidden; contain-intrinsic-size: 40px 30px; width: 40px } #cs { contain: size } #cp { contain: paint; height: 5px }
+    </style>
+    <div id=z><div id=zc></div></div>
+    <p id=dk>d</p><p id=lt>l</p>
+    <div id=sc><div style="height: 300px"></div></div>
+    <input id=cb type=checkbox checked>
+    <textarea id=ta></textarea>
+    <div id=cv><p id=cvp>hidden</p></div><div id=cs><p>sized</p></div><div id=cp><p>clipped</p></div>
+    """)
+    func box(_ id: string) -> layout.Box? { return view.BoxFor(view.QuerySelector("#" + id)!) }
+    check(box("z")!.Width == 102 && box("z")!.Height == 20 && box("z")!.Border.Left == 2, "zoom doubles lengths and borders (got \(box("z")!.Width) \(box("z")!.Height))")
+    check(box("zc")!.Width == 32 && box("zc")!.Height == 20, "and rem and em inside it (got \(box("zc")!.Width) \(box("zc")!.Height))")
+    check(box("dk")!.Style.Color == draw.Color(2, 2, 2) && box("lt")!.Style.Color == draw.Color(1, 1, 1), "color-scheme picks light-dark()'s color")
+    var px = [uint8](repeating: 0, count: 400 * 300 * 4)
+    view.Draw(into: &px, width: 400, height: 300, scale: 1)
+    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 400, x, y) }
+    check(at(354, 5) == draw.Color(255, 0, 0) && at(354, 50) == draw.Color(0, 0, 255), "scrollbar-color's thumb and track (got \(at(354, 5)) \(at(354, 50)))")
+    check(at(8, 208) != draw.Color(0, 117, 255), "appearance: none draws no checkbox of its own")
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(196, 187))))
+    _ = view.Handle(.pointerMoved(draw.Point(216, 197)))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(216, 197))))
+    check(box("ta")!.Width == 120 && box("ta")!.Height == 50, "dragging a textarea's grip resizes it (got \(box("ta")!.Width) \(box("ta")!.Height))")
+    check(box("cvp") == nil && box("cv")!.Height == 30, "content-visibility: hidden skips the content and takes contain-intrinsic-size")
+    check(box("cs")!.Height == 0 && box("cp")!.Style.ClipsOverflow, "contain: size and paint")
+}
+
+@MainActor
+func testSmoothScrollAndSnap() {
+    print("Scroll offsets kept, smooth scrolling, scroll snap")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(300, 200))
+    view.LoadHTML("""
+    <style>
+    html { scroll-behavior: smooth } body { margin: 0 }
+    #box { width: 100px; height: 100px; overflow: auto; scroll-snap-type: y mandatory }
+    #box div { height: 100px; scroll-snap-align: start }
+    #h { width: 100px; height: 50px; overflow: auto; white-space: nowrap; scroll-snap-type: x mandatory }
+    #h span { display: inline-block; width: 100px; height: 40px; scroll-snap-align: start }
+    a:hover { color: red } #tall { height: 2000px }
+    </style>
+    <div id=box><div>1</div><div>2</div><div>3</div></div>
+    <div id=h><span>a</span><span>b</span><span>c</span></div>
+    <a id=l href="#">link</a><div id=tall></div>
+    """)
+    func box(_ id: string) -> layout.Box { return view.BoxFor(view.QuerySelector("#" + id)!)! }
+    _ = view.Advance(time: 0)
+    _ = view.Handle(.pointerMoved(draw.Point(50, 50)))
+    _ = view.Handle(.wheel(web.Wheel(draw.Point(0, -30), precise: true)))
+    check(box("box").ScrollY == 30, "the wheel scrolls the container (got \(box("box").ScrollY))")
+    let link = view.BoundsOf(view.QuerySelector("#l")!)!
+    _ = view.Handle(.pointerMoved(draw.Point(link.X + 2, link.Y + 5)))
+    check(box("box").ScrollY == 30, "and a restyle keeps where it is scrolled to (got \(box("box").ScrollY))")
+    check(view.NeedsAnimation(), "a wheel scroll in a snap container waits to snap")
+    _ = view.Advance(time: 0.2)
+    _ = view.Advance(time: 0.7)
+    check(box("box").ScrollY == 0, "mandatory snapping settles on the nearest start (got \(box("box").ScrollY))")
+    _ = view.Handle(.pointerMoved(draw.Point(50, 50)))
+    _ = view.Handle(.wheel(web.Wheel(draw.Point(0, -70), precise: true)))
+    _ = view.Advance(time: 1.0)
+    _ = view.Advance(time: 1.5)
+    check(box("box").ScrollY == 100, "and on the next one past halfway (got \(box("box").ScrollY))")
+    _ = view.Handle(.pointerMoved(draw.Point(50, 120)))
+    _ = view.Handle(.wheel(web.Wheel(draw.Point(0, -60), precise: true)))
+    check(box("h").ScrollX == 60, "a container that only scrolls sideways takes the wheel sideways (got \(box("h").ScrollX))")
+    _ = view.Advance(time: 2.0)
+    _ = view.Advance(time: 2.5)
+    check(box("h").ScrollX == 100, "and snaps along x (got \(box("h").ScrollX))")
+    _ = view.Handle(.pointerMoved(draw.Point(250, 190)))
+    _ = view.Handle(.keyDown(web.Key(Key: "End", Code: "End")))
+    check(view.ScrollOffset().Y == 0 && view.NeedsAnimation(), "scroll-behavior: smooth makes a key's scroll glide (got \(view.ScrollOffset().Y))")
+    _ = view.Advance(time: 3.0)
+    _ = view.Advance(time: 3.15)
+    let mid = view.ScrollOffset().Y
+    _ = view.Advance(time: 3.5)
+    let end = view.ScrollOffset().Y
+    check(mid > 0 && mid < end && end > 1000, "through the middle to the end (got \(mid) then \(end))")
+}
+
+@MainActor
 func testPointerEventsAndUserSelect() {
     print("pointer-events and user-select")
     let view = web.Page()
@@ -1092,6 +1184,8 @@ func main() async -> int32 {
     testDecorations()
     testGridAreasAndLogical()
     testTextWrap()
+    testScrollbarsZoomAndContainment()
+    testSmoothScrollAndSnap()
     testPointerEventsAndUserSelect()
     testRange()
     await testDeferredImages()

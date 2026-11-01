@@ -149,6 +149,33 @@ public enum Prop: int32 {
     case textWrapStyle
     case whiteSpaceCollapse
     case lineClamp
+    case scrollbarColor
+    case scrollbarGutter
+    case caretColor
+    case colorScheme
+    case appearance
+    case resize
+    case willChange
+    case touchAction
+    case overscrollBehaviorX
+    case overscrollBehaviorY
+    case contain
+    case contentVisibility
+    case containIntrinsicWidth
+    case containIntrinsicHeight
+    case zoom
+    case scrollBehavior
+    case scrollSnapType
+    case scrollSnapAlign
+    case scrollSnapStop
+    case scrollPaddingTop
+    case scrollPaddingRight
+    case scrollPaddingBottom
+    case scrollPaddingLeft
+    case scrollMarginTop
+    case scrollMarginRight
+    case scrollMarginBottom
+    case scrollMarginLeft
 }
 
 /// A unit a length was written in.
@@ -262,6 +289,16 @@ let propNames: [string: Prop] = [
     "text-underline-offset": .textUnderlineOffset, "text-shadow": .textShadow,
     "text-wrap-mode": .textWrapMode, "text-wrap-style": .textWrapStyle, "white-space-collapse": .whiteSpaceCollapse,
     "line-clamp": .lineClamp, "-webkit-line-clamp": .lineClamp,
+    "scrollbar-color": .scrollbarColor, "scrollbar-gutter": .scrollbarGutter, "caret-color": .caretColor,
+    "color-scheme": .colorScheme, "appearance": .appearance, "-webkit-appearance": .appearance, "resize": .resize,
+    "will-change": .willChange, "touch-action": .touchAction, "overscroll-behavior-x": .overscrollBehaviorX,
+    "overscroll-behavior-y": .overscrollBehaviorY, "contain": .contain, "content-visibility": .contentVisibility,
+    "contain-intrinsic-width": .containIntrinsicWidth, "contain-intrinsic-height": .containIntrinsicHeight, "zoom": .zoom,
+    "scroll-behavior": .scrollBehavior, "scroll-snap-type": .scrollSnapType, "scroll-snap-align": .scrollSnapAlign,
+    "scroll-snap-stop": .scrollSnapStop, "scroll-padding-top": .scrollPaddingTop, "scroll-padding-right": .scrollPaddingRight,
+    "scroll-padding-bottom": .scrollPaddingBottom, "scroll-padding-left": .scrollPaddingLeft,
+    "scroll-margin-top": .scrollMarginTop, "scroll-margin-right": .scrollMarginRight,
+    "scroll-margin-bottom": .scrollMarginBottom, "scroll-margin-left": .scrollMarginLeft,
     "grid-template-areas": .gridTemplateAreas, "justify-items": .justifyItems, "justify-self": .justifySelf,
     "background-clip": .backgroundClip, "-webkit-background-clip": .backgroundClip, "background-origin": .backgroundOrigin,
     "outline-width": .outlineWidth, "outline-color": .outlineColor, "accent-color": .accentColor,
@@ -541,6 +578,28 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
         }
         set(.containerName, n)
         set(.containerType, type)
+    case "scroll-padding", "scroll-margin", "scroll-padding-block", "scroll-padding-inline", "scroll-margin-block", "scroll-margin-inline":
+        let pad = name.hasPrefix("scroll-padding")
+        let sides: [Prop] = pad ? [.scrollPaddingTop, .scrollPaddingRight, .scrollPaddingBottom, .scrollPaddingLeft]
+                                : [.scrollMarginTop, .scrollMarginRight, .scrollMarginBottom, .scrollMarginLeft]
+        guard let four = fourSides(tokens, allowAuto: true) else { return [] }
+        if name.hasSuffix("-block") {
+            set(sides[0], four[0]); set(sides[2], four.count > 2 ? four[2] : four[0])
+        } else if name.hasSuffix("-inline") {
+            set(sides[3], four[0]); set(sides[1], four[0])
+            if tokens.count > 1 { set(sides[1], four[1]) }
+        } else {
+            set(sides[0], four[0]); set(sides[1], four[1]); set(sides[2], four[2]); set(sides[3], four[3])
+        }
+    case "overscroll-behavior":
+        guard let x = parseValue(.overscrollBehaviorX, [tokens[0]]) else { return [] }
+        set(.overscrollBehaviorX, x)
+        set(.overscrollBehaviorY, tokens.count > 1 ? (parseValue(.overscrollBehaviorY, [tokens[1]]) ?? x) : x)
+    case "contain-intrinsic-size":
+        let lengths = tokens.filter { !($0.Kind == .ident && lower($0.Value) == "auto") }
+        guard !lengths.isEmpty, let w = parseValue(.containIntrinsicWidth, [lengths[0]]) else { return [] }
+        set(.containIntrinsicWidth, w)
+        set(.containIntrinsicHeight, lengths.count > 1 ? (parseValue(.containIntrinsicHeight, [lengths[1]]) ?? w) : w)
     case "text-wrap":
         // text-wrap-mode and text-wrap-style, either or both.
         for tok in tokens where tok.Kind == .ident {
@@ -561,18 +620,17 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
          "transform-style", "transform-box", "counter-reset", "counter-increment",
          "background-attachment",
          "font-variant", "font-stretch", "font-feature-settings", "src", "unicode-range",
-         "appearance", "-webkit-appearance", "resize", "scroll-behavior",
          "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing", "filter", "backdrop-filter",
-         "clip-path", "will-change", "contain", "isolation",
+         "clip-path", "isolation",
          "hyphens", "direction",
          "unicode-bidi", "writing-mode", "columns", "column-count", "column-width", "caption-side",
          "empty-cells", "speak", "orphans", "widows", "page-break-before", "page-break-after",
          "break-inside", "font-display", "mix-blend-mode",
          "border-image", "box-decoration-break",
-         "text-size-adjust", "-webkit-text-size-adjust", "-webkit-tap-highlight-color", "touch-action",
-         "overscroll-behavior", "scrollbar-color", "list-style-image", "font-kerning",
+         "text-size-adjust", "-webkit-text-size-adjust", "-webkit-tap-highlight-color",
+         "list-style-image", "font-kerning",
          "text-align-last", "text-justify", "font-variant-numeric", "font-variant-ligatures",
-         "font-optical-sizing", "color-scheme", "caret-color",
+         "font-optical-sizing",
          "unused-placeholder-property":
         break
     default:
@@ -662,6 +720,10 @@ func longhandsOf(_ name: string) -> [Prop] {
     case "outline": return [.outlineWidth, .outlineColor, .outlineStyle]
     case "container": return [.containerName, .containerType]
     case "text-wrap": return [.textWrapMode, .textWrapStyle]
+    case "overscroll-behavior": return [.overscrollBehaviorX, .overscrollBehaviorY]
+    case "scroll-padding", "scroll-padding-block", "scroll-padding-inline": return [.scrollPaddingTop, .scrollPaddingRight, .scrollPaddingBottom, .scrollPaddingLeft]
+    case "scroll-margin", "scroll-margin-block", "scroll-margin-inline": return [.scrollMarginTop, .scrollMarginRight, .scrollMarginBottom, .scrollMarginLeft]
+    case "contain-intrinsic-size": return [.containIntrinsicWidth, .containIntrinsicHeight]
     case "transition", "-webkit-transition": return transitionProps
     case "animation", "-webkit-animation": return animationProps
     case "font": return [.fontFamily, .fontSize, .fontWeight, .fontStyle, .lineHeight]
@@ -1510,6 +1572,67 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
         case "collapse", "preserve", "preserve-breaks", "break-spaces", "preserve-spaces": return .keyword(kw)
         default: return nil
         }
+    case .scrollbarColor:
+        // auto, or the thumb's color then the track's.
+        if kw == "auto" { return .string("") }
+        guard let thumb = parseColorAt(tokens, 0), thumb.1 < tokens.count, let track = parseColorAt(tokens, thumb.1) else { return nil }
+        if case .color(let a) = thumb.0, case .color(let b) = track.0 { return .shadows([ShadowValue(X: .color(a), Y: .color(b), Blur: .none, Spread: .none, Color: a, Inset: false)]) }
+        return nil
+    case .caretColor:
+        if kw == "auto" { return .auto }
+        return parseColorAt(tokens, 0)?.0
+    case .colorScheme, .willChange, .touchAction, .contain, .scrollbarGutter:
+        // Space-separated keywords, kept as words.
+        var words: [string] = []
+        for tok in tokens {
+            guard tok.Kind == .ident else { if tok.Kind == .comma { continue }; return nil }
+            words.append(lower(tok.Value))
+        }
+        return words.isEmpty ? nil : .keyword(joinWords(words))
+    case .appearance:
+        switch kw {
+        case "none", "auto", "menulist-button", "textfield", "base-select", "button", "checkbox", "radio", "listbox",
+             "menulist", "meter", "progress-bar", "searchfield", "textarea", "push-button", "slider-horizontal", "square-button":
+            return .keyword(kw == "none" ? "none" : (kw == "base-select" ? "base-select" : "auto"))
+        default: return nil
+        }
+    case .resize:
+        switch kw {
+        case "none", "both", "horizontal", "vertical", "block", "inline": return .keyword(kw == "block" ? "vertical" : (kw == "inline" ? "horizontal" : kw))
+        default: return nil
+        }
+    case .overscrollBehaviorX, .overscrollBehaviorY:
+        switch kw {
+        case "auto", "contain", "none": return .keyword(kw)
+        default: return nil
+        }
+    case .contentVisibility:
+        switch kw {
+        case "visible", "auto", "hidden": return .keyword(kw)
+        default: return nil
+        }
+    case .containIntrinsicWidth, .containIntrinsicHeight:
+        // `auto <length>` remembers a size; the length is what is used.
+        if kw == "none" { return Value.none }
+        for tok in tokens { if let l = parseLengthValue(tok, allowAuto: false) { return l } }
+        return nil
+    case .scrollBehavior:
+        return kw == "auto" || kw == "smooth" ? .keyword(kw) : nil
+    case .scrollSnapType, .scrollSnapAlign, .scrollSnapStop:
+        var words: [string] = []
+        for tok in tokens {
+            guard tok.Kind == .ident else { return nil }
+            words.append(lower(tok.Value))
+        }
+        return words.isEmpty ? nil : .keyword(joinWords(words))
+    case .scrollPaddingTop, .scrollPaddingRight, .scrollPaddingBottom, .scrollPaddingLeft,
+         .scrollMarginTop, .scrollMarginRight, .scrollMarginBottom, .scrollMarginLeft:
+        return parseLengthValue(t, allowAuto: true) ?? calcValue(tokens)
+    case .zoom:
+        if kw == "normal" || kw == "reset" { return .number(1) }
+        if t.Kind == .number && t.NumberVal > 0 { return .number(t.NumberVal) }
+        if t.Kind == .percentage && t.NumberVal > 0 { return .number(t.NumberVal / 100) }
+        return nil
     case .lineClamp:
         if kw == "none" { return .number(0) }
         if t.Kind == .number && t.NumberVal >= 1 { return .number(t.NumberVal) }

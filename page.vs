@@ -209,6 +209,15 @@ public final class Page {
     var target: html.Node? = nil
     /// The controls the user has changed: :user-valid and :user-invalid.
     var userEdited = Set<int64>()
+    /// A resize grip being dragged: the element, where the drag began,
+    /// the element's size then, and its style attribute then.
+    var resizing: (node: html.Node, start: draw.Point, width: float32, height: float32, style: string)? = nil
+    /// Elements' scroll offsets by element, which outlive the box tree;
+    /// a smooth scroll under way; a wheel scroll waiting to snap
+    /// (scrolling.vs).
+    var elementScroll: [int64: draw.Point] = [:]
+    var scrollAnimation: ScrollAnimation? = nil
+    var pendingSnap: (node: int64, at: float64)? = nil
     var caretVisible = true
     var caretPhase: float64 = 0
     /// The other end of the focused field's selection: the caret when
@@ -295,6 +304,9 @@ public final class Page {
     func load(_ doc: html.Document) {
         frames = [:]
         target = nil
+        elementScroll = [:]
+        scrollAnimation = nil
+        pendingSnap = nil
         userEdited = []
         pressedFrame = nil
         hoveredFrame = nil
@@ -594,6 +606,7 @@ public final class Page {
     /// calls `Advance` with each frame's time and keeps requesting frames.
     public func NeedsAnimation() -> bool {
         if animator.Active || !animator.events.isEmpty { return true }
+        if scrollAnimation != nil || pendingSnap != nil { return true }
         for (_, f) in frames where f.page.NeedsAnimation() { return true }
         if let f = focused { return dom.IsTextControl(f) }
         return false
@@ -613,6 +626,7 @@ public final class Page {
             repaint = true
         }
         dispatchAnimationEvents()
+        if advanceScroll(time) { repaint = true }
         for (_, frame) in frames where frame.page.NeedsAnimation() {
             if frame.page.Advance(time: time) {
                 needsPaint = true
@@ -702,6 +716,7 @@ public final class Page {
                 let run = layout.Layout(viewportWidth: size.Width, viewportHeight: size.Height)
                 run.Run(r)
                 laidOut = run
+                restoreElementScrolls()
                 contentHeight = r.Y + r.Height + r.Margin.Bottom
                 contentWidth = r.X + r.Width + r.Margin.Right
                 if r.ContentWidth + r.X + r.ContentX > contentWidth { contentWidth = r.ContentWidth + r.X + r.ContentX }
@@ -1033,9 +1048,10 @@ public final class Page {
         update()
         guard let b = builder.byNode[node.Id] else { return }
         let pos = layout.PagePosition(b)
-        scroll.Y = pos.y
-        clampScroll()
-        needsRepaint = true
+        // scroll-margin-top keeps room above it, as a sticky header needs.
+        let margin = b.Style.ScrollMargin[0].Resolve(size.Height) ?? 0
+        let pad = root?.Style.ScrollPadding[0].Resolve(size.Height) ?? 0
+        scrollPage(to: draw.Point(scroll.X, pos.y - margin - pad), smooth: smoothScrolling)
     }
 
     /// Scrolls just enough to show an element.

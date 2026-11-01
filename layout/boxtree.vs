@@ -346,8 +346,12 @@ public final class BoxTreeBuilder {
                 box.FirstLineStyle = resolver.ResolvePseudo(node, "first-line", parent: style, context: context)
             }
             byNode[node.Id] = box
-            buildChildren(of: node, into: box, parentStyle: style)
-            addPseudoElements(node, box, style)
+            // content-visibility: hidden skips the content: it isn't laid
+            // out or drawn, and the box keeps its own size.
+            if style.ContentVisibility != "hidden" {
+                buildChildren(of: node, into: box, parentStyle: style)
+                addPseudoElements(node, box, style)
+            }
             if resolver.HasPseudo("first-letter") && (kind == .block || kind == .inlineBlock || style.Display == .listItem) {
                 if let fl = resolver.ResolvePseudo(node, "first-letter", parent: style, context: context) {
                     splitFirstLetter(box, fl)

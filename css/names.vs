@@ -19,7 +19,7 @@ let shorthandNames: [string] = [
     "inset-block-start", "inset-block-end", "inline-size", "block-size", "min-inline-size", "max-inline-size",
     "min-block-size", "max-block-size", "border-inline", "border-block", "border-inline-start", "border-inline-end",
     "border-block-start", "border-block-end", "border-inline-end-width", "border-block-start-width",
-    "border-block-end-width", "grid-template", "grid", "place-self", "place-content", "text-wrap", "transition", "-webkit-transition", "animation", "-webkit-animation", "container"
+    "border-block-end-width", "grid-template", "grid", "place-self", "place-content", "text-wrap", "overscroll-behavior", "contain-intrinsic-size", "scroll-padding", "scroll-margin", "scroll-padding-block", "scroll-padding-inline", "scroll-margin-block", "scroll-margin-inline", "transition", "-webkit-transition", "animation", "-webkit-animation", "container"
 ]
 
 /// Properties the engine knows and parses past, but does not apply yet:
@@ -29,18 +29,17 @@ let unappliedNames: [string] = [
     "quotes", "perspective", "perspective-origin", "backface-visibility",
     "transform-style", "transform-box", "counter-reset", "counter-increment",
     "background-attachment", "font-variant", "font-stretch", "font-feature-settings", "src",
-    "unicode-range", "appearance", "-webkit-appearance", "resize",
-    "scroll-behavior", "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
-    "backdrop-filter", "clip-path", "will-change", "contain", "isolation", "hyphens",
+    "unicode-range",
+    "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
+    "backdrop-filter", "clip-path", "isolation", "hyphens",
     "direction", "unicode-bidi", "writing-mode", "columns", "column-count", "column-width",
     "caption-side", "empty-cells", "speak", "orphans", "widows", "page-break-before",
     "page-break-after", "break-inside", "font-display", "mix-blend-mode",
     "border-image",
     "box-decoration-break", "text-size-adjust", "-webkit-text-size-adjust",
-    "-webkit-tap-highlight-color", "touch-action", "overscroll-behavior",
-    "scrollbar-color", "list-style-image", "font-kerning", "text-align-last", "text-justify",
-    "font-variant-numeric", "font-variant-ligatures", "font-optical-sizing", "color-scheme",
-    "caret-color"
+    "-webkit-tap-highlight-color",
+    "list-style-image", "font-kerning", "text-align-last", "text-justify",
+    "font-variant-numeric", "font-variant-ligatures", "font-optical-sizing",
 ]
 
 /// Every property name the engine applies: its longhands, and the

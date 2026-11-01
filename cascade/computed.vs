@@ -104,6 +104,49 @@ public final class ComputedStyle {
     /// inherits. line-clamp's lines, 0 for none.
     public var TextWrapStyle: string = "auto"
     public var LineClamp: int32 = 0
+    /// scrollbar-color's thumb and track (nil for auto), and whether
+    /// scrollbar-width asks for thin bars; scrollbar-color inherits.
+    public var ScrollbarThumb: draw.Color? = nil
+    public var ScrollbarTrack: draw.Color? = nil
+    public var ScrollbarThin = false
+    /// caret-color, nil for auto (the text's color); it inherits.
+    public var CaretColor: draw.Color? = nil
+    /// color-scheme's words ("normal", "light", "dark", "only"); it
+    /// inherits, and light-dark() picks by it.
+    public var ColorScheme: string = "normal"
+    /// appearance: "auto", "none" (a control drawn as a plain box), or
+    /// "base-select".
+    public var Appearance: string = "auto"
+    /// resize: "none", "both", "horizontal" or "vertical".
+    public var Resize: string = "none"
+    public var OverscrollX: string = "auto"
+    public var OverscrollY: string = "auto"
+    /// contain's kinds, and content-visibility, which hidden makes skip
+    /// the content (sized by contain-intrinsic-size).
+    public var ContainSize = false
+    public var ContainLayout = false
+    public var ContainPaint = false
+    public var ContentVisibility: string = "visible"
+    public var ContainIntrinsicWidth: css.Length? = nil
+    public var ContainIntrinsicHeight: css.Length? = nil
+    /// zoom: the element's own, and the product of its ancestors' and
+    /// its own, which its lengths are multiplied by.
+    public var Zoom: float32 = 1
+    public var EffectiveZoom: float32 = 1
+    /// will-change and touch-action's words, kept for the host.
+    /// scroll-behavior, scroll-snap-type ("none", or an axis and
+    /// strictness), scroll-snap-align (block then inline), and
+    /// scroll-snap-stop.
+    public var ScrollBehavior: string = "auto"
+    public var SnapType: string = "none"
+    public var SnapAlign: string = "none"
+    public var SnapStop: string = "normal"
+    /// scroll-padding (a snap container's) and scroll-margin (a snap
+    /// target's), top, right, bottom, left.
+    public var ScrollPadding: [css.Length] = [.px(0), .px(0), .px(0), .px(0)]
+    public var ScrollMargin: [css.Length] = [.px(0), .px(0), .px(0), .px(0)]
+    public var WillChange: string = "auto"
+    public var TouchAction: string = "auto"
     public var ObjectPositionX: float32 = 0.5
     public var ObjectOffsetX: float32 = 0
     public var ObjectPositionY: float32 = 0.5
@@ -219,6 +262,11 @@ public final class ComputedStyle {
         TabSize = parent.TabSize
         TextShadows = parent.TextShadows
         TextWrapStyle = parent.TextWrapStyle
+        ScrollbarThumb = parent.ScrollbarThumb
+        ScrollbarTrack = parent.ScrollbarTrack
+        CaretColor = parent.CaretColor
+        ColorScheme = parent.ColorScheme
+        EffectiveZoom = parent.EffectiveZoom
         customs = parent.customs
         Fill = parent.Fill
         FillCurrent = parent.FillCurrent
@@ -280,7 +328,18 @@ public final class ComputedStyle {
     }
 
     /// Whether the box clips or scrolls what overflows it.
-    public var ClipsOverflow: bool { return OverflowX.Clips || OverflowY.Clips }
+    public var ClipsOverflow: bool { return OverflowX.Clips || OverflowY.Clips || ContainPaint || ContentVisibility == "hidden" }
+
+    /// Whether light-dark() takes its dark color here: color-scheme says
+    /// dark only, or allows dark and the page is dark.
+    public func UsesDark(pageDark: bool) -> bool {
+        let words = ColorScheme.split(separator: " ").map { string($0) }
+        let light = words.contains("light")
+        let dark = words.contains("dark")
+        if dark && !light { return true }
+        if light && !dark { return false }
+        return pageDark
+    }
     public var IsScrollContainer: bool { return OverflowX.Scrolls || OverflowY.Scrolls }
 }
 

@@ -356,8 +356,15 @@ final class DisplayListBuilder {
                 let thumb = trackHeight * box.InnerHeight / box.ContentHeight
                 let maxScroll = box.ContentHeight - box.InnerHeight
                 let thumbY = trackTop + (trackHeight - thumb) * (maxScroll > 0 ? box.ScrollY / maxScroll : 0)
-                let bar = draw.Rect(x + box.Width - box.Border.Right - 8, thumbY, 5, thumb)
-                items.append(.fill(bar, color(draw.Color(0, 0, 0, 80)), draw.Radii(all: 2.5)))
+                // scrollbar-width: thin, and scrollbar-color's thumb and
+                // track.
+                let barWidth: float32 = s.ScrollbarThin ? 3 : 5
+                let barX = x + box.Width - box.Border.Right - barWidth - 3
+                if let track = s.ScrollbarTrack, track.A > 0 {
+                    items.append(.fill(draw.Rect(barX, trackTop, barWidth, trackHeight), color(track), draw.Radii(all: barWidth / 2)))
+                }
+                let bar = draw.Rect(barX, thumbY, barWidth, thumb)
+                items.append(.fill(bar, color(s.ScrollbarThumb ?? draw.Color(0, 0, 0, 80)), draw.Radii(all: barWidth / 2)))
             }
         }
         if s.Visibility == .visible && s.OutlineWidth > 0 && s.OutlineStyle != "none" && s.OutlineStyle != "hidden" {
@@ -831,6 +838,26 @@ final class DisplayListBuilder {
     /// Paints what a control or image shows inside its box.
     func paintReplaced(_ box: layout.Box, x: float32, y: float32) {
         let s = box.Style
+        // appearance: none: a checkbox, radio, range or progress bar draws
+        // nothing of its own, only what CSS gives it (its box, ::before).
+        if s.Appearance == "none" {
+            switch box.Replaced {
+            case .checkbox, .radio, .range, .progress: return
+            default: break
+            }
+        }
+        // A box that can be resized shows a grip in its corner.
+        if s.Resize != "none" && (s.ClipsOverflow || box.Replaced == .textArea) && box.Width > 12 && box.Height > 12 {
+            let gx = x + box.Width - box.Border.Right - 2
+            let gy = y + box.Height - box.Border.Bottom - 2
+            let c = color(draw.Color(0, 0, 0, 90))
+            var k: float32 = 0
+            while k < 3 {
+                let d = 3 + k * 3
+                items.append(.fill(draw.Rect(gx - d, gy - 1, d, 1), c, draw.Radii.zero))
+                k += 1
+            }
+        }
         let inner = draw.Rect(x + box.ContentX, y + box.ContentY, box.InnerWidth, box.InnerHeight)
         let face = s.Face
         let isFocused = box.Node != nil && box.Node!.Id == focused
@@ -903,7 +930,7 @@ final class DisplayListBuilder {
                                 caretX = textX + face.Measure(stringOf(bytes, lineStart, caret))
                                 caretPlaced = true
                                 if caretVisible {
-                                    items.append(.fill(draw.Rect(caretX, lineY - face.Ascent, 1, face.Ascent + face.Descent), color(s.Color), draw.Radii.zero))
+                                    items.append(.fill(draw.Rect(caretX, lineY - face.Ascent, 1, face.Ascent + face.Descent), color(s.CaretColor ?? s.Color), draw.Radii.zero))
                                 }
                             }
                             lineY += face.LineHeight
@@ -944,7 +971,7 @@ final class DisplayListBuilder {
                 }
             }
             if isFocused && caretVisible && (value.isEmpty || box.Replaced == .textInput) {
-                items.append(.fill(draw.Rect(caretX, textY - face.Ascent, 1, face.Ascent + face.Descent), color(s.Color), draw.Radii.zero))
+                items.append(.fill(draw.Rect(caretX, textY - face.Ascent, 1, face.Ascent + face.Descent), color(s.CaretColor ?? s.Color), draw.Radii.zero))
             }
             items.append(PaintItem.unclip)
         case .button:

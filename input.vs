@@ -149,6 +149,7 @@ extension Page {
             modifiers = e.Modifiers
             if !isInside(e.Position) { return .ignored }
             update()
+            if e.Button == .primary && startResize(at: e.Position) { return .handled }
             let target = hitAt(e.Position)?.Node
             let button: int32 = e.Button == .primary ? 0 : (e.Button == .middle ? 1 : 2)
             captured = target
@@ -248,6 +249,10 @@ extension Page {
 
     func pointerMoved(_ p: draw.Point) -> EventResult {
         pointer = p
+        if resizing != nil {
+            resize(to: p)
+            return .handled
+        }
         if let r = sliding {
             slide(r, to: p)
             return .handled
@@ -325,6 +330,47 @@ extension Page {
         guard let a = first, let z = last else { return nil }
         if px < a.X { return dom.TextPosition(Node: a.Box.Node!, Offset: a.Offset) }
         return dom.TextPosition(Node: z.Box.Node!, Offset: z.Offset + z.Text.utf8.count)
+    }
+
+    /// A press on a resize grip -- the bottom-right corner of a box that
+    /// resize allows -- starts resizing it.
+    func startResize(at p: draw.Point) -> bool {
+        guard let hit = hitAt(p) else { return false }
+        var cur: layout.Box? = hit.Box
+        while let b = cur {
+            let s = b.Style
+            if s.Resize != "none" && (s.ClipsOverflow || b.Replaced == .textArea), let node = b.Node {
+                let pos = layout.PagePosition(b)
+                let px = p.X + scroll.X - pos.x
+                let py = p.Y + scroll.Y - pos.y
+                if px >= b.Width - 14 && py >= b.Height - 14 && px <= b.Width && py <= b.Height {
+                    resizing = (node: node, start: p, width: b.Width, height: b.Height, style: node.GetAttribute("style") ?? "")
+                    return true
+                }
+                return false
+            }
+            cur = b.Parent
+        }
+        return false
+    }
+
+    /// Drags a resize: the element's style gets its new width and height,
+    /// as a browser's does, along the axes resize allows.
+    func resize(to p: draw.Point) {
+        guard let r = resizing, let box = builder.byNode[r.node.Id] else { return }
+        let s = box.Style
+        let edgesX = s.BoxSizing == .borderBox ? 0 : box.Border.Horizontal + box.Padding.Horizontal
+        let edgesY = s.BoxSizing == .borderBox ? 0 : box.Border.Vertical + box.Padding.Vertical
+        var w = r.width + p.X - r.start.X - edgesX
+        var h = r.height + p.Y - r.start.Y - edgesY
+        if w < 10 { w = 10 }
+        if h < 10 { h = 10 }
+        var style = r.style
+        if !style.isEmpty && !style.hasSuffix(";") { style += ";" }
+        if s.Resize == "both" || s.Resize == "horizontal" { style += " width: \(w)px;" }
+        if s.Resize == "both" || s.Resize == "vertical" { style += " height: \(h)px;" }
+        Document?.SetAttribute(r.node, "style", style)
+        needsStyle = true
     }
 
     func clampedToView(_ p: draw.Point) -> draw.Point {
@@ -530,6 +576,11 @@ extension Page {
     }
 
     func pointerUp(_ p: draw.Point) -> EventResult {
+        if resizing != nil {
+            resize(to: p)
+            resizing = nil
+            return .handled
+        }
         let was = pressed
         pressed = nil
         if selecting {
@@ -619,23 +670,37 @@ extension Page {
             while let b = cur {
                 if b.Style.IsScrollContainer && b.Kind == .block {
                     let maxY = b.ContentHeight - b.InnerHeight
+                    let maxX = b.ContentWidth - b.InnerWidth
                     if maxY > 0 && ((dy > 0 && b.ScrollY < maxY) || (dy < 0 && b.ScrollY > 0)) {
-                        b.ScrollY = math.Clamp(b.ScrollY + dy, 0, maxY)
-                        needsPaint = true
-                        // The element scrolled: scroll at it, which does not bubble.
-                        if let n = b.Node { _ = dispatch(dom.Event("scroll", bubbles: false), to: n) }
+                        scrollAnimation = nil
+                        setElementScroll(b, draw.Point(b.ScrollX, math.Clamp(b.ScrollY + dy, 0, maxY)))
+                        noteWheelScroll(b)
                         return .handled
                     }
+                    // Sideways, by the wheel's x or, in a container that only
+                    // scrolls sideways, its y.
+                    let sideways = dx != 0 ? dx : (maxY <= 0 ? dy : 0)
+                    if maxX > 0 && ((sideways > 0 && b.ScrollX < maxX) || (sideways < 0 && b.ScrollX > 0)) {
+                        scrollAnimation = nil
+                        setElementScroll(b, draw.Point(math.Clamp(b.ScrollX + sideways, 0, maxX), b.ScrollY))
+                        noteWheelScroll(b)
+                        return .handled
+                    }
+                    // overscroll-behavior: a container at its end keeps the
+                    // scroll from going on to what holds it.
+                    if maxY > 0 && b.Style.OverscrollY != "auto" { return .handled }
                 }
                 cur = b.Parent
             }
         }
         let before = scroll
+        scrollAnimation = nil
         scroll.Y += dy
         scroll.X += dx
         clampScroll()
         if scroll.Y != before.Y || scroll.X != before.X {
             needsRepaint = true
+            noteWheelScroll(nil)
             // What is under the pointer changed.
             if let p = pointer { _ = pointerMoved(p) }
         }
@@ -711,8 +776,8 @@ extension Page {
         case "PageDown": scrollBy(0, page * 0.9)
         case "PageUp": scrollBy(0, -page * 0.9)
         case "Space": scrollBy(0, k.Shift ? -page * 0.9 : page * 0.9)
-        case "Home": SetScrollOffset(draw.Point(scroll.X, 0))
-        case "End": SetScrollOffset(draw.Point(scroll.X, contentHeight))
+        case "Home": scrollPage(to: draw.Point(scroll.X, 0), smooth: smoothScrolling)
+        case "End": scrollPage(to: draw.Point(scroll.X, contentHeight), smooth: smoothScrolling)
         default: return .ignored
         }
         return .handled
@@ -765,7 +830,10 @@ extension Page {
 
     func scrollBy(_ dx: float32, _ dy: float32) {
         update()
-        SetScrollOffset(draw.Point(scroll.X + dx, scroll.Y + dy))
+        // From where a smooth scroll is going, so that keys pressed in a
+        // row add up.
+        let from = scrollAnimation?.node == 0 ? scrollAnimation!.to : scroll
+        scrollPage(to: draw.Point(from.X + dx, from.Y + dy), smooth: smoothScrolling)
     }
 
     func typed(_ text: string) -> EventResult {

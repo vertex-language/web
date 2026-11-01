@@ -796,8 +796,10 @@ public final class StyleResolver {
             for d in r.Declarations where d.Important { declarations.append(d) }
             for p in r.Pending where p.Important { declarations.append(contentsOf: expand(p, scope)) }
         }
+        for d in declarations where d.Prop == .zoom || d.Prop == .colorScheme { apply(d, style, ctx) }
+        ctx.dark = style.UsesDark(pageDark: Dark)
         for d in declarations where d.Prop == .fontSize { apply(d, style, ctx) }
-        for d in declarations where d.Prop != .fontSize { apply(d, style, ctx) }
+        for d in declarations where d.Prop != .fontSize && d.Prop != .zoom && d.Prop != .colorScheme { apply(d, style, ctx) }
         // ::before and ::after exist only with content; ::placeholder
         // is the field's own.
         if (which == "before" || which == "after") && style.Content == nil { return nil }
@@ -894,12 +896,18 @@ public final class StyleResolver {
             for d in r.Declarations where d.Important { declarations.append(d) }
         }
 
-        // Font size first, since em lengths in the same element measure
+        // zoom and color-scheme first, which what follows reads: the
+        // lengths zoom multiplies, the colors light-dark() picks. Then
+        // font size, since em lengths in the same element measure
         // against it whatever order the declarations came in.
+        for d in declarations where d.Prop == .zoom || d.Prop == .colorScheme {
+            apply(d, style, ctx)
+        }
+        ctx.dark = style.UsesDark(pageDark: Dark)
         for d in declarations where d.Prop == .fontSize {
             apply(d, style, ctx)
         }
-        for d in declarations where d.Prop != .fontSize {
+        for d in declarations where d.Prop != .fontSize && d.Prop != .zoom && d.Prop != .colorScheme {
             apply(d, style, ctx)
         }
 
@@ -1236,6 +1244,56 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
     case .justifyItems: if let k = keywordOf(v) { s.JustifyItems = k }
     case .textWrapStyle: if let k = keywordOf(v) { s.TextWrapStyle = k }
     case .lineClamp: if case .number(let n) = v { s.LineClamp = int32(n) }
+    case .zoom:
+        if case .number(let n) = v {
+            let parentZoom = s.EffectiveZoom / s.Zoom
+            s.Zoom = n
+            s.EffectiveZoom = parentZoom * n
+            // The inherited font size grows with the element's zoom.
+            s.FontSize = ctx.parent.FontSize * n
+            s.face = nil
+        }
+    case .scrollbarColor:
+        if case .shadows(let list) = v, let sh = list.first, case .color(let a) = sh.X, case .color(let b) = sh.Y {
+            s.ScrollbarThumb = a
+            s.ScrollbarTrack = b
+        } else {
+            s.ScrollbarThumb = nil
+            s.ScrollbarTrack = nil
+        }
+    case .scrollbarGutter: break
+    case .scrollBehavior: if let k = keywordOf(v) { s.ScrollBehavior = k }
+    case .scrollSnapType: if let k = keywordOf(v) { s.SnapType = k }
+    case .scrollSnapAlign: if let k = keywordOf(v) { s.SnapAlign = k }
+    case .scrollSnapStop: if let k = keywordOf(v) { s.SnapStop = k }
+    case .scrollPaddingTop: s.ScrollPadding[0] = length(v, s, ctx) ?? .px(0)
+    case .scrollPaddingRight: s.ScrollPadding[1] = length(v, s, ctx) ?? .px(0)
+    case .scrollPaddingBottom: s.ScrollPadding[2] = length(v, s, ctx) ?? .px(0)
+    case .scrollPaddingLeft: s.ScrollPadding[3] = length(v, s, ctx) ?? .px(0)
+    case .scrollMarginTop: s.ScrollMargin[0] = length(v, s, ctx) ?? .px(0)
+    case .scrollMarginRight: s.ScrollMargin[1] = length(v, s, ctx) ?? .px(0)
+    case .scrollMarginBottom: s.ScrollMargin[2] = length(v, s, ctx) ?? .px(0)
+    case .scrollMarginLeft: s.ScrollMargin[3] = length(v, s, ctx) ?? .px(0)
+    case .caretColor: s.CaretColor = colorOf(v)
+    case .colorScheme: if let k = keywordOf(v) { s.ColorScheme = k }
+    case .appearance: if let k = keywordOf(v) { s.Appearance = k }
+    case .resize: if let k = keywordOf(v) { s.Resize = k }
+    case .willChange: if let k = keywordOf(v) { s.WillChange = k }
+    case .touchAction: if let k = keywordOf(v) { s.TouchAction = k }
+    case .overscrollBehaviorX: if let k = keywordOf(v) { s.OverscrollX = k }
+    case .overscrollBehaviorY: if let k = keywordOf(v) { s.OverscrollY = k }
+    case .contain:
+        if let k = keywordOf(v) {
+            let w = words(k)
+            let strict = w.contains("strict")
+            let content = w.contains("content")
+            s.ContainSize = strict || w.contains("size")
+            s.ContainLayout = strict || content || w.contains("layout")
+            s.ContainPaint = strict || content || w.contains("paint")
+        }
+    case .contentVisibility: if let k = keywordOf(v) { s.ContentVisibility = k }
+    case .containIntrinsicWidth: s.ContainIntrinsicWidth = length(v, s, ctx)
+    case .containIntrinsicHeight: s.ContainIntrinsicHeight = length(v, s, ctx)
     case .textWrapMode:
         // white-space is wrapping and collapsing together: this sets the
         // first and keeps the second.
@@ -1386,10 +1444,10 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
         // being decided.
         if case .length(let n, let unit) = v {
             switch unit {
-            case .px: s.FontSize = n
+            case .px: s.FontSize = n * s.EffectiveZoom
             case .em: s.FontSize = ctx.parent.FontSize * n
             case .percent: s.FontSize = ctx.parent.FontSize * n / 100
-            case .rem: s.FontSize = ctx.rootFontSize * n
+            case .rem: s.FontSize = ctx.rootFontSize * n * s.EffectiveZoom
             case .ex, .ch: s.FontSize = ctx.parent.FontSize * n * 0.5
             case .vw: s.FontSize = ctx.viewportWidth * n / 100
             case .vh: s.FontSize = ctx.viewportHeight * n / 100
@@ -1541,7 +1599,10 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
     case .visibility:
         if let k = keywordOf(v) { s.Visibility = k == "hidden" ? .hidden : (k == "collapse" ? .collapse : .visible) }
     case .scrollbarWidth:
-        if let k = keywordOf(v) { s.ScrollbarHidden = k == "none" }
+        if let k = keywordOf(v) {
+            s.ScrollbarHidden = k == "none"
+            s.ScrollbarThin = k == "thin"
+        }
     case .borderCollapse:
         if let k = keywordOf(v) { s.BorderCollapse = k == "collapse" ? .collapse : .separate }
     case .borderSpacing: if let p = pixels(v, s, ctx) { s.BorderSpacing = p }
@@ -1615,10 +1676,10 @@ func length(_ v: css.Value, _ s: ComputedStyle, _ ctx: ApplyContext) -> css.Leng
         }
     case .length(let n, let unit):
         switch unit {
-        case .px: return .px(n)
+        case .px: return .px(n * s.EffectiveZoom)
         case .percent: return .percent(n)
         case .em: return .px(n * s.FontSize)
-        case .rem: return .px(n * ctx.rootFontSize)
+        case .rem: return .px(n * ctx.rootFontSize * s.EffectiveZoom)
         case .ex: return .px(n * s.FontSize * 0.5)
         case .ch: return .px(n * s.FontSize * 0.5)
         case .vw: return .px(n * ctx.viewportWidth / 100)
@@ -1923,6 +1984,40 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .justifyItems: b.JustifyItems = a.JustifyItems
     case .textWrapStyle: b.TextWrapStyle = a.TextWrapStyle
     case .lineClamp: b.LineClamp = a.LineClamp
+    case .zoom:
+        b.Zoom = a.Zoom
+        b.EffectiveZoom = a.EffectiveZoom
+    case .scrollbarColor:
+        b.ScrollbarThumb = a.ScrollbarThumb
+        b.ScrollbarTrack = a.ScrollbarTrack
+    case .scrollbarGutter: break
+    case .scrollBehavior: b.ScrollBehavior = a.ScrollBehavior
+    case .scrollSnapType: b.SnapType = a.SnapType
+    case .scrollSnapAlign: b.SnapAlign = a.SnapAlign
+    case .scrollSnapStop: b.SnapStop = a.SnapStop
+    case .scrollPaddingTop: b.ScrollPadding[0] = a.ScrollPadding[0]
+    case .scrollPaddingRight: b.ScrollPadding[1] = a.ScrollPadding[1]
+    case .scrollPaddingBottom: b.ScrollPadding[2] = a.ScrollPadding[2]
+    case .scrollPaddingLeft: b.ScrollPadding[3] = a.ScrollPadding[3]
+    case .scrollMarginTop: b.ScrollMargin[0] = a.ScrollMargin[0]
+    case .scrollMarginRight: b.ScrollMargin[1] = a.ScrollMargin[1]
+    case .scrollMarginBottom: b.ScrollMargin[2] = a.ScrollMargin[2]
+    case .scrollMarginLeft: b.ScrollMargin[3] = a.ScrollMargin[3]
+    case .caretColor: b.CaretColor = a.CaretColor
+    case .colorScheme: b.ColorScheme = a.ColorScheme
+    case .appearance: b.Appearance = a.Appearance
+    case .resize: b.Resize = a.Resize
+    case .willChange: b.WillChange = a.WillChange
+    case .touchAction: b.TouchAction = a.TouchAction
+    case .overscrollBehaviorX: b.OverscrollX = a.OverscrollX
+    case .overscrollBehaviorY: b.OverscrollY = a.OverscrollY
+    case .contain:
+        b.ContainSize = a.ContainSize
+        b.ContainLayout = a.ContainLayout
+        b.ContainPaint = a.ContainPaint
+    case .contentVisibility: b.ContentVisibility = a.ContentVisibility
+    case .containIntrinsicWidth: b.ContainIntrinsicWidth = a.ContainIntrinsicWidth
+    case .containIntrinsicHeight: b.ContainIntrinsicHeight = a.ContainIntrinsicHeight
     case .textWrapMode, .whiteSpaceCollapse: b.WhiteSpace = a.WhiteSpace
     case .justifySelf: b.JustifySelf = a.JustifySelf
     case .backgroundClip: b.BackgroundClip = a.BackgroundClip
@@ -1991,7 +2086,9 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .pointerEvents: b.PointerEvents = a.PointerEvents
     case .userSelect: b.UserSelect = a.UserSelect
     case .visibility: b.Visibility = a.Visibility
-    case .scrollbarWidth: b.ScrollbarHidden = a.ScrollbarHidden
+    case .scrollbarWidth:
+        b.ScrollbarHidden = a.ScrollbarHidden
+        b.ScrollbarThin = a.ScrollbarThin
     case .borderCollapse: b.BorderCollapse = a.BorderCollapse
     case .borderSpacing: b.BorderSpacing = a.BorderSpacing
     case .tabSize: b.TabSize = a.TabSize
