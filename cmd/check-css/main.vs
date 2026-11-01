@@ -281,6 +281,62 @@ func testColors() {
     check(css.ParseColor(" transparent ") == draw.Color.transparent, "transparent, trimmed")
     check(css.ParseColor("nonsense") == nil, "unknown name is nil")
     check(css.ParseColor("#12345") == nil, "bad hex length is nil")
+    near("hsl(0.5turn 100% 50%)", draw.Color(0, 255, 255))
+    near("rgb(none 0 0)", draw.Color(0, 0, 0))
+    near("hwb(0 0% 0%)", draw.Color(255, 0, 0))
+    near("hwb(120 0% 50%)", draw.Color(0, 128, 0))
+    near("hwb(0 60% 60%)", draw.Color(128, 128, 128))
+    near("lab(50 0 0)", draw.Color(119, 119, 119))
+    near("lab(54.29% 80.8 69.89)", draw.Color(255, 0, 0))
+    near("lch(54.29 106.84 40.85)", draw.Color(255, 0, 0))
+    near("oklab(1 0 0)", draw.Color(255, 255, 255))
+    near("oklab(0% 0 0 / 0.5)", draw.Color(0, 0, 0, 128))
+    near("oklch(62.8% 0.2577 29.23)", draw.Color(255, 0, 0))
+    near("oklch(0.452 0.313 264.05)", draw.Color(0, 0, 255))
+    near("color(srgb 0 0.5 1)", draw.Color(0, 128, 255))
+    near("color(srgb-linear 0.5 0.5 0.5)", draw.Color(188, 188, 188))
+    near("color(display-p3 1 0 0)", draw.Color(255, 0, 0))
+    near("color(display-p3 0.5 0.5 0.5)", draw.Color(128, 128, 128))
+    near("color(a98-rgb 0.5 0.5 0.5)", draw.Color(128, 128, 128))
+    near("color(prophoto-rgb 0.5 0.5 0.5)", draw.Color(146, 146, 146))
+    near("color(rec2020 0.5 0.5 0.5)", draw.Color(139, 139, 139))
+    near("color(xyz 0.9505 1 1.089)", draw.Color(255, 255, 255))
+    near("color(xyz-d50 0.9642 1 0.8251)", draw.Color(255, 255, 255))
+    near("color-mix(in srgb, red, blue)", draw.Color(128, 0, 128))
+    near("color-mix(in srgb, red 25%, blue)", draw.Color(64, 0, 191))
+    near("color-mix(in srgb, 25% red, blue)", draw.Color(64, 0, 191))
+    near("color-mix(in srgb, red 20%, blue 20%)", draw.Color(128, 0, 128, 102))
+    near("color-mix(in srgb, red, transparent)", draw.Color(255, 0, 0, 128))
+    near("color-mix(in oklab, white, black)", draw.Color(99, 99, 99))
+    near("color-mix(white, black)", draw.Color(99, 99, 99))
+    near("color-mix(in hsl, red, blue)", draw.Color(255, 0, 255))
+    near("color-mix(in hsl longer hue, red, blue)", draw.Color(0, 255, 0))
+    near("color-mix(in oklch, white, red)", draw.Color(255, 161, 145))
+    near("rgb(from red r g b / 50%)", draw.Color(255, 0, 0, 128))
+    near("rgb(from #336699 b g r)", draw.Color(153, 102, 51))
+    near("hsl(from red calc(h + 120) s l)", draw.Color(0, 255, 0))
+    near("oklch(from red l c h)", draw.Color(255, 0, 0))
+    near("lab(from #777777 calc(l * 2) a b)", draw.Color(255, 255, 255))
+    near("color(from red srgb r g calc(b + 1))", draw.Color(255, 0, 255))
+    near("rgb(from rgb(0 0 0 / 40%) 255 255 255 / alpha)", draw.Color(255, 255, 255, 102))
+    near("contrast-color(white)", draw.Color(0, 0, 0))
+    near("contrast-color(navy)", draw.Color(255, 255, 255))
+    near("light-dark(red, blue)", draw.Color(255, 0, 0))
+    check(css.ParseColor("lab(50)") == nil, "lab() with one channel is nil")
+    check(css.ParseColor("hsl(10% 50% 50%)") == nil, "a percentage hue is nil")
+    check(css.ParseColor("color(foo 1 1 1)") == nil, "color() in an unknown space is nil")
+    check(css.ParseColor("color-mix(in srgb, red 120%, blue)") == nil, "color-mix() over 100% is nil")
+}
+
+/// Checks a color parses to within one step of each channel.
+func near(_ text: string, _ want: draw.Color) {
+    guard let c = css.ParseColor(text) else {
+        check(false, "\(text) parses")
+        return
+    }
+    func d(_ a: uint8, _ b: uint8) -> int { return a > b ? int(a - b) : int(b - a) }
+    let ok = d(c.R, want.R) <= 1 && d(c.G, want.G) <= 1 && d(c.B, want.B) <= 1 && d(c.A, want.A) <= 1
+    check(ok, "\(text) (got \(c.R) \(c.G) \(c.B) \(c.A))")
 }
 
 func testNesting() {
@@ -321,7 +377,7 @@ func testNames() {
     var unknown: [string] = []
     for n in applied where !css.IsKnownProperty(n) && css.Longhands(css.Declaration(property: n, value: "initial", important: false, tokens: [])).isEmpty && !["outline", "place-items", "flex-flow", "inset", "grid-gap", "border-top", "border-right", "border-bottom", "border-left"].contains(n) { unknown.append(n) }
     check(unknown.isEmpty, "every applied name is one the engine expands (got \(unknown))")
-    check(applied.contains("margin") && applied.contains("color") && unapplied.contains("transition"), "the lists hold what they should")
+    check(applied.contains("margin") && applied.contains("color") && applied.contains("transition") && unapplied.contains("text-shadow"), "the lists hold what they should")
 }
 
 func main() -> int32 {

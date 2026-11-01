@@ -227,20 +227,59 @@ public enum FontStyle: Equatable {
     case oblique
 }
 
+/// The cursor property: CSS Basic User Interface 4's keywords.
+/// pointer-events: whether the element is a target of the pointer.
+public enum PointerEvents: Equatable {
+    case auto
+    case none
+}
+
+/// user-select: whether the user can select the element's text.
+public enum UserSelect: Equatable {
+    case auto
+    case text
+    case none
+    case contain
+    case all
+}
+
 public enum CursorKind: Equatable {
     case auto
     case `default`
+    case none
+    case contextMenu
+    case help
     case pointer
-    case text
+    case progress
+    case wait
+    case cell
     case crosshair
+    case text
+    case verticalText
+    case alias
+    case copy
     case move
+    case noDrop
     case notAllowed
+    case grab
+    case grabbing
+    case allScroll
+    case colResize
+    case rowResize
+    case nResize
+    case eResize
+    case sResize
+    case wResize
+    case neResize
+    case nwResize
+    case seResize
+    case swResize
     case ewResize
     case nsResize
-    case wait
-    case help
-    case grab
-    case none
+    case neswResize
+    case nwseResize
+    case zoomIn
+    case zoomOut
 }
 
 public enum TableLayout: Equatable {

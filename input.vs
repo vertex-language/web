@@ -20,8 +20,12 @@ public enum Input {
     case pointerLeft
     case wheel(Wheel)
     case keyDown(Key)
+    case keyUp(Key)
     /// Text the user typed, after the keyboard layout and input method.
     case text(string)
+    /// Text an input method is composing and has not committed, shown in
+    /// place; "" when composition ends without committing.
+    case composition(string)
 }
 
 /// The modifier keys held with a pointer, wheel or key input.
@@ -111,9 +115,28 @@ extension Page {
     /// keys while something in the page has focus are handled; the rest
     /// is ignored and left to the host.
     public func Handle(_ input: Input) -> EventResult {
+        let before = scroll
+        let r = handleInput(input)
+        // The page scrolled -- by the wheel, a key, a jump to a fragment:
+        // scroll at its root element.
+        if scroll.X != before.X || scroll.Y != before.Y {
+            pageScrolled()
+        }
+        return r
+    }
+
+    /// scroll, at the root element: the page's viewport moved.
+    func pageScrolled() {
+        if let doc = Document, doc.HasEventListeners, let root = doc.Tree.ElementsByTagName("html").first {
+            _ = dispatch(dom.Event("scroll", bubbles: false), to: root)
+        }
+    }
+
+    func handleInput(_ input: Input) -> EventResult {
         // What the program changed since the last input -- a field's value
         // set by a handler -- is what this input meets.
         syncValues()
+        if let r = forwardToFrame(input) { return r }
         switch input {
         case .pointerMoved(let p):
             return pointerMoved(p)
@@ -124,8 +147,15 @@ extension Page {
             let target = hitAt(e.Position)?.Node
             let button: int32 = e.Button == .primary ? 0 : (e.Button == .middle ? 1 : 2)
             captured = target
+            mouseSuppressed = false
             if let t = target, !dispatch(dom.PointerEvent("pointerdown", X: e.Position.X, Y: e.Position.Y, Clicks: e.Clicks, Button: button, Pressed: true, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: t) {
-                // A listener took the press for its own (a drag).
+                // A listener took the press for its own (a drag): the
+                // mouse events that would follow it are not sent.
+                mouseSuppressed = true
+                return .handled
+            }
+            // The mouse event the pointer event is compatible with.
+            if let t = target, !dispatch(dom.MouseEvent("mousedown", X: e.Position.X, Y: e.Position.Y, Clicks: e.Clicks, Button: button, Pressed: true, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: t) {
                 return .handled
             }
             if e.Button == .primary {
@@ -145,8 +175,12 @@ extension Page {
             let button: int32 = e.Button == .primary ? 0 : (e.Button == .middle ? 1 : 2)
             if let t = captured ?? hitAt(e.Position)?.Node {
                 _ = dispatch(dom.PointerEvent("pointerup", X: e.Position.X, Y: e.Position.Y, Button: button, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: t)
+                if !mouseSuppressed {
+                    _ = dispatch(dom.MouseEvent("mouseup", X: e.Position.X, Y: e.Position.Y, Button: button, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: t)
+                }
             }
             captured = nil
+            mouseSuppressed = false
             if let r = sliding {
                 sliding = nil
                 _ = dispatch(dom.Event("change"), to: r)
@@ -155,6 +189,13 @@ extension Page {
             if e.Button == .primary { return pointerUp(e.Position) }
             return .handled
         case .pointerLeft:
+            // A press the window lost the pointer in the middle of ends
+            // without a release.
+            if let c = captured {
+                _ = dispatch(dom.PointerEvent("pointercancel"), to: c)
+                captured = nil
+                mouseSuppressed = false
+            }
             pointer = nil
             setHovered(nil)
             return .handled
@@ -172,8 +213,19 @@ extension Page {
         case .keyDown(let k):
             modifiers = Modifiers(shift: k.Shift, control: k.Control, alt: k.Alt, meta: k.Meta)
             return keyDown(k)
+        case .keyUp(let k):
+            modifiers = Modifiers(shift: k.Shift, control: k.Control, alt: k.Alt, meta: k.Meta)
+            let to = focused ?? Document?.Tree.ElementsByTagName("body").first
+            if let t = to, !dispatch(dom.KeyboardEvent("keyup", Key: k.Key, Code: k.Code, Shift: k.Shift, Control: k.Control, Alt: k.Alt, Meta: k.Meta, IsComposing: !Composing.isEmpty), to: t) {
+                return .handled
+            }
+            return .ignored
         case .text(let t):
+            // Text an input method was composing is committed by it.
+            if !Composing.isEmpty { endComposition(t) }
             return typed(t)
+        case .composition(let c):
+            return compose(c)
         }
     }
 
@@ -197,9 +249,15 @@ extension Page {
         }
         if let c = captured {
             _ = dispatch(dom.PointerEvent("pointermove", X: p.X, Y: p.Y, Pressed: true, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: c)
+            if !mouseSuppressed {
+                _ = dispatch(dom.MouseEvent("mousemove", X: p.X, Y: p.Y, Pressed: true, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: c)
+            }
         } else if isInside(p), let doc = Document, doc.HasEventListeners {
             update()
-            if let t = hitAt(p)?.Node { _ = dispatch(dom.PointerEvent("pointermove", X: p.X, Y: p.Y, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: t) }
+            if let t = hitAt(p)?.Node {
+                _ = dispatch(dom.PointerEvent("pointermove", X: p.X, Y: p.Y, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: t)
+                _ = dispatch(dom.MouseEvent("mousemove", X: p.X, Y: p.Y, Shift: modifiers.Shift, Control: modifiers.Control, Alt: modifiers.Alt, Meta: modifiers.Meta), to: t)
+            }
         }
         if fieldSelecting, let f = focused {
             // Dragging in a field extends its selection from the anchor.
@@ -248,12 +306,41 @@ extension Page {
         var cur: layout.Box? = h.Box
         while let b = cur {
             switch b.Style.Cursor {
+            case .`default`: return Cursor.`default`
+            case .none: return Cursor.none
+            case .contextMenu: return Cursor.contextMenu
+            case .help: return Cursor.help
             case .pointer: return Cursor.pointer
-            case .text: return Cursor.text
+            case .progress: return Cursor.progress
+            case .wait: return Cursor.wait
+            case .cell: return Cursor.cell
             case .crosshair: return Cursor.crosshair
+            case .text: return Cursor.text
+            case .verticalText: return Cursor.verticalText
+            case .alias: return Cursor.alias
+            case .copy: return Cursor.copy
+            case .move: return Cursor.move
+            case .noDrop: return Cursor.noDrop
+            case .notAllowed: return Cursor.notAllowed
+            case .grab: return Cursor.grab
+            case .grabbing: return Cursor.grabbing
+            case .allScroll: return Cursor.allScroll
+            case .colResize: return Cursor.colResize
+            case .rowResize: return Cursor.rowResize
+            case .nResize: return Cursor.nResize
+            case .eResize: return Cursor.eResize
+            case .sResize: return Cursor.sResize
+            case .wResize: return Cursor.wResize
+            case .neResize: return Cursor.neResize
+            case .nwResize: return Cursor.nwResize
+            case .seResize: return Cursor.seResize
+            case .swResize: return Cursor.swResize
             case .ewResize: return Cursor.ewResize
             case .nsResize: return Cursor.nsResize
-            case .default, .none, .move, .notAllowed, .wait, .help, .grab: return Cursor.default
+            case .neswResize: return Cursor.neswResize
+            case .nwseResize: return Cursor.nwseResize
+            case .zoomIn: return Cursor.zoomIn
+            case .zoomOut: return Cursor.zoomOut
             case .auto: break
             }
             if b.Style.Cursor != .auto { break }
@@ -262,6 +349,17 @@ extension Page {
         if h.TextBox != nil && dom.LinkAncestor(h.Node) == nil { return Cursor.text }
         if let b = h.Box.ElementBox, b.Replaced == .textInput || b.Replaced == .textArea { return Cursor.text }
         return Cursor.default
+    }
+
+    /// user-select's used value for a box: its own, or where it is auto,
+    /// the nearest ancestor's that is not.
+    func usedUserSelect(_ box: layout.Box) -> cascade.UserSelect {
+        var cur: layout.Box? = box
+        while let b = cur {
+            if b.Style.UserSelect != .auto { return b.Style.UserSelect }
+            cur = b.Parent
+        }
+        return .text
     }
 
     func setHovered(_ node: html.Node?) {
@@ -294,7 +392,20 @@ extension Page {
 
         // A press on text starts a selection, unless it is a link or a
         // control; a double click takes the word, a triple the paragraph.
-        if let tb = hit.TextBox, let textNode = tb.Node, dom.ControlAncestor(node) == nil && dom.LinkAncestor(node) == nil {
+        let selectable = usedUserSelect(hit.Box)
+        if let tb = hit.TextBox, tb.Node != nil, selectable == .all, dom.ControlAncestor(node) == nil {
+            // user-select: all -- the outermost element that says so,
+            // selected whole.
+            var whole: layout.Box = hit.Box
+            var cur: layout.Box? = hit.Box
+            while let b = cur {
+                if b.Style.UserSelect == .all { whole = b }
+                cur = b.Parent
+            }
+            selectText(in: whole)
+            return .handled
+        }
+        if let tb = hit.TextBox, let textNode = tb.Node, selectable != .none, dom.ControlAncestor(node) == nil && dom.LinkAncestor(node) == nil {
             if clicks >= 3 {
                 selectBlock(of: tb)
                 return .handled
@@ -365,6 +476,7 @@ extension Page {
         }
         if let summary = dom.Ancestor(node, "summary"), let details = summary.Parent, details.TagName == "details" {
             _ = Document?.ToggleAttribute(details, "open")
+            _ = dispatch(dom.Event("toggle", bubbles: false), to: details)
             return .handled
         }
         // An element with a tabindex takes focus when it, or what is in
@@ -472,6 +584,8 @@ extension Page {
                     if maxY > 0 && ((dy > 0 && b.ScrollY < maxY) || (dy < 0 && b.ScrollY > 0)) {
                         b.ScrollY = math.Clamp(b.ScrollY + dy, 0, maxY)
                         needsPaint = true
+                        // The element scrolled: scroll at it, which does not bubble.
+                        if let n = b.Node { _ = dispatch(dom.Event("scroll", bubbles: false), to: n) }
                         return .handled
                     }
                 }
@@ -870,6 +984,8 @@ extension Page {
     }
 
     func resetForm(_ form: html.Node) {
+        // reset first; a listener may keep the values.
+        if !dispatch(dom.Event("reset"), to: form) { return }
         for c in dom.Controls(form) {
             values.removeValue(forKey: c.Id)
         }
@@ -897,11 +1013,56 @@ extension Page {
         guard let doc = Document, doc.HasEventListeners else { return }
         let was = elementChain(old)
         let now = elementChain(new)
+        let x = pointer?.X ?? 0
+        let y = pointer?.Y ?? 0
+        // out and over bubble, from the element left and the element
+        // entered; leave and enter are each element's own.
+        if let o = was.first {
+            _ = doc.Dispatch(dom.PointerEvent("pointerout", X: x, Y: y), to: o)
+            _ = doc.Dispatch(dom.MouseEvent("mouseout", X: x, Y: y), to: o)
+        }
         for n in was where !now.contains(where: { $0.Id == n.Id }) {
-            _ = doc.Dispatch(dom.MouseEvent("mouseleave", bubbles: false), to: n)
+            _ = doc.Dispatch(dom.PointerEvent("pointerleave", X: x, Y: y, bubbles: false), to: n)
+            _ = doc.Dispatch(dom.MouseEvent("mouseleave", X: x, Y: y, bubbles: false), to: n)
+        }
+        if let o = now.first {
+            _ = doc.Dispatch(dom.PointerEvent("pointerover", X: x, Y: y), to: o)
+            _ = doc.Dispatch(dom.MouseEvent("mouseover", X: x, Y: y), to: o)
         }
         for n in now.reversed() where !was.contains(where: { $0.Id == n.Id }) {
-            _ = doc.Dispatch(dom.MouseEvent("mouseenter", bubbles: false), to: n)
+            _ = doc.Dispatch(dom.PointerEvent("pointerenter", X: x, Y: y, bubbles: false), to: n)
+            _ = doc.Dispatch(dom.MouseEvent("mouseenter", X: x, Y: y, bubbles: false), to: n)
+        }
+    }
+
+    // MARK: - Composition
+
+    /// An input method's text in progress: compositionstart the first time,
+    /// compositionupdate with each change, shown at the focused field's
+    /// caret until it is committed (.text) or given up ("").
+    func compose(_ text: string) -> EventResult {
+        let target = focused ?? Document?.Tree.ElementsByTagName("body").first
+        guard let t = target else { return .ignored }
+        if text.isEmpty {
+            if Composing.isEmpty { return .ignored }
+            endComposition("")
+            return .handled
+        }
+        if Composing.isEmpty {
+            _ = dispatch(dom.CompositionEvent("compositionstart"), to: t)
+        }
+        Composing = text
+        _ = dispatch(dom.CompositionEvent("compositionupdate", Data: text), to: t)
+        needsPaint = true
+        return .handled
+    }
+
+    /// Composition ends, with what was committed ("" for nothing).
+    func endComposition(_ committed: string) {
+        Composing = ""
+        needsPaint = true
+        if let t = focused ?? Document?.Tree.ElementsByTagName("body").first {
+            _ = dispatch(dom.CompositionEvent("compositionend", Data: committed), to: t)
         }
     }
 

@@ -6,8 +6,9 @@ import (
 )
 
 /// Parses a CSS color: `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`,
-/// `rgb()`, `rgba()`, `hsl()`, `hsla()`, `transparent` and the named
-/// colors. Nil for anything else (including `currentcolor`, which
+/// the functional colors of Color 4 and 5 (colorspace.vs), relative
+/// colors, `transparent` and the named colors. `light-dark()` gives its
+/// light color here; the property parser keeps both. Nil for anything else (including `currentcolor`, which
 /// the caller knows and this does not).
 public func ParseColor(_ text: string) -> draw.Color? {
     let bytes = asciiLower(trimmed(text))
@@ -17,11 +18,10 @@ public func ParseColor(_ text: string) -> draw.Color? {
         return parseHex(bytes)
     }
     if n > 4 && bytes[n - 1] == 41 { // ')'
-        if startsWith(bytes, "rgb(") { return parseRGB(bytes, from: 4) }
-        if startsWith(bytes, "rgba(") { return parseRGB(bytes, from: 5) }
-        if startsWith(bytes, "hsl(") { return parseHSL(bytes, from: 4) }
-        if startsWith(bytes, "hsla(") { return parseHSL(bytes, from: 5) }
-        return nil
+        var open = 0
+        while open < n && bytes[open] != 40 { open += 1 }
+        if open == n { return nil }
+        return parseColorFunction(stringOf(bytes, 0, open), bytes, open + 1)
     }
     let name = stringOf(bytes, 0, n)
     if name == "transparent" { return draw.Color.transparent }
@@ -83,75 +83,6 @@ func hexValue(_ c: uint8) -> int {
     if c >= 97 && c <= 102 { return int(c - 97 + 10) }
     if c >= 65 && c <= 70 { return int(c - 65 + 10) }
     return -1
-}
-
-/// The numbers between the parentheses of a functional color, each with
-/// whether it was written as a percentage. Commas, spaces and a `/`
-/// before the alpha all separate.
-func numbersIn(_ b: [uint8], from start: int) -> (values: [float32], percents: [bool]) {
-    var values: [float32] = []
-    var percents: [bool] = []
-    var i = start
-    let end = b.count - 1
-    while i < end {
-        let c = b[i]
-        if c == 32 || c == 44 || c == 47 || c == 9 || c == 10 { i += 1; continue }
-        var j = i
-        while j < end && b[j] != 32 && b[j] != 44 && b[j] != 47 && b[j] != 9 && b[j] != 10 { j += 1 }
-        var isPercent = false
-        var k = j
-        if k > i && b[k - 1] == 37 { isPercent = true; k -= 1 }
-        values.append(parseNumber(b, i, k))
-        percents.append(isPercent)
-        i = j
-    }
-    return (values: values, percents: percents)
-}
-
-func parseRGB(_ b: [uint8], from start: int) -> draw.Color? {
-    let parts = numbersIn(b, from: start)
-    if parts.values.count < 3 { return nil }
-    var channels: [uint8] = []
-    var i = 0
-    while i < 3 {
-        var v = parts.values[i]
-        if parts.percents[i] { v = v * 255 / 100 }
-        channels.append(clampByte(v))
-        i += 1
-    }
-    var alpha: uint8 = 255
-    if parts.values.count >= 4 {
-        var a = parts.values[3]
-        if parts.percents[3] { a = a / 100 }
-        alpha = clampByte(a * 255)
-    }
-    return draw.Color(channels[0], channels[1], channels[2], alpha)
-}
-
-func parseHSL(_ b: [uint8], from start: int) -> draw.Color? {
-    let parts = numbersIn(b, from: start)
-    if parts.values.count < 3 { return nil }
-    var h = parts.values[0]
-    while h < 0 { h += 360 }
-    while h >= 360 { h -= 360 }
-    let s = math.Saturate(parts.values[1] / 100)
-    let l = math.Saturate(parts.values[2] / 100)
-    let c = (1 - math.Abs(2 * l - 1)) * s
-    let hp = h / 60
-    let x = c * (1 - math.Abs(math.FloorMod(hp, 2) - 1))
-    var r: float32 = 0
-    var g: float32 = 0
-    var bl: float32 = 0
-    if hp < 1 { r = c; g = x } else if hp < 2 { r = x; g = c } else if hp < 3 { g = c; bl = x }
-    else if hp < 4 { g = x; bl = c } else if hp < 5 { r = x; bl = c } else { r = c; bl = x }
-    let m = l - c / 2
-    var alpha: uint8 = 255
-    if parts.values.count >= 4 {
-        var a = parts.values[3]
-        if parts.percents[3] { a = a / 100 }
-        alpha = clampByte(a * 255)
-    }
-    return draw.Color(clampByte((r + m) * 255), clampByte((g + m) * 255), clampByte((bl + m) * 255), alpha)
 }
 
 /// clampByte is a channel from 0 to 255, rounded.
@@ -274,6 +205,12 @@ let namedColors: [string: uint32] = [
     "tomato": 0xFF6347, "turquoise": 0x40E0D0, "violet": 0xEE82EE, "wheat": 0xF5DEB3,
     "white": 0xFFFFFF, "whitesmoke": 0xF5F5F5, "yellow": 0xFFFF00, "yellowgreen": 0x9ACD32,
 ]
+
+/// The number a string spells, as parseNumber reads it.
+public func ParseNumberText(_ s: string) -> float32 {
+    let b = [uint8](s.utf8)
+    return parseNumber(b, 0, b.count)
+}
 
 /// The string bytes[start..<end] spell.
 package func stringOf(_ bytes: [uint8], _ start: int, _ end: int) -> string {

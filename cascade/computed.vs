@@ -63,6 +63,29 @@ public final class ComputedStyle {
     public var Opacity: float32 = 1
     /// filter: blur()'s radius, in CSS pixels; 0 for none.
     public var FilterBlur: float32 = 0
+    /// transform's functions, and the translate, rotate and scale
+    /// properties, each empty for none; TransformMatrix puts them
+    /// together about transform-origin.
+    public var Transform: [TransformOp] = []
+    public var Translate: [TransformOp] = []
+    public var Rotate: [TransformOp] = []
+    public var Scale: [TransformOp] = []
+    public var TransformOriginX: css.Length = .percent(50)
+    public var TransformOriginY: css.Length = .percent(50)
+    /// The transition-* and animation-* lists (animation.vs).
+    public var Transition: TransitionSpec = TransitionSpec()
+    public var Animation: AnimationSpec = AnimationSpec()
+    /// container-type ("normal", "size" or "inline-size") and
+    /// container-name's names (container.vs).
+    public var ContainerType: string = "normal"
+    public var ContainerNames: [string] = []
+    /// object-fit, and object-position as fractions of the free space
+    /// and offsets, as background-position keeps them.
+    public var ObjectFit: string = "fill"
+    public var ObjectPositionX: float32 = 0.5
+    public var ObjectOffsetX: float32 = 0
+    public var ObjectPositionY: float32 = 0.5
+    public var ObjectOffsetY: float32 = 0
     public var OverflowX: Overflow = .visible
     public var OverflowY: Overflow = .visible
     public var Shadows: [Shadow] = []
@@ -119,6 +142,11 @@ public final class ComputedStyle {
     public var ListStyleType: ListStyleType = .disc
     public var ListStylePosition: ListStylePosition = .outside
     public var Cursor: CursorKind = .auto
+    /// Inherited: the element and what is in it are not hit by the pointer,
+    /// unless something in it sets auto again.
+    public var PointerEvents: PointerEvents = .auto
+    /// Not inherited; auto is what the parent's is (UsedUserSelect).
+    public var UserSelect: UserSelect = .auto
     public var Visibility: Visibility = .visible
     /// scrollbar-width: none: a scroll container that scrolls without
     /// showing where it is.
@@ -162,6 +190,7 @@ public final class ComputedStyle {
         ListStyleType = parent.ListStyleType
         ListStylePosition = parent.ListStylePosition
         Cursor = parent.Cursor
+        PointerEvents = parent.PointerEvents
         Visibility = parent.Visibility
         BorderCollapse = parent.BorderCollapse
         BorderSpacing = parent.BorderSpacing
@@ -229,4 +258,54 @@ public final class ComputedStyle {
     /// Whether the box clips or scrolls what overflows it.
     public var ClipsOverflow: bool { return OverflowX.Clips || OverflowY.Clips }
     public var IsScrollContainer: bool { return OverflowX.Scrolls || OverflowY.Scrolls }
+}
+
+/// One 2D transform function with its lengths resolved but for
+/// percentages, which are of the border box: translate (two lengths),
+/// scale (two numbers), rotate (radians), skew (two, radians) or
+/// matrix (six numbers).
+public struct TransformOp {
+    public var Name: string
+    public var Lengths: [css.Length]
+    public var Numbers: [float32]
+
+    public init(_ name: string, lengths: [css.Length] = [], numbers: [float32] = []) {
+        Name = name
+        Lengths = lengths
+        Numbers = numbers
+    }
+
+    /// The function as a matrix, for a border box of width by height.
+    public func Matrix(width: float32, height: float32) -> draw.Affine {
+        switch Name {
+        case "translate":
+            return draw.Affine.translate(Lengths[0].Resolve(width) ?? 0, Lengths[1].Resolve(height) ?? 0)
+        case "scale": return draw.Affine.scale(Numbers[0], Numbers[1])
+        case "rotate": return draw.Affine.rotate(Numbers[0])
+        case "skew": return draw.Affine.skew(Numbers[0], Numbers[1])
+        case "matrix": return draw.Affine(Numbers[0], Numbers[1], Numbers[2], Numbers[3], Numbers[4], Numbers[5])
+        default: return draw.Affine.identity
+        }
+    }
+}
+
+extension ComputedStyle {
+    /// Whether any transform applies: the box paints and hits through
+    /// TransformMatrix.
+    public var HasTransform: bool {
+        return !Transform.isEmpty || !Translate.isEmpty || !Rotate.isEmpty || !Scale.isEmpty
+    }
+
+    /// The box's transform, in coordinates whose origin is its border
+    /// box's top left: translate, rotate, scale and then transform, all
+    /// about transform-origin.
+    public func TransformMatrix(width: float32, height: float32) -> draw.Affine {
+        let ox = TransformOriginX.Resolve(width) ?? width / 2
+        let oy = TransformOriginY.Resolve(height) ?? height / 2
+        var m = draw.Affine.translate(ox, oy)
+        for list in [Translate, Rotate, Scale, Transform] {
+            for op in list { m = m.Concat(op.Matrix(width: width, height: height)) }
+        }
+        return m.Concat(draw.Affine.translate(-ox, -oy))
+    }
 }

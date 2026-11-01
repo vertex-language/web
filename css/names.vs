@@ -16,19 +16,20 @@ let shorthandNames: [string] = [
     "padding-block-start", "padding-block-end", "border-inline-start-width",
     "border-inline-end-width", "border-start-start-radius", "border-start-end-radius",
     "border-end-start-radius", "border-end-end-radius", "inset-inline-start", "inset-inline-end",
-    "inset-block-start", "inset-block-end"
+    "inset-block-start", "inset-block-end", "transition", "-webkit-transition", "animation", "-webkit-animation", "container"
 ]
 
 /// Properties the engine knows and parses past, but does not apply yet:
 /// a page that uses them renders without them. The same names as the
 /// case in Longhands that sets nothing.
 let unappliedNames: [string] = [
-    "text-decoration-style", "text-decoration-thickness", "text-underline-offset", "transition",
-    "animation", "transform", "quotes", "counter-reset", "counter-increment",
+    "text-decoration-style", "text-decoration-thickness", "text-underline-offset",
+    "quotes", "perspective", "perspective-origin", "backface-visibility",
+    "transform-style", "transform-box", "counter-reset", "counter-increment",
     "background-attachment", "font-variant", "font-stretch", "font-feature-settings", "src",
-    "unicode-range", "user-select", "pointer-events", "appearance", "-webkit-appearance", "resize",
+    "unicode-range", "appearance", "-webkit-appearance", "resize",
     "scroll-behavior", "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
-    "backdrop-filter", "clip-path", "object-fit", "will-change", "contain", "isolation", "hyphens",
+    "backdrop-filter", "clip-path", "will-change", "contain", "isolation", "hyphens",
     "direction", "unicode-bidi", "writing-mode", "columns", "column-count", "column-width",
     "caption-side", "empty-cells", "speak", "orphans", "widows", "page-break-before",
     "page-break-after", "break-inside", "font-display", "text-shadow", "mix-blend-mode",

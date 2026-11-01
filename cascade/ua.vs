@@ -53,7 +53,10 @@ a:visited { color: #551a8b; }
 a:active { color: #ff0000; }
 center { text-align: center; }
 nobr { white-space: nowrap; }
-img, video, canvas, iframe, embed, object, svg { display: inline-block; }
+img, video, iframe, embed, object, svg, audio { display: inline-block; }
+audio:not([controls]) { display: none; }
+iframe { border: 2px inset #767676; }
+video { object-fit: contain; }
 br { display: inline; }
 table { display: table; box-sizing: border-box; border-spacing: 2px; border-collapse: separate; text-indent: 0; }
 caption { display: table-caption; text-align: center; }

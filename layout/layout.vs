@@ -229,7 +229,9 @@ public final class Layout {
         var positive: float32 = 0
         var negative: float32 = 0
         var first = true
-        let canCollapseTop = box.Border.Top == 0 && box.Padding.Top == 0 && !box.IsFormattingRoot
+        // The root's margins never collapse with its children's (CSS 2
+        // 8.3.1): what is positioned against it stays at the page's top.
+        let canCollapseTop = box.Border.Top == 0 && box.Padding.Top == 0 && !box.IsFormattingRoot && box.Parent != nil
         var firstCollapsed = false
         var lastChild: Box? = nil
         var contentRight: float32 = 0
@@ -308,7 +310,7 @@ public final class Layout {
         // The last child's bottom margin: kept inside the box when the
         // box has a bottom edge or a set height, and otherwise passed to
         // the parent.
-        let canCollapseBottom = box.Border.Bottom == 0 && box.Padding.Bottom == 0 && !box.IsFormattingRoot && box.Style.Height.IsAuto
+        let canCollapseBottom = box.Border.Bottom == 0 && box.Padding.Bottom == 0 && !box.IsFormattingRoot && box.Style.Height.IsAuto && box.Parent != nil
         if lastChild != nil && canCollapseBottom {
             box.Margin.Bottom = collapse(box.Margin.Bottom, positive + negative)
         } else {

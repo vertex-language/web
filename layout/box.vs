@@ -41,6 +41,11 @@ public enum ReplacedKind: Equatable {
     case placeholder
     /// An inline <svg>, drawn from its shapes (web/svg).
     case svg
+    /// A nested document: <iframe>, or an <object> or <embed> of HTML.
+    /// The page lays it out and paints it in the content box.
+    case frame
+    /// <audio controls>: a bar of controls.
+    case audio
 }
 
 /// A box in the layout tree: an element, a run of text, or an anonymous

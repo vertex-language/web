@@ -257,7 +257,7 @@ func testCustomProperties() {
 
 func testColorScheme() {
     print("Color scheme and system colors")
-    let src = "<style>p { color: red } @media (prefers-color-scheme: dark) { p { color: rgb(1, 2, 3) } } b { color: AccentColor; background-color: Canvas }</style><p>x</p><b>y</b>"
+    let src = "<style>p { color: red } @media (prefers-color-scheme: dark) { p { color: rgb(1, 2, 3) } } b { color: AccentColor; background-color: Canvas } i { color: light-dark(#010101, color-mix(in srgb, white, black)) }</style><p>x</p><b>y</b><i>z</i>"
     let doc = html.Parse(src)
     let resolver = cascade.StyleResolver(ua: cascade.UserAgentRules())
     for style in doc.ElementsByTagName("style") { resolver.Author.Add(css.Parse(style.InnerText())) }
@@ -274,8 +274,10 @@ func testColorScheme() {
         return parent?.Color
     }
     check(colorOf("p") == draw.Color(255, 0, 0), "light: prefers-color-scheme: dark does not hold")
+    check(colorOf("i") == draw.Color(1, 1, 1), "light: light-dark() takes its first color")
     resolver.Dark = true
     check(colorOf("p") == draw.Color(1, 2, 3), "dark: it does")
+    check(colorOf("i") == draw.Color(128, 128, 128), "dark: light-dark() takes its second")
     check(colorOf("b") == css.SystemAccent, "AccentColor is the system's accent")
 }
 
@@ -286,10 +288,10 @@ func testMediaQueries() {
     }
     // styleOf's viewport is 800 by 600.
     let yes = ["(width >= 768px)", "(width>=48rem)", "(min-width: 40em)", "screen and (width <= calc(64rem - .02px))",
-               "(400px <= width < 900px)", "(height > 500px)", "(hover: hover)", "(prefers-reduced-motion: reduce)", "(prefers-reduced-motion)",
+               "(400px <= width < 900px)", "(height > 500px)", "(hover: hover)", "(prefers-reduced-motion: no-preference)",
                "(forced-colors: none)", "not print", "(max-width: 400px), (min-width: 700px)", "(aspect-ratio > 1)"]
     let no = ["(width >= 1012px)", "(width<768px)", "(forced-colors: active)", "(prefers-color-scheme: dark)",
-              "(prefers-reduced-motion: no-preference)", "print", "(900px <= width)", "(prefers-contrast: more)", "(scripting: enabled)"]
+              "(prefers-reduced-motion: reduce)", "(prefers-reduced-motion)", "print", "(900px <= width)", "(prefers-contrast: more)", "(scripting: enabled)"]
     for q in yes { check(width(q) == Length.px(2), "@media \(q) holds") }
     for q in no { check(width(q) == Length.px(1), "@media \(q) doesn't") }
 }

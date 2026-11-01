@@ -104,6 +104,8 @@ public enum Prop: int32 {
     case listStyleType
     case listStylePosition
     case cursor
+    case pointerEvents
+    case userSelect
     case visibility
     case scrollbarWidth
     case borderCollapse
@@ -111,6 +113,27 @@ public enum Prop: int32 {
     case tabSize
     case content
     case fill
+    case transform
+    case transformOrigin
+    case translate
+    case rotate
+    case scale
+    case transitionProperty
+    case transitionDuration
+    case transitionTimingFunction
+    case transitionDelay
+    case animationName
+    case animationDuration
+    case animationTimingFunction
+    case animationDelay
+    case animationIterationCount
+    case animationDirection
+    case animationFillMode
+    case animationPlayState
+    case containerType
+    case containerName
+    case objectFit
+    case objectPosition
 }
 
 /// A unit a length was written in.
@@ -125,6 +148,14 @@ public enum Unit: Equatable {
     case vmin
     case vmax
     case percent
+    /// The query container's width, height, and the smaller and larger.
+    case cqw
+    case cqh
+    case cqmin
+    case cqmax
+    /// The element's line height, and the root's.
+    case lh
+    case rlh
 }
 
 /// A declaration's value as parsed: typed, but with lengths still in
@@ -139,12 +170,15 @@ public enum Value {
     case number(float32)
     case keyword(string)
     case color(draw.Color)
+    /// light-dark(): the color for a light scheme, then a dark one.
+    case lightDark(draw.Color, draw.Color)
     case currentColor
     case string(string)
     case families([string])
     case url(string)
     case gradient(draw.LinearGradient)
     case shadows([ShadowValue])
+    case transforms([TransformFunction])
     case tracks([GridTrack])
     case placement(GridPlacement)
     case inherit
@@ -198,6 +232,16 @@ let propNames: [string: Prop] = [
     "background-color": .backgroundColor, "background-image": .backgroundImage, "opacity": .opacity,
     "background-repeat": .backgroundRepeat, "background-size": .backgroundSize, "background-position": .backgroundPosition,
     "overflow-x": .overflowX, "overflow-y": .overflowY, "box-shadow": .boxShadow, "filter": .filter, "-webkit-filter": .filter,
+    "transform": .transform, "-webkit-transform": .transform, "transform-origin": .transformOrigin,
+    "-webkit-transform-origin": .transformOrigin, "translate": .translate, "rotate": .rotate, "scale": .scale,
+    "transition-property": .transitionProperty, "transition-duration": .transitionDuration,
+    "transition-timing-function": .transitionTimingFunction, "transition-delay": .transitionDelay,
+    "animation-name": .animationName, "animation-duration": .animationDuration,
+    "animation-timing-function": .animationTimingFunction, "animation-delay": .animationDelay,
+    "animation-iteration-count": .animationIterationCount, "animation-direction": .animationDirection,
+    "animation-fill-mode": .animationFillMode, "animation-play-state": .animationPlayState,
+    "container-type": .containerType, "container-name": .containerName,
+    "object-fit": .objectFit, "object-position": .objectPosition,
     "outline-width": .outlineWidth, "outline-color": .outlineColor, "accent-color": .accentColor,
     "vertical-align": .verticalAlign, "text-decoration-line": .textDecorationLine,
     "text-decoration-color": .textDecorationColor,
@@ -212,7 +256,7 @@ let propNames: [string: Prop] = [
     "text-transform": .textTransform, "text-indent": .textIndent, "letter-spacing": .letterSpacing,
     "word-spacing": .wordSpacing, "white-space": .whiteSpace, "list-style-type": .listStyleType,
     "overflow-wrap": .overflowWrap, "word-wrap": .overflowWrap, "word-break": .wordBreak, "text-overflow": .textOverflow,
-    "list-style-position": .listStylePosition, "cursor": .cursor, "visibility": .visibility, "scrollbar-width": .scrollbarWidth,
+    "list-style-position": .listStylePosition, "cursor": .cursor, "pointer-events": .pointerEvents, "user-select": .userSelect, "-webkit-user-select": .userSelect, "visibility": .visibility, "scrollbar-width": .scrollbarWidth,
     "border-collapse": .borderCollapse, "border-spacing": .borderSpacing, "tab-size": .tabSize,
     "content": .content, "fill": .fill,
 ]
@@ -425,15 +469,35 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
             else if let m = parseColorAt([t], 0) { set(.outlineColor, m.0) }
         }
         if noStyle { set(.outlineWidth, .length(0, .px)) }
+    case "container":
+        // `container: <name>+ [/ <type>]?`
+        var names: [Token] = []
+        var i = 0
+        while i < tokens.count && !(tokens[i].Kind == .delim && tokens[i].Value == "/") { names.append(tokens[i]); i += 1 }
+        guard let n = parseContainerName(names) else { return [] }
+        var type = Value.keyword("normal")
+        if i < tokens.count {
+            guard i + 2 == tokens.count, let t = parseValue(.containerType, [tokens[i + 1]]) else { return [] }
+            type = t
+        }
+        set(.containerName, n)
+        set(.containerType, type)
+    case "transition", "-webkit-transition":
+        guard let parts = parseTransitionShorthand(tokens) else { return [] }
+        for (p, v) in parts { set(p, v) }
+    case "animation", "-webkit-animation":
+        guard let parts = parseAnimationShorthand(tokens) else { return [] }
+        for (p, v) in parts { set(p, v) }
     case "place-items":
         if let v = parseValue(.alignItems, [tokens[0]]) { set(.alignItems, v) }
     case "text-decoration-style", "text-decoration-thickness", "text-underline-offset",
-         "transition", "animation", "transform", "quotes", "counter-reset", "counter-increment",
+         "quotes", "perspective", "perspective-origin", "backface-visibility",
+         "transform-style", "transform-box", "counter-reset", "counter-increment",
          "background-attachment",
          "font-variant", "font-stretch", "font-feature-settings", "src", "unicode-range",
-         "user-select", "pointer-events", "appearance", "-webkit-appearance", "resize", "scroll-behavior",
+         "appearance", "-webkit-appearance", "resize", "scroll-behavior",
          "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing", "filter", "backdrop-filter",
-         "clip-path", "object-fit", "will-change", "contain", "isolation",
+         "clip-path", "will-change", "contain", "isolation",
          "hyphens", "direction",
          "unicode-bidi", "writing-mode", "columns", "column-count", "column-width", "caption-side",
          "empty-cells", "speak", "orphans", "widows", "page-break-before", "page-break-after",
@@ -516,6 +580,9 @@ func longhandsOf(_ name: string) -> [Prop] {
     case "border-radius": return [.borderTopLeftRadius, .borderTopRightRadius, .borderBottomRightRadius, .borderBottomLeftRadius]
     case "background": return [.backgroundColor, .backgroundImage, .backgroundRepeat, .backgroundSize, .backgroundPosition]
     case "overflow": return [.overflowX, .overflowY]
+    case "container": return [.containerName, .containerType]
+    case "transition", "-webkit-transition": return transitionProps
+    case "animation", "-webkit-animation": return animationProps
     case "font": return [.fontFamily, .fontSize, .fontWeight, .fontStyle, .lineHeight]
     case "flex": return [.flexGrow, .flexShrink, .flexBasis]
     case "gap": return [.rowGap, .columnGap]
@@ -572,6 +639,19 @@ func unitOf(_ s: string) -> Unit? {
     case "vh": return .vh
     case "vmin": return .vmin
     case "vmax": return .vmax
+    // The small, large and dynamic viewports are the one viewport: the
+    // engine has no browser chrome that comes and goes. vi and vb are
+    // horizontal writing's.
+    case "svw", "lvw", "dvw", "vi", "svi", "lvi", "dvi": return .vw
+    case "svh", "lvh", "dvh", "vb", "svb", "lvb", "dvb": return .vh
+    case "svmin", "lvmin", "dvmin": return .vmin
+    case "svmax", "lvmax", "dvmax": return .vmax
+    case "cqw", "cqi": return .cqw
+    case "cqh", "cqb": return .cqh
+    case "cqmin": return .cqmin
+    case "cqmax": return .cqmax
+    case "lh": return .lh
+    case "rlh": return .rlh
     default: return nil
     }
 }
@@ -878,7 +958,7 @@ func parseColorAt(_ tokens: [Token], _ i: int) -> (Value, int)? {
         return nil
     case .function:
         let name = lower(t.Value)
-        if name != "rgb" && name != "rgba" && name != "hsl" && name != "hsla" { return nil }
+        if !colorFunctionNames.contains(name) { return nil }
         var j = i + 1
         var depth = 1
         var inner: [Token] = []
@@ -892,11 +972,38 @@ func parseColorAt(_ tokens: [Token], _ i: int) -> (Value, int)? {
             j += 1
         }
         let text = name + "(" + Serialize(inner) + ")"
+        if name == "light-dark" {
+            let b = asciiLower([uint8](text.utf8))
+            let parts = commaArgs(b, 11, b.count - 1)
+            if parts.count != 2 { return nil }
+            guard let light = ParseColor(parts[0]), let dark = ParseColor(parts[1]) else { return nil }
+            return (Value.lightDark(light, dark), j - i + 1)
+        }
         if let c = ParseColor(text) { return (Value.color(c), j - i + 1) }
         return nil
     default:
         return nil
     }
+}
+
+let colorFunctionNames: [string] = [
+    "rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch", "color",
+    "color-mix", "light-dark", "contrast-color",
+]
+
+/// container-name: none, or names (not the CSS-wide keywords, `and`,
+/// `or`, `not`), kept space-separated.
+func parseContainerName(_ tokens: [Token]) -> Value? {
+    if tokens.isEmpty { return nil }
+    if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) == "none" { return .string("") }
+    var names: [string] = []
+    for t in tokens {
+        if t.Kind != .ident { return nil }
+        let k = lower(t.Value)
+        if k == "none" || k == "and" || k == "or" || k == "not" || k == "default" { return nil }
+        names.append(t.Value)
+    }
+    return .string(names.joined(separator: " "))
 }
 
 func parseColorValue(_ t: Token) -> Value? {
@@ -1183,8 +1290,13 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
     case .backgroundSize:
         if kw == "cover" || kw == "contain" || kw == "auto" { return .keyword(kw) }
         return parseBackgroundSize(tokens)
-    case .backgroundPosition:
+    case .backgroundPosition, .objectPosition:
         return parseBackgroundPosition(tokens)
+    case .objectFit:
+        switch kw {
+        case "fill", "contain", "cover", "none", "scale-down": return .keyword(kw)
+        default: return nil
+        }
     case .opacity, .flexGrow, .flexShrink:
         if t.Kind == .number { return .number(t.NumberVal) }
         if t.Kind == .percentage && prop == .opacity { return .number(t.NumberVal / 100) }
@@ -1197,6 +1309,27 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
         return parseOverflow(t)
     case .boxShadow:
         return parseShadows(tokens)
+    case .transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay,
+         .animationName, .animationDuration, .animationTimingFunction, .animationDelay,
+         .animationIterationCount, .animationDirection, .animationFillMode, .animationPlayState:
+        return parseAnimationLonghand(prop, tokens)
+    case .containerType:
+        switch kw {
+        case "normal", "size", "inline-size": return .keyword(kw)
+        default: return nil
+        }
+    case .containerName:
+        return parseContainerName(tokens)
+    case .transform:
+        return parseTransformList(tokens)
+    case .transformOrigin:
+        return parseTransformOrigin(tokens)
+    case .translate:
+        return parseTranslateProperty(tokens)
+    case .rotate:
+        return parseRotateProperty(tokens)
+    case .scale:
+        return parseScaleProperty(tokens)
     case .filter:
         // Only blur() is drawn; the other filter functions are dropped.
         if kw == "none" { return Value.none }
@@ -1345,10 +1478,26 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
         if kw == "inside" || kw == "outside" { return .keyword(kw) }
         return nil
     case .cursor:
+        // `url(hand.png) 4 4, pointer`: the keyword the list falls back to.
+        // (Images as cursors are not drawn yet: the fallback is.)
+        var last = ""
+        for tok in tokens where tok.Kind == .ident { last = lower(tok.Value) }
+        switch last {
+        case "auto", "default", "none", "context-menu", "help", "pointer", "progress", "wait", "cell", "crosshair", "text", "vertical-text", "alias", "copy", "move", "no-drop", "not-allowed", "grab", "grabbing", "all-scroll", "col-resize", "row-resize", "n-resize", "e-resize", "s-resize", "w-resize", "ne-resize", "nw-resize", "se-resize", "sw-resize", "ew-resize", "ns-resize", "nesw-resize", "nwse-resize", "zoom-in", "zoom-out":
+            return .keyword(last)
+        default: return nil
+        }
+    case .pointerEvents:
+        // SVG's values are all "the element takes the pointer" here.
         switch kw {
-        case "auto", "default", "pointer", "text", "crosshair", "move", "not-allowed", "ew-resize", "ns-resize",
-             "col-resize", "row-resize", "wait", "progress", "help", "grab", "grabbing", "none":
+        case "auto", "none", "visiblepainted", "visiblefill", "visiblestroke", "visible", "painted", "fill",
+             "stroke", "all", "bounding-box":
             return .keyword(kw)
+        default: return nil
+        }
+    case .userSelect:
+        switch kw {
+        case "auto", "text", "none", "contain", "all": return .keyword(kw)
         default: return nil
         }
     case .visibility:

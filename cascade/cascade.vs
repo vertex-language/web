@@ -42,6 +42,8 @@ final class StyleRule {
     /// The @scope the rule is in, or nil: it applies to an element only
     /// inside the scope.
     var scope: Scope? = nil
+    /// The @container queries the rule is under, all of which must hold.
+    var containers: [ContainerQuery] = []
 
     init(selector sel: selector.ComplexSelector, order: int32, declarations: SplitDecls, media: [string], layer: int32) {
         Selector = sel
@@ -77,6 +79,12 @@ public final class RuleSet {
     /// Custom properties registered with @property, and the value each
     /// has where nothing sets it (its initial-value).
     var registered: [string: [css.Token]] = [:]
+    /// @keyframes by name: a later rule of a name replaces an earlier.
+    var keyframes: [string: [Keyframe]] = [:]
+    /// The @container preludes around the rules being added.
+    var containerStack: [ContainerQuery] = []
+    public var UsesContainerQueries: bool = false
+    public var UsesContainerUnits: bool = false
     /// What the selectors mention, for turning changes into restyles.
     let features = Features()
     /// Whether any rule asks about pointer or keyboard state, which is
@@ -95,6 +103,7 @@ public final class RuleSet {
     var mediaWidth: float32 = -1
     var mediaHeight: float32 = -1
     var mediaDark = false
+    var mediaMotion = false
 
     public init() {}
 
@@ -127,8 +136,8 @@ public final class RuleSet {
 
     /// The rules of at-rules, as deep as they nest: @media's under its
     /// query (with those around it), @supports' where its condition
-    /// holds, and @layer's in their layer. @container, @keyframes and
-    /// the rest aren't read yet.
+    /// holds, @layer's in their layer, and @keyframes by name.
+    /// @container and the rest aren't read yet.
     func addAtRules(_ ats: [css.AtRule], media: [string], layer: string, scope: Scope? = nil) {
         for at in ats {
             switch at.Name {
@@ -163,6 +172,16 @@ public final class RuleSet {
                     registered[name] = d.Tokens
                     UsesCustomProperties = true
                 }
+            case "container":
+                containerStack.append(ContainerQuery.parse(at.Params))
+                UsesContainerQueries = true
+                addBlock(at.Rules, at.AtRules, media: media, layer: layer, scope: scope)
+                containerStack.removeLast()
+            case "keyframes", "-webkit-keyframes":
+                var name = trimSpaces(at.Params)
+                if name.hasPrefix("\"") && name.hasSuffix("\"") && name.count >= 2 { name = string(name.dropFirst().dropLast()) }
+                if name.isEmpty || name == "none" { continue }
+                keyframes[name] = keyframesOf(at)
             case "scope":
                 // `@scope (root) to (limit) { … }`: the rules apply inside
                 // an element the root matches, and not at or below one the
@@ -195,6 +214,7 @@ public final class RuleSet {
                 if unit == .vw || unit == .vh || unit == .vmin || unit == .vmax { UsesViewport = true }
             }
             if case .url(let u) = d.Value { ImageURLs.append(u) }
+            if case .length(_, let unit) = d.Value, unit == .cqw || unit == .cqh || unit == .cqmin || unit == .cqmax { UsesContainerUnits = true }
         }
         features.note(decls)
         for text in rule.Selectors {
@@ -203,6 +223,7 @@ public final class RuleSet {
                 order += 1
                 let r = StyleRule(selector: sel, order: order, declarations: split, media: media, layer: layer)
                 r.scope = scope
+                r.containers = containerStack
                 r.usesState = noteState(sel)
                 features.note(sel)
                 bucket(r)
@@ -237,10 +258,11 @@ public final class RuleSet {
 
     /// Re-evaluates every @media rule for a viewport.
     func setViewport(_ width: float32, _ height: float32, dark: bool = false) {
-        if width == mediaWidth && height == mediaHeight && dark == mediaDark { return }
+        if width == mediaWidth && height == mediaHeight && dark == mediaDark && PrefersReducedMotion == mediaMotion { return }
         mediaWidth = width
         mediaHeight = height
         mediaDark = dark
+        mediaMotion = PrefersReducedMotion
         for r in all {
             if !r.Media.isEmpty {
                 var on = true
@@ -401,6 +423,10 @@ final class Buckets {
     }
 }
 
+/// Whether the user asked for less motion: what
+/// `prefers-reduced-motion` answers. The host sets it from the system.
+public var PrefersReducedMotion = false
+
 /// Whether a media query holds for a viewport: `screen`, `all`,
 /// `(min-width: N)`, `(max-width: N)`, `and`, `not`, and lists.
 func mediaMatches(_ query: string, width: float32, height: float32, dark: bool = false) -> bool {
@@ -477,9 +503,8 @@ func mediaFeature(_ text: string, width: float32, height: float32, dark: bool = 
     case "height": return value.isEmpty ? height > 0 : (mediaLength(value).map { height == $0 } ?? false)
     case "orientation": return value == (width >= height ? "landscape" : "portrait")
     case "prefers-color-scheme": return value == (dark ? "dark" : "light")
-    // The engine runs no transitions or animations: motion is reduced,
-    // and a page's reduced-motion rules show what its motion would.
-    case "prefers-reduced-motion": return value.isEmpty || value == "reduce"
+    // The host's accessibility setting (Page.SetReducedMotion).
+    case "prefers-reduced-motion": return PrefersReducedMotion ? (value.isEmpty || value == "reduce") : value == "no-preference"
     case "prefers-reduced-transparency", "prefers-reduced-data", "prefers-contrast":
         return value == "no-preference"
     case "hover", "any-hover": return value.isEmpty || value == "hover"
@@ -639,6 +664,16 @@ public final class StyleResolver {
     /// Whether the page is shown in a dark color scheme: what
     /// `prefers-color-scheme` answers.
     public var Dark: bool = false
+    /// Called with each element's style once the cascade has settled it,
+    /// and its parent's: what web's Animator puts its values in through.
+    public var Animate: ((html.Node, ComputedStyle, ComputedStyle?) -> Void)? = nil
+    /// The size containers' content boxes, by element, from the last
+    /// layout (container.vs).
+    public var ContainerSizes: [int64: ContainerSize] = [:]
+    /// This pass's element styles, where containers are used: what
+    /// container queries look up.
+    var stylesById: [int64: ComputedStyle] = [:]
+    var RootLineHeight: float32 = 19.2
     var inlineByText: [string: SplitDecls] = [:]
     var scratch: [StyleRule] = []
     var matchedScratch: [StyleRule] = []
@@ -705,14 +740,19 @@ public final class StyleResolver {
             if m { matched.append(r) }
         }
         for r in authorList where r.enabled {
-            let m = selector.MatchComplexIn(r.Selector, node, context, pseudoElement: which)
+            var m = selector.MatchComplexIn(r.Selector, node, context, pseudoElement: which)
+            if m && !r.containers.isEmpty { m = containersHold(r.containers, node) }
             if r.usesState { StateTrace.append(StateEntry(node: node, rule: r, pseudo: which, matched: m)) }
             if m { matched.append(r) }
         }
         if matched.isEmpty { return nil }
         sortRules(&matched)
         let style = ComputedStyle(inheriting: parent)
-        let ctx = ApplyContext(parent: parent, rootFontSize: RootFontSize, viewportWidth: ViewportWidth, viewportHeight: ViewportHeight)
+        var ctx = ApplyContext(parent: parent, rootFontSize: RootFontSize, viewportWidth: ViewportWidth, viewportHeight: ViewportHeight, dark: Dark)
+        ctx.rootLineHeight = RootLineHeight
+        let cs = UsesContainers ? nearestContainerSize(node) : (w: ViewportWidth, h: ViewportHeight)
+        ctx.containerWidth = cs.w
+        ctx.containerHeight = cs.h
         var customs: [CustomDecl] = []
         for r in matched {
             for c in r.Customs where !c.important { customs.append(c) }
@@ -747,8 +787,13 @@ public final class StyleResolver {
         let root = parent == nil
         let base = parent ?? defaultStyle
         let style = ComputedStyle(inheriting: base)
-        let ctx = ApplyContext(parent: base, rootFontSize: root ? 16 : RootFontSize,
-                               viewportWidth: ViewportWidth, viewportHeight: ViewportHeight)
+        var ctx = ApplyContext(parent: base, rootFontSize: root ? 16 : RootFontSize,
+                               viewportWidth: ViewportWidth, viewportHeight: ViewportHeight, dark: Dark)
+        let containers = UsesContainers
+        ctx.rootLineHeight = root ? 19.2 : RootLineHeight
+        let cs = containers ? nearestContainerSize(node) : (w: ViewportWidth, h: ViewportHeight)
+        ctx.containerWidth = cs.w
+        ctx.containerHeight = cs.h
 
         // Every declaration that applies, in cascade order: UA rules,
         // presentational attributes, author rules, the style attribute,
@@ -780,7 +825,8 @@ public final class StyleResolver {
         Author.candidates(node, into: &scratch)
         matched.removeAll(keepingCapacity: true)
         for r in scratch {
-            let m = selector.MatchComplexIn(r.Selector, node, context)
+            var m = selector.MatchComplexIn(r.Selector, node, context)
+            if m && !r.containers.isEmpty { m = containersHold(r.containers, node) }
             if r.usesState { StateTrace.append(StateEntry(node: node, rule: r, pseudo: "", matched: m)) }
             if m { matched.append(r) }
         }
@@ -839,9 +885,14 @@ public final class StyleResolver {
         }
         if root {
             RootFontSize = style.FontSize
+            RootLineHeight = style.LineHeightPx
         }
+        if containers { stylesById[node.Id] = style }
         declScratch = declarations
         matchedScratch = matched
+        // Transitions and animations put their values in last, before
+        // the children inherit.
+        if let animate = Animate { animate(node, style, parent) }
         return style
     }
 
@@ -972,6 +1023,13 @@ struct ApplyContext {
     let rootFontSize: float32
     let viewportWidth: float32
     let viewportHeight: float32
+    /// Whether the page is dark, which light-dark() picks by.
+    var dark: bool = false
+    /// The nearest query container's content box, for cq units: the
+    /// viewport where there is none.
+    var containerWidth: float32 = 0
+    var containerHeight: float32 = 0
+    var rootLineHeight: float32 = 19.2
 }
 
 // MARK: - Applying declarations
@@ -987,7 +1045,8 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
     default:
         break
     }
-    let v = d.Value
+    var v = d.Value
+    if case .lightDark(let light, let dark) = v { v = .color(ctx.dark ? dark : light) }
     switch d.Prop {
     case .display:
         if let k = keywordOf(v) { s.Display = displayOf(k) }
@@ -1114,6 +1173,32 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
         }
     case .opacity:
         if case .number(let n) = v { s.Opacity = n < 0 ? 0 : (n > 1 ? 1 : n) }
+    case .transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay,
+         .animationName, .animationDuration, .animationTimingFunction, .animationDelay,
+         .animationIterationCount, .animationDirection, .animationFillMode, .animationPlayState:
+        applyAnimationProperty(d.Prop, v, s)
+    case .containerType: if let k = keywordOf(v) { s.ContainerType = k }
+    case .objectFit: if let k = keywordOf(v) { s.ObjectFit = k }
+    case .objectPosition:
+        if let k = keywordOf(v) {
+            let p = backgroundPosition(words(k), s)
+            s.ObjectPositionX = p.fx
+            s.ObjectOffsetX = p.ox
+            s.ObjectPositionY = p.fy
+            s.ObjectOffsetY = p.oy
+        }
+    case .containerName:
+        if case .string(let names) = v { s.ContainerNames = names.split(separator: " ").map { string($0) } }
+    case .transform: s.Transform = transformOps(v, s, ctx)
+    case .translate: s.Translate = transformOps(v, s, ctx)
+    case .rotate: s.Rotate = transformOps(v, s, ctx)
+    case .scale: s.Scale = transformOps(v, s, ctx)
+    case .transformOrigin:
+        let ops = transformOps(v, s, ctx)
+        if ops.count == 1 && ops[0].Lengths.count == 2 {
+            s.TransformOriginX = ops[0].Lengths[0]
+            s.TransformOriginY = ops[0].Lengths[1]
+        }
     case .filter:
         if case .none = v { s.FilterBlur = 0 } else if let r = pixels(v, s, ctx), r > 0 { s.FilterBlur = r } else { s.FilterBlur = 0 }
     case .overflowX: if let k = keywordOf(v) { s.OverflowX = overflowOf(k) }
@@ -1241,6 +1326,12 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
             case .vh: s.FontSize = ctx.viewportHeight * n / 100
             case .vmin: s.FontSize = math.Min(ctx.viewportWidth, ctx.viewportHeight) * n / 100
             case .vmax: s.FontSize = math.Max(ctx.viewportWidth, ctx.viewportHeight) * n / 100
+            case .cqw: s.FontSize = ctx.containerWidth * n / 100
+            case .cqh: s.FontSize = ctx.containerHeight * n / 100
+            case .cqmin: s.FontSize = math.Min(ctx.containerWidth, ctx.containerHeight) * n / 100
+            case .cqmax: s.FontSize = math.Max(ctx.containerWidth, ctx.containerHeight) * n / 100
+            case .lh: s.FontSize = ctx.parent.LineHeightPx * n
+            case .rlh: s.FontSize = ctx.rootLineHeight * n
             }
             if s.FontSize < 0 { s.FontSize = 0 }
         }
@@ -1328,18 +1419,54 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
     case .cursor:
         if let k = keywordOf(v) {
             switch k {
-            case "default": s.Cursor = .default
-            case "pointer": s.Cursor = .pointer
-            case "text": s.Cursor = .text
-            case "crosshair": s.Cursor = .crosshair
-            case "move", "grab", "grabbing": s.Cursor = k == "move" ? .move : .grab
-            case "not-allowed": s.Cursor = .notAllowed
-            case "ew-resize", "col-resize": s.Cursor = .ewResize
-            case "ns-resize", "row-resize": s.Cursor = .nsResize
-            case "wait", "progress": s.Cursor = .wait
-            case "help": s.Cursor = .help
+            case "default": s.Cursor = .`default`
             case "none": s.Cursor = .none
+            case "context-menu": s.Cursor = .contextMenu
+            case "help": s.Cursor = .help
+            case "pointer": s.Cursor = .pointer
+            case "progress": s.Cursor = .progress
+            case "wait": s.Cursor = .wait
+            case "cell": s.Cursor = .cell
+            case "crosshair": s.Cursor = .crosshair
+            case "text": s.Cursor = .text
+            case "vertical-text": s.Cursor = .verticalText
+            case "alias": s.Cursor = .alias
+            case "copy": s.Cursor = .copy
+            case "move": s.Cursor = .move
+            case "no-drop": s.Cursor = .noDrop
+            case "not-allowed": s.Cursor = .notAllowed
+            case "grab": s.Cursor = .grab
+            case "grabbing": s.Cursor = .grabbing
+            case "all-scroll": s.Cursor = .allScroll
+            case "col-resize": s.Cursor = .colResize
+            case "row-resize": s.Cursor = .rowResize
+            case "n-resize": s.Cursor = .nResize
+            case "e-resize": s.Cursor = .eResize
+            case "s-resize": s.Cursor = .sResize
+            case "w-resize": s.Cursor = .wResize
+            case "ne-resize": s.Cursor = .neResize
+            case "nw-resize": s.Cursor = .nwResize
+            case "se-resize": s.Cursor = .seResize
+            case "sw-resize": s.Cursor = .swResize
+            case "ew-resize": s.Cursor = .ewResize
+            case "ns-resize": s.Cursor = .nsResize
+            case "nesw-resize": s.Cursor = .neswResize
+            case "nwse-resize": s.Cursor = .nwseResize
+            case "zoom-in": s.Cursor = .zoomIn
+            case "zoom-out": s.Cursor = .zoomOut
             default: s.Cursor = .auto
+            }
+        }
+    case .pointerEvents:
+        if let k = keywordOf(v) { s.PointerEvents = k == "none" ? .none : .auto }
+    case .userSelect:
+        if let k = keywordOf(v) {
+            switch k {
+            case "text": s.UserSelect = .text
+            case "none": s.UserSelect = .none
+            case "contain": s.UserSelect = .contain
+            case "all": s.UserSelect = .all
+            default: s.UserSelect = .auto
             }
         }
     case .visibility:
@@ -1363,6 +1490,27 @@ func keywordOf(_ v: css.Value) -> string? {
     case .normal: return "normal"
     default: return nil
     }
+}
+
+/// A transform value's functions, their lengths resolved; empty for
+/// none or anything that does not resolve.
+func transformOps(_ v: css.Value, _ s: ComputedStyle, _ ctx: ApplyContext) -> [TransformOp] {
+    guard case .transforms(let fns) = v else { return [] }
+    var out: [TransformOp] = []
+    for f in fns {
+        var op = TransformOp(f.Name)
+        for a in f.Args {
+            if case .number(let n) = a {
+                op.Numbers.append(n)
+            } else if let l = length(a, s, ctx) {
+                op.Lengths.append(l)
+            } else {
+                return []
+            }
+        }
+        out.append(op)
+    }
+    return out
 }
 
 func colorOf(_ v: css.Value) -> draw.Color? {
@@ -1408,6 +1556,12 @@ func length(_ v: css.Value, _ s: ComputedStyle, _ ctx: ApplyContext) -> css.Leng
         case .vh: return .px(n * ctx.viewportHeight / 100)
         case .vmin: return .px(n * math.Min(ctx.viewportWidth, ctx.viewportHeight) / 100)
         case .vmax: return .px(n * math.Max(ctx.viewportWidth, ctx.viewportHeight) / 100)
+        case .cqw: return .px(n * ctx.containerWidth / 100)
+        case .cqh: return .px(n * ctx.containerHeight / 100)
+        case .cqmin: return .px(n * math.Min(ctx.containerWidth, ctx.containerHeight) / 100)
+        case .cqmax: return .px(n * math.Max(ctx.containerWidth, ctx.containerHeight) / 100)
+        case .lh: return .px(n * s.LineHeightPx)
+        case .rlh: return .px(n * ctx.rootLineHeight)
         }
     case .number(let n):
         return n == 0 ? .px(0) : nil
@@ -1663,6 +1817,25 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
         }
     case .opacity: b.Opacity = a.Opacity
     case .filter: b.FilterBlur = a.FilterBlur
+    case .transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay,
+         .animationName, .animationDuration, .animationTimingFunction, .animationDelay,
+         .animationIterationCount, .animationDirection, .animationFillMode, .animationPlayState:
+        copyAnimationProperty(p, from: a, to: b)
+    case .containerType: b.ContainerType = a.ContainerType
+    case .objectFit: b.ObjectFit = a.ObjectFit
+    case .objectPosition:
+        b.ObjectPositionX = a.ObjectPositionX
+        b.ObjectOffsetX = a.ObjectOffsetX
+        b.ObjectPositionY = a.ObjectPositionY
+        b.ObjectOffsetY = a.ObjectOffsetY
+    case .containerName: b.ContainerNames = a.ContainerNames
+    case .transform: b.Transform = a.Transform
+    case .translate: b.Translate = a.Translate
+    case .rotate: b.Rotate = a.Rotate
+    case .scale: b.Scale = a.Scale
+    case .transformOrigin:
+        b.TransformOriginX = a.TransformOriginX
+        b.TransformOriginY = a.TransformOriginY
     case .overflowX: b.OverflowX = a.OverflowX
     case .overflowY: b.OverflowY = a.OverflowY
     case .boxShadow: b.Shadows = a.Shadows
@@ -1711,6 +1884,8 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .listStyleType: b.ListStyleType = a.ListStyleType
     case .listStylePosition: b.ListStylePosition = a.ListStylePosition
     case .cursor: b.Cursor = a.Cursor
+    case .pointerEvents: b.PointerEvents = a.PointerEvents
+    case .userSelect: b.UserSelect = a.UserSelect
     case .visibility: b.Visibility = a.Visibility
     case .scrollbarWidth: b.ScrollbarHidden = a.ScrollbarHidden
     case .borderCollapse: b.BorderCollapse = a.BorderCollapse

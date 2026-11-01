@@ -25,6 +25,8 @@ public final class BoxTreeBuilder {
     public var Values: [int64: string] = [:]
     /// Every box made, by node id, for the view to find an element's box.
     public var byNode: [int64: Box] = [:]
+    /// Whether the tree has a nested document's box (ReplacedKind.frame).
+    public var HasFrames = false
     /// Each text node's place in document order, for ordering selections.
     public var textOrder: [int64: int] = [:]
     var textCount = 0
@@ -38,6 +40,7 @@ public final class BoxTreeBuilder {
     /// document with no element.
     public func Build(_ doc: html.Document) -> Box? {
         byNode = [:]
+        HasFrames = false
         resolver.StateTrace.removeAll(keepingCapacity: true)
         textOrder = [:]
         textCount = 0
@@ -112,16 +115,17 @@ public final class BoxTreeBuilder {
             return
         }
         // Floats and positioned boxes go with the inline content around
-        // them; only in-flow blocks split it.
+        // them; only in-flow blocks split it -- a replaced element with
+        // display: block among them.
         var hasBlock = false
         var hasInline = false
         for b in made {
-            if b.Kind == .block && !b.Style.IsOutOfFlow { hasBlock = true } else if !(b.Kind == .text && IsBlank(b.Text)) { hasInline = true }
+            if b.IsBlockLevel && b.Kind != .text && !b.Style.IsOutOfFlow { hasBlock = true } else if !(b.Kind == .text && IsBlank(b.Text)) { hasInline = true }
         }
         if hasBlock && hasInline {
             var run: [Box] = []
             for b in made {
-                if b.Kind == .block && !b.Style.IsOutOfFlow {
+                if b.IsBlockLevel && b.Kind != .text && !b.Style.IsOutOfFlow {
                     flushInline(&run, into: parent)
                     parent.AppendChild(b)
                 } else {
@@ -130,7 +134,7 @@ public final class BoxTreeBuilder {
             }
             flushInline(&run, into: parent)
         } else if hasBlock {
-            for b in made where b.Kind == .block {
+            for b in made where b.IsBlockLevel && b.Kind != .text {
                 parent.AppendChild(b)
             }
         } else {
@@ -208,17 +212,7 @@ public final class BoxTreeBuilder {
         case "img":
             box = Box(kind: .replaced, style: style, node: node)
             box.Replaced = .image
-            if let src = node.GetAttribute("src"), let doc = Vectors[src] {
-                box.Replaced = .svg
-                box.Vector = doc.Drawing
-                box.VectorIsDocument = true
-                box.IntrinsicWidth = doc.Width
-                box.IntrinsicHeight = doc.Height
-            } else if let src = node.GetAttribute("src"), let img = Images[src] {
-                box.Image = img
-                box.IntrinsicWidth = float32(img.Width)
-                box.IntrinsicHeight = float32(img.Height)
-            } else {
+            if !showImage(box, node.GetAttribute("src")) {
                 box.IntrinsicWidth = 0
                 box.IntrinsicHeight = 0
             }
@@ -288,11 +282,40 @@ public final class BoxTreeBuilder {
             box.IntrinsicWidth = size.width
             box.IntrinsicHeight = size.height
             box.RatioOnly = svg.HasRatioOnly(node)
-        case "video", "iframe", "canvas", "embed", "object":
+        case "video":
+            // No video plays yet: its poster shows, as before playing.
             box = Box(kind: .replaced, style: style, node: node)
             box.Replaced = .placeholder
             box.IntrinsicWidth = 300
             box.IntrinsicHeight = 150
+            if let poster = node.GetAttribute("poster"), let img = Images[poster] {
+                box.Replaced = .image
+                box.Image = img
+                box.IntrinsicWidth = float32(img.Width)
+                box.IntrinsicHeight = float32(img.Height)
+            }
+        case "audio":
+            box = Box(kind: .replaced, style: style, node: node)
+            box.Replaced = .audio
+            box.IntrinsicWidth = 300
+            box.IntrinsicHeight = 54
+        case "iframe":
+            box = Box(kind: .replaced, style: style, node: node)
+            box.Replaced = .frame
+            HasFrames = true
+            box.IntrinsicWidth = 300
+            box.IntrinsicHeight = 150
+        case "embed", "object" where embedsSomething(node):
+            box = Box(kind: .replaced, style: style, node: node)
+            box.IntrinsicWidth = 300
+            box.IntrinsicHeight = 150
+            let src = tag == "object" ? node.GetAttribute("data") : node.GetAttribute("src")
+            if showImage(box, src) {
+                box.Replaced = box.Replaced == .svg ? .svg : .image
+            } else {
+                box.Replaced = EmbedsDocument(node) ? .frame : .placeholder
+                if box.Replaced == .frame { HasFrames = true }
+            }
         case "br":
             box = Box(kind: .lineBreak, style: style, node: node)
         default:
@@ -319,6 +342,38 @@ public final class BoxTreeBuilder {
         }
         byNode[node.Id] = box
         return box
+    }
+
+    /// Puts an image the page has for src in a replaced box, an SVG as
+    /// shapes; answers whether there was one.
+    func showImage(_ box: Box, _ src: string?) -> bool {
+        guard let src = src else { return false }
+        if let doc = Vectors[src] {
+            box.Replaced = .svg
+            box.Vector = doc.Drawing
+            box.VectorIsDocument = true
+            box.IntrinsicWidth = doc.Width
+            box.IntrinsicHeight = doc.Height
+            return true
+        }
+        if let img = Images[src] {
+            box.Replaced = .image
+            box.Image = img
+            box.IntrinsicWidth = float32(img.Width)
+            box.IntrinsicHeight = float32(img.Height)
+            return true
+        }
+        return false
+    }
+
+    /// Whether an <object> or <embed> shows what it points at: an image
+    /// the page has, or a document. An <object> that doesn't shows its
+    /// fallback content, as an ordinary element; an <embed> always takes
+    /// its box.
+    func embedsSomething(_ node: html.Node) -> bool {
+        if node.TagName == "embed" { return true }
+        if let data = node.GetAttribute("data"), Images[data] != nil || Vectors[data] != nil { return true }
+        return EmbedsDocument(node)
     }
 
     /// Adds the boxes of ::before and ::after where rules give them
@@ -443,4 +498,14 @@ func markerText(_ type: cascade.ListStyleType, _ index: int, node: html.Node) ->
     case .lowerRoman: return roman(index, upper: false) + "."
     case .upperRoman: return roman(index, upper: true) + "."
     }
+}
+
+/// Whether an <object> or <embed> points at an HTML document, by its
+/// type or its URL's extension: what the page shows as a nested frame.
+public func EmbedsDocument(_ node: html.Node) -> bool {
+    let type = css.lower(node.GetAttribute("type") ?? "")
+    if type.contains("html") { return true }
+    if !type.isEmpty { return false }
+    let src = css.lower(node.GetAttribute(node.TagName == "object" ? "data" : "src") ?? "")
+    return src.hasSuffix(".html") || src.hasSuffix(".htm") || src.hasSuffix("/")
 }

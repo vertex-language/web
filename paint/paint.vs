@@ -2,6 +2,7 @@ package paint
 
 import (
     "image/draw"
+    "math"
     "text/font"
     "web/cascade"
     "web/css"
@@ -29,13 +30,17 @@ public enum PaintKind: Equatable {
     /// An <svg>'s shapes, fitted to Rect.
     case vector
     /// What follows, to the matching unlayer, is painted apart, then
-    /// blurred by Blur and put back: filter: blur(). Rect is the box
-    /// the filter is on.
+    /// blurred by Blur and put back through Transform: filter: blur()
+    /// and transform. Rect is the box they are on.
     case layer
     case unlayer
     /// Where an element marked data-viewport is painted: what comes after
     /// is drawn over it. Node is the element's id. Paints nothing.
     case mark
+    /// What follows, to the matching untranslate, is moved by X and Y:
+    /// a nested document's display list, in its own coordinates.
+    case translate
+    case untranslate
 }
 
 /// One thing to paint, in CSS pixels on the page: a filled rectangle, a
@@ -69,6 +74,8 @@ public struct PaintItem {
     public var FillNone: bool
     /// A layer's blur radius, in CSS pixels.
     public var Blur: float32
+    /// A layer's transform, in the page's CSS pixels.
+    public var Transform: draw.Affine = draw.Affine.identity
 
     /// For a mark: the element's node id.
     public var Node: int64 = 0
@@ -182,6 +189,8 @@ public struct State {
     /// The caret's byte offset in the focused field, or -1.
     public var Caret: int = -1
     public var CaretVisible: bool = true
+    /// What an input method is composing, shown at the caret, underlined.
+    public var Composing: string = ""
     /// The focused field's selected bytes, or -1 for none.
     public var FieldSelectionStart: int = -1
     public var FieldSelectionEnd: int = -1
@@ -191,8 +200,23 @@ public struct State {
     public var SelectionStart: dom.TextPosition? = nil
     public var SelectionEnd: dom.TextPosition? = nil
     public var TextOrder: [int64: int] = [:]
+    /// The nested documents of <iframe>s and the like, by element id.
+    public var Subpages: [int64: Subpage] = [:]
 
     public init() {}
+}
+
+/// A nested document's display list, and how far it is scrolled.
+public struct Subpage {
+    public var Items: [PaintItem]
+    public var ScrollX: float32
+    public var ScrollY: float32
+
+    public init(items: [PaintItem], scrollX: float32, scrollY: float32) {
+        Items = items
+        ScrollX = scrollX
+        ScrollY = scrollY
+    }
 }
 
 /// The display list for a laid-out box tree: what to paint, in the
@@ -202,12 +226,14 @@ public func Build(_ root: layout.Box, state: State, viewportWidth: float32, view
     b.focused = state.Focused
     b.caret = state.Caret
     b.caretVisible = state.CaretVisible
+    b.composing = state.Composing
     b.fieldSelectionStart = state.FieldSelectionStart
     b.fieldSelectionEnd = state.FieldSelectionEnd
     b.images = state.Images
     b.selectionStart = state.SelectionStart
     b.selectionEnd = state.SelectionEnd
     b.textOrder = state.TextOrder
+    b.subpages = state.Subpages
     return b.build(root, viewportWidth: viewportWidth, viewportHeight: viewportHeight, background: background)
 }
 
@@ -215,7 +241,9 @@ final class DisplayListBuilder {
     var items: [PaintItem] = []
     /// The page's state the painter needs.
     var focused: int64 = 0
+    var subpages: [int64: Subpage] = [:]
     var caret: int = -1
+    var composing = ""
     var caretVisible: bool = true
     /// The focused field's selected bytes, or -1 for none.
     var fieldSelectionStart: int = -1
@@ -271,11 +299,17 @@ final class DisplayListBuilder {
         let y = parentY + box.Y + box.OffsetY
         let savedOpacity = opacity
         if s.Opacity < 1 { opacity = opacity * s.Opacity }
-        let blurred = s.FilterBlur > 0
+        let transform = s.HasTransform
+            ? draw.Affine.translate(x, y).Concat(s.TransformMatrix(width: box.Width, height: box.Height)).Concat(draw.Affine.translate(-x, -y))
+            : draw.Affine.identity
+        // A transform that flattens the box shows nothing of it.
+        if transform.Determinant == 0 { opacity = savedOpacity; return }
+        let blurred = s.FilterBlur > 0 || !transform.IsIdentity
         if blurred {
             var layer = PaintItem(.layer)
             layer.Rect = draw.Rect(x, y, box.Width, box.Height)
             layer.Blur = s.FilterBlur
+            layer.Transform = transform
             items.append(layer)
         }
         let clips = s.ClipsOverflow
@@ -389,7 +423,7 @@ final class DisplayListBuilder {
                 if phase == .floats { paintBox(child, x: sx, y: sy, skipBackground: skipBackground) }
                 continue
             }
-            if child.Style.IsPositioned {
+            if child.Style.IsPositioned || child.Style.HasTransform {
                 // A relative or sticky box paints as a whole, with what
                 // is positioned against it, among the stacking context's
                 // positioned boxes.
@@ -592,6 +626,31 @@ final class DisplayListBuilder {
     }
 
     /// Paints what a control or image shows inside its box.
+    /// Where a replaced element's image goes in its content box, as
+    /// object-fit and object-position say.
+    func objectRect(_ s: cascade.ComputedStyle, _ inner: draw.Rect, _ iw: float32, _ ih: float32) -> draw.Rect {
+        if iw <= 0 || ih <= 0 { return inner }
+        var w = inner.Width
+        var h = inner.Height
+        switch s.ObjectFit {
+        case "contain", "cover", "scale-down":
+            let sx = inner.Width / iw
+            let sy = inner.Height / ih
+            var k = s.ObjectFit == "cover" ? math.Max(sx, sy) : math.Min(sx, sy)
+            if s.ObjectFit == "scale-down" && k > 1 { k = 1 }
+            w = iw * k
+            h = ih * k
+        case "none":
+            w = iw
+            h = ih
+        default:
+            return inner
+        }
+        let x = inner.X + (inner.Width - w) * s.ObjectPositionX + s.ObjectOffsetX
+        let y = inner.Y + (inner.Height - h) * s.ObjectPositionY + s.ObjectOffsetY
+        return draw.Rect(x, y, w, h)
+    }
+
     func paintReplaced(_ box: layout.Box, x: float32, y: float32) {
         let s = box.Style
         let inner = draw.Rect(x + box.ContentX, y + box.ContentY, box.InnerWidth, box.InnerHeight)
@@ -600,7 +659,11 @@ final class DisplayListBuilder {
         switch box.Replaced {
         case .image:
             if let img = box.Image {
-                items.append(.image(inner, img, opacity))
+                let fitted = objectRect(s, inner, float32(img.Width), float32(img.Height))
+                let spills = fitted.X < inner.X || fitted.Y < inner.Y || fitted.Right > inner.Right || fitted.Bottom > inner.Bottom
+                if spills { items.append(.clip(inner)) }
+                items.append(.image(fitted, img, opacity))
+                if spills { items.append(PaintItem.unclip) }
             } else {
                 // No image: a faint frame, as browsers show a broken image.
                 let c = color(draw.Color(200, 200, 200))
@@ -617,8 +680,21 @@ final class DisplayListBuilder {
             let textX = inner.X + 1
             var textY = inner.Y + (inner.Height - face.LineHeight) / 2 + face.Ascent
             if box.Replaced == .textArea { textY = inner.Y + face.Ascent + (face.LineHeight - face.Ascent - face.Descent) / 2 }
-            let value = box.Text
+            var value = box.Text
             var caretX = textX
+            // What an input method is composing is shown at the caret, as
+            // if typed, underlined; the caret after it.
+            var caret = self.caret
+            var composedFrom = -1
+            var composedTo = -1
+            if isFocused && !composing.isEmpty {
+                let bytes = [uint8](value.utf8)
+                let at = caret < 0 ? bytes.count : (caret > bytes.count ? bytes.count : caret)
+                value = stringOf(bytes, 0, at) + composing + stringOf(bytes, at, bytes.count)
+                composedFrom = at
+                composedTo = at + composing.utf8.count
+                caret = composedTo
+            }
             let selected = isFocused && fieldSelectionStart >= 0 && fieldSelectionEnd > fieldSelectionStart
             let highlight = draw.Color(179, 212, 252)
             if !value.isEmpty {
@@ -666,6 +742,12 @@ final class DisplayListBuilder {
                         items.append(.fill(draw.Rect(x0, textY - face.Ascent, x1 - x0, face.Ascent + face.Descent), highlight, draw.Radii.zero))
                     }
                     items.append(.text(textX, textY, run, color(s.Color), 0))
+                    if composedFrom >= 0 {
+                        let bytes = [uint8](value.utf8)
+                        let x0 = textX + face.Measure(stringOf(bytes, 0, composedFrom))
+                        let x1 = textX + face.Measure(stringOf(bytes, 0, composedTo))
+                        items.append(.fill(draw.Rect(x0, textY + 2, x1 - x0, 1), color(s.Color), draw.Radii.zero))
+                    }
                     if isFocused {
                         let bytes = [uint8](value.utf8)
                         let upto = caret < 0 ? 0 : (caret > bytes.count ? bytes.count : caret)
@@ -752,9 +834,46 @@ final class DisplayListBuilder {
             let dot = draw.Rect(tx + thumb * 0.3, cy - thumb * 0.2, thumb * 0.4, thumb * 0.4)
             items.append(.fill(dot, accent, draw.Radii(all: thumb * 0.2)))
         case .placeholder:
-            // Video, canvas, iframe and the rest draw nothing until they
-            // have something to show, as a browser's do before loading.
+            // A video without a poster, and an embed of something the
+            // engine can't show, draw nothing, as a browser's do before
+            // loading.
             break
+        case .frame:
+            guard let node = box.Node, let sub = subpages[node.Id] else { break }
+            items.append(.clip(inner))
+            var t = PaintItem(.translate)
+            t.X = inner.X - sub.ScrollX
+            t.Y = inner.Y - sub.ScrollY
+            items.append(t)
+            items.append(contentsOf: sub.Items)
+            items.append(PaintItem(.untranslate))
+            items.append(PaintItem.unclip)
+        case .audio:
+            // The controls a browser shows, at rest: a play button, a
+            // track, and the time.
+            let bar = inner
+            let h = bar.Height
+            items.append(.fill(bar, color(draw.Color(241, 243, 244)), draw.Radii(all: h / 2)))
+            let d = math.Min(h * 0.6, 32)
+            let cx = bar.X + h / 2
+            let cy = bar.Y + h / 2
+            items.append(.fill(draw.Rect(cx - d / 2, cy - d / 2, d, d), color(s.AccentColor ?? css.SystemAccent), draw.Radii(all: d / 2)))
+            // The play triangle, as steps of a narrowing bar.
+            let tri = d * 0.36
+            var k: float32 = 0
+            while k < tri {
+                let half = tri / 2 * (1 - k / tri)
+                items.append(.fill(draw.Rect(cx - tri * 0.3 + k, cy - half, 1, half * 2), color(draw.Color.white), draw.Radii.zero))
+                k += 1
+            }
+            let label = face.Shape("0:00")
+            let tx = bar.X + h + 4
+            items.append(.text(tx, cy + (face.Ascent - face.Descent) / 2, label, color(draw.Color(60, 64, 67)), 0))
+            let trackX = tx + face.Measure("0:00") + 10
+            let trackW = bar.Right - h / 2 - trackX
+            if trackW > 8 {
+                items.append(.fill(draw.Rect(trackX, cy - 2, trackW, 4), color(draw.Color(0, 0, 0, 60)), draw.Radii(all: 2)))
+            }
         case .svg:
             guard let v = box.Vector, !v.IsEmpty else { break }
             let st = box.Style
@@ -802,8 +921,9 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
                scrollX: float32, scrollY: float32) {
     var canvas = base
     var clips: [draw.IRect] = []
-    let dx = originX - scrollX * scale
-    let dy = originY - scrollY * scale
+    var dx = originX - scrollX * scale
+    var dy = originY - scrollY * scale
+    var offsets: [(float32, float32)] = []
     func device(_ r: draw.Rect) -> draw.IRect {
         let x0 = draw.RoundToInt(r.X * scale + dx)
         let y0 = draw.RoundToInt(r.Y * scale + dy)
@@ -814,6 +934,7 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
     var layers: [draw.Layer?] = []
     var layerCanvases: [draw.Canvas] = []
     var layerBlurs: [float32] = []
+    var layerTransforms: [draw.Affine] = []
     func inflate(_ r: draw.IRect, _ by: float32) -> draw.IRect {
         let d = int32(by + 0.5)
         return draw.IRect(r.X - d, r.Y - d, r.Width + 2 * d, r.Height + 2 * d)
@@ -925,8 +1046,23 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
             // The box and as far as its blur reaches, within reach of
             // what shows.
             let reach = item.Blur * scale * 3
-            let bounds = inflate(device(item.Rect), reach)
-            let area = bounds.Intersect(inflate(canvas.Clip, reach))
+            var bounds = inflate(device(item.Rect), reach)
+            var shows = canvas.Clip
+            // CSS pixels to the canvas's, where the layer is: what its
+            // transform is conjugated by.
+            let toDevice = draw.Affine(scale, 0, 0, scale, dx, dy)
+            let fromDevice = toDevice.Inverted() ?? draw.Affine.identity
+            let t = toDevice.Concat(item.Transform).Concat(fromDevice)
+            if !t.IsIdentity {
+                // What of the untransformed content lands in the clip,
+                // and of what overflows the box, up to 512 pixels out.
+                guard let inv = t.Inverted() else { continue }
+                let c = canvas.Clip
+                let r = inv.Bounds(draw.Rect(float32(c.X), float32(c.Y), float32(c.Width), float32(c.Height)))
+                shows = draw.IRect(int32(r.X) - 1, int32(r.Y) - 1, int32(r.Width) + 2, int32(r.Height) + 2)
+                bounds = inflate(bounds, 512)
+            }
+            let area = bounds.Intersect(inflate(shows, reach))
             if area.IsEmpty {
                 layers.append(nil)
                 layerCanvases.append(canvas)
@@ -938,6 +1074,7 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
             layers.append(layer)
             layerCanvases.append(canvas)
             layerBlurs.append(item.Blur * scale)
+            layerTransforms.append(t)
             canvas = layer.Canvas
         case .unlayer:
             guard let parent = layerCanvases.popLast() else { continue }
@@ -945,12 +1082,22 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
             canvas = parent
             if let layer = made {
                 let sigma = layerBlurs.popLast() ?? 0
+                let t = layerTransforms.popLast() ?? draw.Affine.identity
                 layer.Blur(sigma)
-                layer.Composite(onto: canvas)
+                layer.Composite(onto: canvas, transform: t)
                 layer.Free()
             }
         case .mark:
             break
+        case .translate:
+            offsets.append((dx, dy))
+            dx += item.X * scale
+            dy += item.Y * scale
+        case .untranslate:
+            if let o = offsets.popLast() {
+                dx = o.0
+                dy = o.1
+            }
         case .clip:
             clips.append(canvas.Clip)
             canvas.ClipTo(device(item.Rect))

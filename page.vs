@@ -49,14 +49,87 @@ public enum EventResult: Equatable {
     case ignored
 }
 
-/// The pointer shape the page asks for where the pointer is.
+/// The pointer shape the page asks for where the pointer is: CSS's
+/// cursor keywords (auto resolved). CSSName is its keyword.
 public enum Cursor: Equatable {
     case `default`
+    case none
+    case contextMenu
+    case help
     case pointer
-    case text
+    case progress
+    case wait
+    case cell
     case crosshair
+    case text
+    case verticalText
+    case alias
+    case copy
+    case move
+    case noDrop
+    case notAllowed
+    case grab
+    case grabbing
+    case allScroll
+    case colResize
+    case rowResize
+    case nResize
+    case eResize
+    case sResize
+    case wResize
+    case neResize
+    case nwResize
+    case seResize
+    case swResize
     case ewResize
     case nsResize
+    case neswResize
+    case nwseResize
+    case zoomIn
+    case zoomOut
+}
+
+extension Cursor {
+    /// The CSS keyword for the cursor: "pointer", "nwse-resize".
+    public var CSSName: string {
+        switch self {
+        case .`default`: return "default"
+        case .none: return "none"
+        case .contextMenu: return "context-menu"
+        case .help: return "help"
+        case .pointer: return "pointer"
+        case .progress: return "progress"
+        case .wait: return "wait"
+        case .cell: return "cell"
+        case .crosshair: return "crosshair"
+        case .text: return "text"
+        case .verticalText: return "vertical-text"
+        case .alias: return "alias"
+        case .copy: return "copy"
+        case .move: return "move"
+        case .noDrop: return "no-drop"
+        case .notAllowed: return "not-allowed"
+        case .grab: return "grab"
+        case .grabbing: return "grabbing"
+        case .allScroll: return "all-scroll"
+        case .colResize: return "col-resize"
+        case .rowResize: return "row-resize"
+        case .nResize: return "n-resize"
+        case .eResize: return "e-resize"
+        case .sResize: return "s-resize"
+        case .wResize: return "w-resize"
+        case .neResize: return "ne-resize"
+        case .nwResize: return "nw-resize"
+        case .seResize: return "se-resize"
+        case .swResize: return "sw-resize"
+        case .ewResize: return "ew-resize"
+        case .nsResize: return "ns-resize"
+        case .neswResize: return "nesw-resize"
+        case .nwseResize: return "nwse-resize"
+        case .zoomIn: return "zoom-in"
+        case .zoomOut: return "zoom-out"
+        }
+    }
 }
 
 /// The system clipboard, as the host provides it. Without one, copy and
@@ -84,6 +157,8 @@ public final class Page {
     public var Clipboard: Clipboard? = nil
 
     let resolver: cascade.StyleResolver
+    /// Transitions and @keyframes animations (animate.vs).
+    let animator: Animator
     let context: selector.MatchContext
     var builder: layout.BoxTreeBuilder
     var laidOut: layout.Layout? = nil
@@ -102,6 +177,16 @@ public final class Page {
     var contentHeight: float32 = 0
 
     var needsStyle = true
+    /// Restyles in a row for container queries (update).
+    var containerPasses = 0
+    /// Nested documents by element id (frames.vs), and which of them the
+    /// pointer is over, pressed in, and clicked into.
+    var frames: [int64: Frame] = [:]
+    var framePass = 0
+    var lastPointer = draw.Point(0, 0)
+    var pressedFrame: int64? = nil
+    var hoveredFrame: Frame? = nil
+    var focusedFrame: Frame? = nil
     var needsLayout = true
     var needsPaint = true
     var needsRepaint = true
@@ -131,6 +216,13 @@ public final class Page {
     /// The modifier keys held, as the last input said: what mouse and
     /// wheel events report.
     var modifiers = Modifiers()
+    /// What an input method is composing and has not committed, shown at
+    /// the focused field's caret; "" when nothing is.
+    public internal(set) var Composing = ""
+    /// Whether the primary press in progress was taken by a pointerdown
+    /// listener: the mouse events that follow it are not sent, as the
+    /// Pointer Events standard has it.
+    var mouseSuppressed = false
     var baseURL: string = ""
     var title: string = ""
 
@@ -157,9 +249,12 @@ public final class Page {
         resolver = cascade.StyleResolver(ua: cascade.UserAgentRules())
         context = selector.MatchContext()
         builder = layout.BoxTreeBuilder(resolver: resolver, context: context)
+        animator = Animator(resolver: resolver)
         size = draw.Size(800, 600)
         scroll = draw.Point(0, 0)
         baseURL = Configuration.BaseURL ?? ""
+        let a = animator
+        resolver.Animate = { node, style, parent in a.apply(node, style, parent) }
     }
 
     // MARK: - Loading
@@ -188,6 +283,12 @@ public final class Page {
     }
 
     func load(_ doc: html.Document) {
+        frames = [:]
+        pressedFrame = nil
+        hoveredFrame = nil
+        focusedFrame = nil
+        animator.elements = [:]
+        animator.events = []
         Document = dom.Document(doc)
         resolver.Author = cascade.RuleSet()
         fontFaces = []
@@ -211,6 +312,17 @@ public final class Page {
         var wanted: [string] = []
         for img in doc.ElementsByTagName("img") {
             if let src = img.GetAttribute("src") { wanted.append(src) }
+        }
+        // A video's poster, and what an <object> or <embed> points at,
+        // where it may be an image.
+        for v in doc.ElementsByTagName("video") {
+            if let poster = v.GetAttribute("poster") { wanted.append(poster) }
+        }
+        for o in doc.ElementsByTagName("object") where !layout.EmbedsDocument(o) {
+            if let data = o.GetAttribute("data") { wanted.append(data) }
+        }
+        for e in doc.ElementsByTagName("embed") where !layout.EmbedsDocument(e) {
+            if let src = e.GetAttribute("src") { wanted.append(src) }
         }
         for url in resolver.Author.ImageURLs { wanted.append(url) }
         pendingImages = []
@@ -385,6 +497,15 @@ public final class Page {
         needsRepaint = true
     }
 
+    /// Whether the user asked for less motion, as the system says:
+    /// what `@media (prefers-reduced-motion)` asks.
+    public func SetReducedMotion(_ reduce: bool) {
+        if cascade.PrefersReducedMotion == reduce { return }
+        cascade.PrefersReducedMotion = reduce
+        needsStyle = true
+        needsRepaint = true
+    }
+
     /// Whether the page is shown in a dark color scheme.
     public var IsDark: bool { return resolver.Dark }
 
@@ -408,9 +529,11 @@ public final class Page {
     public func ScrollOffset() -> draw.Point { return scroll }
 
     public func SetScrollOffset(_ offset: draw.Point) {
+        let before = scroll
         scroll = offset
         clampScroll()
         needsRepaint = true
+        if scroll.X != before.X || scroll.Y != before.Y { pageScrolled() }
     }
 
     /// The size of the whole page.
@@ -421,6 +544,7 @@ public final class Page {
 
     public func NeedsRepaint() -> bool {
         takeJournal()
+        if !frames.isEmpty && framesNeedPaint { needsPaint = true }
         return needsRepaint || needsStyle || needsLayout || needsPaint
     }
 
@@ -457,14 +581,33 @@ public final class Page {
     /// caret -- and wants frames while it does. A host that gets true
     /// calls `Advance` with each frame's time and keeps requesting frames.
     public func NeedsAnimation() -> bool {
+        if animator.Active || !animator.events.isEmpty { return true }
+        for (_, f) in frames where f.page.NeedsAnimation() { return true }
         if let f = focused { return dom.IsTextControl(f) }
         return false
     }
 
-    /// Moves the page's own animation to a time in seconds: the caret
-    /// blinks at a second per cycle. Answers whether a repaint is needed.
+    /// Moves the page's own animation to a time in seconds: CSS
+    /// transitions and animations, and the caret, which blinks at a
+    /// second per cycle. Answers whether a repaint is needed.
     public func Advance(time: float64) -> bool {
-        guard NeedsAnimation() else { return false }
+        var repaint = false
+        let running = animator.Active
+        _ = animator.advance(time)
+        if running {
+            // Each frame of a transition or animation is a restyle.
+            needsStyle = true
+            needsRepaint = true
+            repaint = true
+        }
+        dispatchAnimationEvents()
+        for (_, frame) in frames where frame.page.NeedsAnimation() {
+            if frame.page.Advance(time: time) {
+                needsPaint = true
+                repaint = true
+            }
+        }
+        guard let f = focused, dom.IsTextControl(f) else { return repaint }
         if caretPhase < 0 { caretPhase = time }
         let phase = time - caretPhase
         let cycles = phase - float64(int64(phase))
@@ -474,7 +617,15 @@ public final class Page {
             needsPaint = true
             return true
         }
-        return false
+        return repaint
+    }
+
+    /// Hands the transition and animation events of the last frames to
+    /// their elements.
+    func dispatchAnimationEvents() {
+        let events = animator.takeEvents()
+        guard let doc = Document else { return }
+        for e in events { _ = doc.Dispatch(e.event, to: e.node) }
     }
 
     /// The pointer shape for where the pointer is.
@@ -521,11 +672,14 @@ public final class Page {
             } else {
                 context.Visited = nil
             }
+            animator.beginPass()
+            resolver.BeginStylePass()
             if let doc = Document {
                 root = builder.Build(doc.Tree)
             } else {
                 root = nil
             }
+            animator.endPass()
             needsStyle = false
             needsLayout = true
         }
@@ -544,6 +698,17 @@ public final class Page {
             clampScroll()
             needsLayout = false
             needsPaint = true
+            // Container queries ask about sizes only layout knows: once
+            // laid out, measure the containers, and while that changes
+            // which rules hold, style and lay out again (a few times at
+            // most, so that a query that flips its own answer settles).
+            if resolver.UsesContainers && containerPasses < 3 && measureContainers() {
+                containerPasses += 1
+                needsStyle = true
+                update()
+                return
+            }
+            containerPasses = 0
         }
         if needsPaint {
             if let r = root {
@@ -551,11 +716,13 @@ public final class Page {
                 state.Focused = focused?.Id ?? 0
                 state.Caret = caret
                 state.CaretVisible = caretVisible
+                state.Composing = Composing
                 if let r = fieldRange() {
                     state.FieldSelectionStart = r.start
                     state.FieldSelectionEnd = r.end
                 }
                 state.Images = images
+                if !frames.isEmpty || builder.HasFrames { state.Subpages = syncFrames() }
                 if let range = selectionRange() {
                     state.SelectionStart = range.start
                     state.SelectionEnd = range.end
@@ -568,6 +735,19 @@ public final class Page {
             needsPaint = false
             needsRepaint = true
         }
+    }
+
+    /// Hands the size containers' content boxes to the cascade; answers
+    /// whether any changed.
+    func measureContainers() -> bool {
+        var sizes: [int64: cascade.ContainerSize] = [:]
+        for c in resolver.SizeContainers {
+            guard let box = builder.byNode[c.id] else { continue }
+            let w = box.Width - box.Border.Horizontal - box.Padding.Horizontal
+            let h = box.Height - box.Border.Vertical - box.Padding.Vertical
+            sizes[c.id] = cascade.ContainerSize(Width: w > 0 ? w : 0, Height: h > 0 ? h : 0, HasHeight: c.style.ContainerType == "size")
+        }
+        return resolver.SetContainerSizes(sizes)
     }
 
     func clampScroll() {
@@ -741,6 +921,11 @@ public final class Page {
                     }
                 }
                 if tookSomething { lineBroken = true }
+            }
+            // Boxes taken out of the lines -- absolutely positioned and
+            // fixed -- are children still, and have text of their own.
+            for child in box.Children where child.Style.Position == .absolute || child.Style.Position == .fixed {
+                collectSelectedText(child, range, &out, &lineBroken)
             }
             return
         }

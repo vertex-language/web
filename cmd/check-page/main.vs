@@ -6,6 +6,8 @@ import (
     "image/draw"
     "image/png"
     "web"
+    "web/dom"
+    "web/layout"
     "web/fetch"
 )
 
@@ -270,6 +272,416 @@ func testEvents() {
 }
 
 @MainActor
+func testEventModel() {
+    print("The DOM's event model: phases, keys, compatibility events, composition")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(300, 200))
+    view.LoadHTML("""
+    <body style="margin:0"><div id="outer" style="padding:20px"><button id="b" style="width:100px;height:40px">b</button></div>
+    <div id="far" style="height:60px"></div><input id="t" style="width:200px"></body>
+    """)
+    let doc = view.Document!
+    let outer = view.QuerySelector("#outer")!
+    let b = view.QuerySelector("#b")!
+    var seen: [string] = []
+
+    // Capturing listeners, outermost first; the target's; then bubbling.
+    _ = doc.AddEventListener(outer, "click", capture: true, { _ in seen.append("outer.capture") })
+    _ = doc.AddEventListener(outer, "click", { _ in seen.append("outer.bubble") })
+    _ = doc.AddEventListener(b, "click", { _ in seen.append("b") })
+    _ = doc.AddEventListener(b, "click", capture: true, { _ in seen.append("b.capture") })
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(40, 40))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(40, 40))))
+    check(seen == ["outer.capture", "b.capture", "b", "outer.bubble"],
+          "capture down to the target, the target's own, then bubbling (got \(seen))")
+
+    // A listener that stops the event immediately stops its element's others.
+    seen = []
+    let stopper = doc.AddEventListener(b, "click", capture: true, { e in
+        seen.append("stop")
+        e.StopImmediatePropagation()
+    })
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(40, 40))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(40, 40))))
+    check(seen == ["outer.capture", "b.capture", "stop"] || seen == ["outer.capture", "stop"],
+          "StopImmediatePropagation stops the element's other listeners too (got \(seen))")
+    doc.RemoveEventListener(b, stopper)
+
+    // The mouse events a pointer event is compatible with follow it.
+    seen = []
+    for type in ["pointerdown", "mousedown", "pointerup", "mouseup", "pointermove", "mousemove"] {
+        _ = doc.AddEventListener(b, type, { e in seen.append(e.Type) })
+    }
+    _ = view.Handle(.pointerMoved(draw.Point(41, 41)))
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(41, 41))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(41, 41))))
+    // (The click listeners above still log the click that follows.)
+    check(Array(seen.prefix(6)) == ["pointermove", "mousemove", "pointerdown", "mousedown", "pointerup", "mouseup"],
+          "mousemove, mousedown and mouseup follow their pointer events (got \(seen))")
+    // A pointerdown listener that takes the press keeps the mouse events back.
+    seen = []
+    let taker = doc.AddEventListener(b, "pointerdown", { e in e.PreventDefault() })
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(41, 41))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(41, 41))))
+    check(!seen.contains("mousedown") && !seen.contains("mouseup"), "and none follow a pointerdown a listener prevented (got \(seen))")
+    doc.RemoveEventListener(b, taker)
+
+    // Over and out bubble; enter and leave are each element's own.
+    seen = []
+    for type in ["pointerover", "pointerout", "pointerenter", "pointerleave", "mouseover", "mouseout"] {
+        _ = doc.AddEventListener(outer, type, { e in seen.append("outer." + e.Type) })
+        _ = doc.AddEventListener(b, type, { e in seen.append("b." + e.Type) })
+    }
+    _ = view.Handle(.pointerMoved(draw.Point(200, 100)))
+    seen = []
+    _ = view.Handle(.pointerMoved(draw.Point(40, 40)))
+    check(seen.contains("b.pointerover") && seen.contains("outer.pointerover") && seen.contains("b.mouseover"),
+          "pointerover and mouseover bubble from the element entered (got \(seen))")
+    check(seen.contains("b.pointerenter") && seen.contains("outer.pointerenter"), "pointerenter comes to each element entered (got \(seen))")
+    seen = []
+    _ = view.Handle(.pointerMoved(draw.Point(200, 100)))
+    check(seen.contains("b.pointerout") && seen.contains("b.pointerleave") && seen.contains("outer.pointerleave") && seen.contains("b.mouseout"),
+          "and out and leave as it goes (got \(seen))")
+
+    // A press the pointer leaves the window in the middle of is cancelled.
+    seen = []
+    _ = doc.AddEventListener(b, "pointercancel", { e in seen.append(e.Type) })
+    _ = view.Handle(.pointerMoved(draw.Point(40, 40)))
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(40, 40))))
+    _ = view.Handle(.pointerLeft)
+    check(seen.contains("pointercancel"), "a press the pointer leaves the page during is cancelled (got \(seen))")
+
+    // keyup, after keydown.
+    let t = view.QuerySelector("#t")!
+    view.Focus(t)
+    var keys: [string] = []
+    _ = doc.AddEventListener(t, "keydown", { e in keys.append("down") })
+    _ = doc.AddEventListener(t, "keyup", { e in
+        if let k = e as? dom.KeyboardEvent { keys.append("up " + k.Key) }
+    })
+    _ = view.Handle(.keyDown(web.Key(Key: "a", Code: "KeyA")))
+    _ = view.Handle(.keyUp(web.Key(Key: "a", Code: "KeyA")))
+    check(keys == ["down", "up a"], "a key's release fires keyup (got \(keys))")
+
+    // An input method: start, updates, the composed text shown at the
+    // caret, then end with what it committed.
+    var comp: [string] = []
+    for type in ["compositionstart", "compositionupdate", "compositionend"] {
+        _ = doc.AddEventListener(t, type, { e in
+            if let c = e as? dom.CompositionEvent { comp.append(c.Type + ":" + c.Data) }
+        })
+    }
+    _ = view.Handle(.composition("ni"))
+    _ = view.Handle(.composition("nih"))
+    check(view.Composing == "nih", "what an input method composes is held while it does (\(view.Composing))")
+    _ = view.Handle(.text("你好"))
+    check(comp == ["compositionstart:", "compositionupdate:ni", "compositionupdate:nih", "compositionend:你好"],
+          "compositionstart, an update each change, and compositionend with what was committed (got \(comp))")
+    check(view.Composing.isEmpty && view.ValueOf(t) == "你好", "the committed text is the field's (\(view.ValueOf(t)))")
+
+    // scroll, toggle and reset.
+    let page2 = web.Page()
+    page2.SetViewportSize(draw.Size(300, 200))
+    page2.LoadHTML("""
+    <body style="margin:0">
+    <div id="box" style="height:80px;overflow:auto"><div style="height:400px">tall</div></div>
+    <details id="d"><summary id="s" style="display:block;height:20px">more</summary>inside</details>
+    <form id="f"><input id="name" value="a"><button id="r" type="reset" style="width:60px;height:20px">reset</button></form>
+    <div style="height:1000px"></div>
+    </body>
+    """)
+    let doc2 = page2.Document!
+    var events: [string] = []
+    _ = doc2.AddEventListener(page2.QuerySelector("html")!, "scroll", { _ in events.append("page") })
+    _ = doc2.AddEventListener(page2.QuerySelector("#box")!, "scroll", { _ in events.append("box") })
+    _ = doc2.AddEventListener(page2.QuerySelector("#d")!, "toggle", { _ in events.append("toggle") })
+    _ = doc2.AddEventListener(page2.QuerySelector("#f")!, "reset", { _ in events.append("reset") })
+    _ = page2.Handle(.pointerMoved(draw.Point(20, 20)))
+    _ = page2.Handle(.wheel(web.Wheel(draw.Point(0, -1))))
+    check(events == ["box"], "the wheel over a scroll container scrolls it: scroll at it (got \(events))")
+    events = []
+    page2.SetScrollOffset(draw.Point(0, 50))
+    check(events == ["page"], "the page scrolling is scroll at its root (got \(events))")
+    page2.SetScrollOffset(draw.Point(0, 0))
+    events = []
+    let sb = page2.BoundsOf(page2.QuerySelector("#s")!)!
+    _ = page2.Handle(.pointerDown(web.Pointer(draw.Point(sb.X + 5, sb.Y + 5))))
+    _ = page2.Handle(.pointerUp(web.Pointer(draw.Point(sb.X + 5, sb.Y + 5))))
+    check(events == ["toggle"] && page2.QuerySelector("#d")!.HasAttribute("open"), "a summary's click opens its details: toggle (got \(events))")
+    events = []
+    let name = page2.QuerySelector("#name")!
+    page2.Focus(name)
+    _ = page2.Handle(.text("bc"))
+    let rb = page2.BoundsOf(page2.QuerySelector("#r")!)!
+    _ = page2.Handle(.pointerDown(web.Pointer(draw.Point(rb.X + 5, rb.Y + 5))))
+    _ = page2.Handle(.pointerUp(web.Pointer(draw.Point(rb.X + 5, rb.Y + 5))))
+    check(events == ["reset"] && page2.ValueOf(name) == "a", "a reset button: reset, and the fields their defaults (got \(events), '\(page2.ValueOf(name))')")
+    let keep = doc2.AddEventListener(page2.QuerySelector("#f")!, "reset", { e in e.PreventDefault() })
+    page2.Focus(name)
+    _ = page2.Handle(.text("z"))
+    _ = page2.Handle(.pointerDown(web.Pointer(draw.Point(rb.X + 5, rb.Y + 5))))
+    _ = page2.Handle(.pointerUp(web.Pointer(draw.Point(rb.X + 5, rb.Y + 5))))
+    check(page2.ValueOf(name) != "a", "a reset a listener prevented keeps the values ('\(page2.ValueOf(name))')")
+    doc2.RemoveEventListener(page2.QuerySelector("#f")!, keep)
+}
+
+@MainActor
+func testCursors() {
+    print("Cursors: CSS's keywords")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(400, 100))
+    view.LoadHTML("""
+    <body style="margin:0;display:flex">
+    <div id="a" style="width:50px;height:50px;cursor:grab"></div>
+    <div id="b" style="width:50px;height:50px;cursor:nwse-resize"></div>
+    <div id="c" style="width:50px;height:50px;cursor:not-allowed"></div>
+    <div id="d" style="width:50px;height:50px;cursor:url(hand.png) 4 4, zoom-in"></div>
+    <div id="e" style="width:50px;height:50px;cursor:wait"></div>
+    <div id="f" style="width:50px;height:50px">text</div>
+    </body>
+    """)
+    var got: [string] = []
+    for x in [25, 75, 125, 175, 225, 260] {
+        _ = view.Handle(.pointerMoved(draw.Point(float32(x), 10)))
+        got.append(view.DesiredCursor().CSSName)
+    }
+    check(got == ["grab", "nwse-resize", "not-allowed", "zoom-in", "wait", "text"],
+          "each keyword is its own cursor, a url() list its fallback, auto over text an I-beam (got \(got))")
+}
+
+
+@MainActor
+func testTransforms() {
+    print("Transforms")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(300, 200))
+    view.LoadHTML("""
+    <body style="margin:0;background:white">
+    <div id="t" style="position:absolute;left:0;top:0;width:20px;height:20px;background:rgb(255,0,0);transform:translate(100px, 50%)"></div>
+    <div id="r" style="position:absolute;left:0;top:100px;width:40px;height:10px;background:rgb(0,0,255);transform:rotate(90deg)"></div>
+    <div id="s" style="position:absolute;left:200px;top:0;width:20px;height:20px;background:rgb(0,128,0);scale:2;transform-origin:top left"></div>
+    <div id="p" style="width:20px;height:20px;margin-top:170px;background:rgb(0,0,0);translate:calc(10px + 50%) 0">x</div>
+    </body>
+    """)
+    var px = [uint8](repeating: 0, count: 300 * 200 * 4)
+    view.Draw(into: &px, width: 300, height: 200, scale: 1)
+    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 300, x, y) }
+    check(at(110, 15) == draw.Color(255, 0, 0) && at(5, 5) == draw.Color(255, 255, 255),
+          "translate() moves a box, by lengths and percentages of itself (got \(at(110, 15)))")
+    check(at(20, 88) == draw.Color(0, 0, 255) && at(20, 112) == draw.Color(0, 0, 255) && at(2, 105) == draw.Color(255, 255, 255),
+          "rotate() turns it about its center (got \(at(20, 88)) \(at(2, 105)))")
+    check(at(235, 35) == draw.Color(0, 128, 0) && at(242, 42) == draw.Color(255, 255, 255),
+          "the scale property grows it from transform-origin (got \(at(235, 35)))")
+    check(at(35, 180) == draw.Color(0, 0, 0) && at(5, 180) == draw.Color(255, 255, 255),
+          "the translate property moves an in-flow box, calc() and all (got \(at(35, 180)))")
+    func idAt(_ x: float32, _ y: float32) -> string { return view.ElementAt(draw.Point(x, y))?.GetAttribute("id") ?? "" }
+    check(idAt(110, 15) == "t" && idAt(5, 5) != "t", "a click lands on a translated box where it is drawn")
+    check(idAt(20, 90) == "r" && idAt(35, 105) != "r", "and on a rotated one")
+    check(idAt(235, 35) == "s", "and on a scaled one")
+}
+
+@MainActor
+func testAnimations() {
+    print("Transitions and animations")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(300, 200))
+    view.LoadHTML("""
+    <style>
+    #a { width: 10px; height: 10px; opacity: 1; transition: opacity 1s linear, width 2s linear 1s }
+    #a.on { opacity: 0; width: 110px }
+    @keyframes grow { from { width: 0px } 50% { width: 100px; background-color: rgb(0, 0, 255) } to { width: 40px } }
+    #b { height: 10px; width: 40px; background-color: rgb(255, 0, 0); animation: grow 2s linear 2 alternate forwards }
+    @keyframes fade { to { opacity: 0 } }
+    #c { animation: fade 1s steps(2) paused }
+    #d { color: rgb(0, 0, 0); transition: color 1s linear } #d.on { color: rgb(200, 100, 0) }
+    </style>
+    <div id=a></div><div id=b></div><div id=c>c</div><div id=d><span id=e>e</span></div>
+    """)
+    let doc = view.Document!
+    let a = view.QuerySelector("#a")!
+    let b = view.QuerySelector("#b")!
+    let c = view.QuerySelector("#c")!
+    var events: [string] = []
+    _ = doc.AddEventListener(a, "transitionend", { e in events.append("end") })
+    _ = doc.AddEventListener(b, "animationend", { e in events.append("animationend") })
+    _ = doc.AddEventListener(b, "animationiteration", { e in events.append("iteration") })
+    func width(_ n: html.Node) -> float32 { return view.BoxFor(n)!.Width }
+    func opacity(_ n: html.Node) -> float32 { return view.BoxFor(n)!.Style.Opacity }
+
+    _ = view.Advance(time: 0)
+    check(opacity(a) == 1 && width(a) == 10, "nothing moves before a change")
+    check(width(b) == 0, "an animation shows its 0% at once (got \(width(b)))")
+    doc.ElementFor(a).ClassList.Add("on")
+    doc.ElementFor(view.QuerySelector("#d")!).ClassList.Add("on")
+    check(opacity(a) == 1 && view.NeedsAnimation(), "a change starts a transition from the old value")
+    _ = view.Advance(time: 0)
+    _ = view.Advance(time: 0.5)
+    check(abs(opacity(a) - 0.5) < 0.01, "halfway through, the value is halfway (got \(opacity(a)))")
+    check(width(a) == 10, "a delayed transition waits")
+    check(abs(width(b) - 50) < 0.5, "keyframes interpolate between their offsets (got \(width(b)))")
+    let bg = view.BoxFor(b)!.Style.BackgroundColor
+    check(abs(int(bg.R) - 128) <= 1 && abs(int(bg.B) - 128) <= 1, "and a keyframe that names a property late starts from the element's own value (got \(bg.R) \(bg.B))")
+    let span = view.BoxFor(view.QuerySelector("#e")!)!.Style.Color
+    check(abs(int(span.R) - 100) <= 1 && abs(int(span.G) - 50) <= 1, "a transitioning inherited property reaches the children (got \(span.R) \(span.G))")
+    _ = view.Advance(time: 1.5)
+    check(opacity(a) == 0, "a finished transition leaves the new value")
+    check(abs(width(a) - 35) < 0.5, "a delayed one runs after its delay (got \(width(a)))")
+    check(abs(width(b) - 70) < 0.5, "past 50% toward 100% (got \(width(b)))")
+    _ = view.Advance(time: 2.5)
+    check(abs(width(b) - 70) < 0.5, "alternate runs the second iteration backwards (got \(width(b)))")
+    check(abs(width(a) - 85) < 0.5, "the delayed transition keeps going (got \(width(a)))")
+    _ = view.Advance(time: 4.5)
+    check(width(b) == 0, "fill forwards keeps where the last iteration ended (got \(width(b)))")
+    check(width(a) == 110, "and the transition is done")
+    _ = view.Advance(time: 4.6)
+    check(events.filter { $0 == "end" }.count == 2, "transitionend fires for each property (got \(events))")
+    check(events.contains("iteration") && events.contains("animationend"), "animationiteration and animationend fire")
+    check(opacity(c) == 1, "a paused animation holds its start")
+    doc.ElementFor(c).SetAttribute("style", "animation-play-state: running")
+    check(opacity(c) == 1, "resumed, it goes on from there")
+    _ = view.Advance(time: 5.2)
+    check(abs(opacity(c) - 0.5) < 0.01, "steps() moves in steps (got \(opacity(c)))")
+    _ = view.Advance(time: 6)
+    check(opacity(c) == 1 && !view.NeedsAnimation(), "without a fill an ended animation lets go, and the page asks for no more frames")
+}
+
+@MainActor
+func testContainerQueries() {
+    print("Container queries and new units")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(800, 600))
+    view.LoadHTML("""
+    <style>
+    body { margin: 0 }
+    .card { container: card / inline-size }
+    .wide { width: 500px } .narrow { width: 200px }
+    .t { width: 10px; height: 10px }
+    @container card (width > 400px) { .t { width: 30px } }
+    @container (min-width: 100px) and (max-width: 300px) { .t { height: 20px } }
+    @container style(--theme: dark) { .t { margin-left: 5px } }
+    @container other (width > 1px) { .t { width: 99px } }
+    .u { width: 50cqw; height: 10px }
+    .sz { container-type: size; width: 100px; height: 60px }
+    @container (orientation: landscape) and (not (height < 10px)) { .v { width: 7px } }
+    @container (height > 10px) { .w { width: 9px } }
+    .l { font-size: 10px; line-height: 2; height: 1lh; width: 2dvw }
+    </style>
+    <div class="card wide"><div class=t id=t1></div><div class=u id=u1></div></div>
+    <div class="card narrow" style="--theme: dark"><div class=t id=t2></div><div class=w id=w></div></div>
+    <div class=sz><div class=v id=v></div></div>
+    <div class=l id=l></div>
+    """)
+    func box(_ id: string) -> layout.Box { return view.BoxFor(view.QuerySelector("#" + id)!)! }
+    check(box("t1").Width == 30 && box("t1").Height == 10, "a named query holds in a wide container (got \(box("t1").Width) \(box("t1").Height))")
+    check(box("t2").Width == 10 && box("t2").Height == 20, "and an unnamed range query in a narrow one (got \(box("t2").Width) \(box("t2").Height))")
+    check(box("t2").Style.MarginLeft == .px(5) && box("t1").Style.MarginLeft == .px(0), "style() asks the container's custom properties")
+    check(box("u1").Width == 250, "cqw is of the container's width (got \(box("u1").Width))")
+    check(box("v").Width == 7, "a size container answers orientation, not and nesting (got \(box("v").Width))")
+    check(box("w").Width != 9, "an inline-size container has no height to ask about")
+    check(box("l").Height == 20 && box("l").Width == 16, "lh is the line height, dvw the viewport's (got \(box("l").Height) \(box("l").Width))")
+    view.SetViewportSize(draw.Size(300, 600))
+    check(box("t1").Width == 30, "a container's own width is what counts, not the viewport's")
+}
+
+@MainActor
+func testFrames() {
+    print("Frames, media and object-fit")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(400, 500))
+    view.Configuration.Fetcher = fetch.Fetcher({ url in
+        if url.hasSuffix("inner.html") {
+            return [uint8]("<body style='margin:0;background:rgb(0,0,255)'><a id=l href='next.html' style='display:block;width:50px;height:20px'>x</a></body>".utf8)
+        }
+        if url.hasSuffix("next.html") { return [uint8]("<body style='margin:0;background:rgb(0,255,0)'></body>".utf8) }
+        return nil
+    })
+    view.LoadHTML("""
+    <body style="margin:0;background:white">
+    <iframe id=f src="inner.html" style="border:0;width:100px;height:50px;display:block"></iframe>
+    <iframe id=s srcdoc="<body style='margin:0;background:rgb(255,0,0)'>" style="border:0;width:60px;height:30px;display:block"></iframe>
+    <canvas id=c><p id=fb>fallback</p></canvas>
+    <audio id=a></audio><audio id=ac controls></audio>
+    <img id=i src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4z/AfiAAN+QP9Wkb9ewAAAABJRU5ErkJggg==" style="display:block;width:100px;height:100px;object-fit:contain">
+    <video id=v poster="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4z/AfiAAN+QP9Wkb9ewAAAABJRU5ErkJggg==" style="display:block;width:100px;height:100px"></video>
+    <object id=o data="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAADUlEQVR4nGP4z/AfiAAN+QP9Wkb9ewAAAABJRU5ErkJggg==" style="display:block"></object>
+    <object id=u data="thing.bin" type="application/x-thing"><span id=ufb>no plugin</span></object>
+    </body>
+    """, baseURL: "/site/")
+    var px = [uint8](repeating: 0, count: 400 * 500 * 4)
+    func draw() { view.Draw(into: &px, width: 400, height: 500, scale: 1) }
+    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 400, x, y) }
+    func box(_ id: string) -> layout.Box? { return view.BoxFor(view.QuerySelector("#" + id)!) }
+    draw()
+    check(at(70, 40) == draw.Color(0, 0, 255), "an iframe shows its document (got \(at(70, 40)))")
+    check(at(30, 65) == draw.Color(255, 0, 0), "and srcdoc (got \(at(30, 65)))")
+    check(box("fb") != nil && box("c")!.Replaced == .none, "a canvas shows its fallback, as without scripting")
+    check(box("a") == nil, "an audio without controls shows nothing")
+    check(box("ac")!.Width == 300 && box("ac")!.Height == 54, "with them, a bar of controls")
+    let img = box("i")!
+    let iy = int32(layout.PagePosition(img).y)
+    check(at(50, iy + 5) == draw.Color(255, 255, 255) && at(50, iy + 50) == draw.Color(255, 0, 255),
+          "object-fit: contain letterboxes an image (got \(at(50, iy + 5)) \(at(50, iy + 50)))")
+    let vb = box("v")!
+    let vy = int32(layout.PagePosition(vb).y)
+    check(vb.Replaced == .image && at(50, vy + 5) == draw.Color(255, 255, 255) && at(50, vy + 50) == draw.Color(255, 0, 255),
+          "a video shows its poster, contained (got \(at(50, vy + 5)) \(at(50, vy + 50)))")
+    check(box("o")!.Replaced == .image && box("o")!.Width == 2, "an object of an image is that image")
+    check(box("ufb") != nil, "an object of something unknown shows its fallback")
+    _ = view.Handle(.pointerMoved(draw.Point(10, 10)))
+    check(view.DesiredCursor() == web.Cursor.pointer, "the pointer over a link in a frame is a hand")
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(10, 10))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(10, 10))))
+    check(view.NeedsRepaint(), "a click in a frame asks for a frame")
+    draw()
+    check(at(70, 40) == draw.Color(0, 255, 0), "and a link in it navigates the frame (got \(at(70, 40)))")
+}
+
+@MainActor
+func testPointerEventsAndUserSelect() {
+    print("pointer-events and user-select")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(400, 200))
+    view.LoadHTML("""
+    <body style="margin:0">
+    <div id="under" style="position:absolute;left:0;top:0;width:200px;height:100px"></div>
+    <div id="over" style="position:absolute;left:0;top:0;width:200px;height:100px;pointer-events:none">
+      <button id="live" style="pointer-events:auto;width:50px;height:20px">x</button>
+    </div>
+    <p id="plain" style="position:absolute;top:120px;margin:0">select me</p>
+    <p id="chrome" style="position:absolute;top:150px;margin:0;user-select:none">not me</p>
+    <p id="whole" style="position:absolute;top:175px;margin:0;user-select:all">all of it</p>
+    </body>
+    """)
+    let doc = view.Document!
+    var clicked: [string] = []
+    for id in ["under", "over", "live"] {
+        _ = doc.AddEventListener(view.QuerySelector("#" + id)!, "click", { e in
+            if let t = e.CurrentTarget?.GetAttribute("id"), t == id { clicked.append(id) }
+        })
+    }
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(150, 60))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(150, 60))))
+    check(clicked == ["under"], "a click passes through pointer-events: none to what is under it (got \(clicked))")
+    clicked = []
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(10, 5))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(10, 5))))
+    check(clicked.first == "live", "and reaches what inside it sets auto again (got \(clicked))")
+
+    // A drag over text selects it; not where user-select is none.
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(2, 128))))
+    _ = view.Handle(.pointerMoved(draw.Point(40, 128)))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(40, 128))))
+    check(view.HasSelection, "a drag over text selects it (\(view.SelectedText()))")
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(2, 158))))
+    _ = view.Handle(.pointerMoved(draw.Point(40, 158)))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(40, 158))))
+    check(!view.HasSelection, "but not text where user-select is none ('\(view.SelectedText())')")
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(20, 182))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(20, 182))))
+    check(view.SelectedText() == "all of it", "and a press in user-select: all selects the whole element ('\(view.SelectedText())')")
+}
+
+@MainActor
 func testJournal() {
     print("The journal drives restyle")
     let view = web.Page()
@@ -451,6 +863,13 @@ func main() async -> int32 {
     testPageInput()
     testJournal()
     testEvents()
+    testEventModel()
+    testCursors()
+    testTransforms()
+    testAnimations()
+    testContainerQueries()
+    testFrames()
+    testPointerEventsAndUserSelect()
     testRange()
     await testDeferredImages()
     await testSVGImages()

@@ -1,6 +1,9 @@
 package layout
 
-import "web/html"
+import (
+    "image/draw"
+    "web/html"
+)
 
 /// What lies under a point: the deepest box, the element it belongs
 /// to, and for text, where in the text.
@@ -16,8 +19,21 @@ public struct Hit {
     public var PageY: float32
 }
 
-/// The innermost box under a page point.
+/// The innermost box under a page point. A transformed box is tested
+/// where it paints: the point is taken back through its transform.
 public func HitTest(_ box: Box, _ px: float32, _ py: float32, originX: float32, originY: float32) -> Hit? {
+    if box.Style.HasTransform {
+        let x = originX + box.X + box.OffsetX
+        let y = originY + box.Y + box.OffsetY
+        let t = draw.Affine.translate(x, y).Concat(box.Style.TransformMatrix(width: box.Width, height: box.Height)).Concat(draw.Affine.translate(-x, -y))
+        guard let inv = t.Inverted() else { return nil }
+        let p = inv.Apply(px, py)
+        return hitTestBox(box, p.x, p.y, originX: originX, originY: originY)
+    }
+    return hitTestBox(box, px, py, originX: originX, originY: originY)
+}
+
+func hitTestBox(_ box: Box, _ px: float32, _ py: float32, originX: float32, originY: float32) -> Hit? {
     let x = originX + box.X + box.OffsetX
     let y = originY + box.Y + box.OffsetY
     let inside = px >= x && py >= y && px < x + box.Width && py < y + box.Height
@@ -45,8 +61,10 @@ public func HitTest(_ box: Box, _ px: float32, _ py: float32, originX: float32, 
     }
     if box.Style.ClipsOverflow && !inside { return nil }
 
+    // pointer-events: none -- the box isn't a target; what is in it may be.
+    let takes = box.Style.PointerEvents != .none
     if box.Kind == .replaced {
-        return inside ? Hit(Box: box, Node: box.Element, TextBox: nil, TextOffset: 0, PageX: x, PageY: y) : nil
+        return inside && takes ? Hit(Box: box, Node: box.Element, TextBox: nil, TextOffset: 0, PageX: x, PageY: y) : nil
     }
     if !box.Lines.isEmpty {
         var li = box.Lines.count - 1
@@ -62,7 +80,7 @@ public func HitTest(_ box: Box, _ px: float32, _ py: float32, originX: float32, 
                     if px >= fx && px < fx + f.Width {
                         if f.Kind == .atomic {
                             if let h = HitTest(f.Box, px, py, originX: sx, originY: sy) { return h }
-                        } else if f.Kind == .text && py >= fy - 2 && py < fy + f.Height + 2 {
+                        } else if f.Kind == .text && py >= fy - 2 && py < fy + f.Height + 2 && f.Owner.Style.PointerEvents != .none {
                             let offset = f.Offset + offsetInRun(f, at: px - fx, letterSpacing: f.Owner.Style.LetterSpacing)
                             return Hit(Box: f.Owner, Node: f.Owner.Element, TextBox: f.Box, TextOffset: offset, PageX: fx, PageY: fy)
                         }
@@ -74,12 +92,12 @@ public func HitTest(_ box: Box, _ px: float32, _ py: float32, originX: float32, 
                 var si = line.Spans.count - 1
                 while si >= 0 {
                     let sp = line.Spans[si]
-                    if px >= sx + sp.X && px < sx + sp.X + sp.Width {
+                    if px >= sx + sp.X && px < sx + sp.X + sp.Width && sp.Box.Style.PointerEvents != .none {
                         return Hit(Box: sp.Box, Node: sp.Box.Element, TextBox: nil, TextOffset: 0, PageX: sx + sp.X, PageY: sy + sp.Y)
                     }
                     si -= 1
                 }
-                if inside {
+                if inside && takes {
                     return Hit(Box: box, Node: box.Element, TextBox: nil, TextOffset: 0, PageX: x, PageY: y)
                 }
             }
@@ -95,7 +113,7 @@ public func HitTest(_ box: Box, _ px: float32, _ py: float32, originX: float32, 
             if let h = HitTest(c, px, py, originX: sx, originY: sy) { return h }
         }
     }
-    if inside {
+    if inside && takes {
         return Hit(Box: box, Node: box.Element, TextBox: nil, TextOffset: 0, PageX: x, PageY: y)
     }
     return nil
