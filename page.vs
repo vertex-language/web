@@ -577,9 +577,14 @@ public final class Page {
     public func ScrollOffset() -> draw.Point { return scroll }
 
     public func SetScrollOffset(_ offset: draw.Point) {
+        // Laid out first: before the first layout the page has no height,
+        // and the offset would be clamped to nothing.
+        update()
         let before = scroll
         scroll = offset
         clampScroll()
+        root?.ViewportScrollX = scroll.X
+        root?.ViewportScrollY = scroll.Y
         needsRepaint = true
         if scroll.X != before.X || scroll.Y != before.Y { pageScrolled() }
     }
@@ -706,6 +711,8 @@ public final class Page {
     /// whichever are stale.
     func update() {
         takeJournal()
+        root?.ViewportScrollX = scroll.X
+        root?.ViewportScrollY = scroll.Y
         if needsStyle {
             builder.Images = images
             builder.Vectors = vectors
@@ -739,6 +746,8 @@ public final class Page {
             if let r = root {
                 let run = layout.Layout(viewportWidth: size.Width, viewportHeight: size.Height)
                 run.Run(r)
+                r.ViewportScrollX = scroll.X
+                r.ViewportScrollY = scroll.Y
                 laidOut = run
                 restoreElementScrolls()
                 contentHeight = r.Y + r.Height + r.Margin.Bottom

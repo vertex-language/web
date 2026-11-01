@@ -18,7 +18,6 @@ extension Layout {
     /// wrapped, grown and shrunk into the space, aligned. Answers the
     /// content height.
     func layoutFlex(_ box: Box, contentWidth: float32, flow: Flow) -> float32 {
-        let positionedAncestor = flow.positioned
         let s = box.Style
         let isRow = s.FlexDirection.IsRow
         let reverse = s.FlexDirection.IsReverse
@@ -35,7 +34,7 @@ extension Layout {
             if child.Style.Position == .absolute || child.Style.Position == .fixed {
                 child.X = box.ContentX
                 child.Y = box.ContentY
-                positionedAncestor.Positioned.append(child)
+                attachPositioned(child, flow)
                 continue
             }
             resolveEdges(child, cbWidth: contentWidth)

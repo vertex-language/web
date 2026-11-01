@@ -290,6 +290,11 @@ func testTables() {
     guard let w = layoutOf("<body style='margin:0'><table id=t style='width:400px;border-spacing:0'><tr><td id=a style='padding:0'>x</td><td id=b style='padding:0'>y</td></tr></table></body>") else { check(false, "layout"); return }
     check(w.rect("t")!.Width == 400 && near(w.rect("a")!.Width + w.rect("b")!.Width, 400), "a given width is shared by the columns (got \(w.rect("a")!.Width) + \(w.rect("b")!.Width))")
 
+    guard let fx = layoutOf("<body style='margin:0'><table style='width:400px;border-spacing:0'><tr><td id=a style='width:100px;padding:0'>a</td><td id=b style='padding:0'>b</td></tr></table></body>") else { check(false, "layout"); return }
+    check(near(fx.rect("a")!.Width, 100) && near(fx.rect("b")!.Width, 300), "room to spare goes to the column with no width (got \(fx.rect("a")!.Width) \(fx.rect("b")!.Width))")
+    guard let fa = layoutOf("<body style='margin:0'><table style='width:400px;border-spacing:0'><tr><td id=a style='width:100px;padding:0'>a</td><td id=b style='width:100px;padding:0'>b</td></tr></table></body>") else { check(false, "layout"); return }
+    check(near(fa.rect("a")!.Width, 200) && near(fa.rect("b")!.Width, 200), "and to every column where all have one (got \(fa.rect("a")!.Width) \(fa.rect("b")!.Width))")
+
     guard let sp = layoutOf("<body style='margin:0'><table id=t style='border-spacing:4px'><tr><td id=a style='padding:0;width:50px;height:10px'></td><td id=b style='padding:0;width:50px'></td></tr></table></body>") else { check(false, "layout"); return }
     check(sp.rect("a")!.X == 4 && sp.rect("b")!.X == 58 && sp.rect("t")!.Width == 112, "border-spacing goes between and around cells (got \(sp.rect("a")!.X) \(sp.rect("b")!.X) \(sp.rect("t")!.Width))")
 
@@ -539,6 +544,20 @@ func lineTexts(_ b: layout.Box, _ line: int) -> [string] {
     return out
 }
 
+func testContainment() {
+    print("Containment")
+    guard let l = layoutOf("""
+    <body style='margin:0'>
+    <div id=size style='container-type:size;width:100px'><div style='height:50px'></div></div>
+    <div id=inl style='container-type:inline-size;float:left'><div style='width:80px;height:30px'></div></div>
+    <div id=plain style='float:left'><div style='width:80px;height:30px'></div></div>
+    </body>
+    """) else { check(false, "layout"); return }
+    check(l.rect("size")!.Height == 0, "container-type: size doesn't take its content's height (got \(l.rect("size")!.Height))")
+    check(l.rect("inl")!.Width == 0 && l.rect("inl")!.Height == 30, "inline-size takes no width from its content, but its height (got \(l.rect("inl")!))")
+    check(l.rect("plain")!.Width == 80, "without containment a float fits its content")
+}
+
 func testRightToLeft() {
     print("Right to left")
     guard let l = layoutOf("""
@@ -574,7 +593,7 @@ func testRightToLeft() {
     let marker = item.Lines[0].Fragments.first { $0.Kind == .marker }
     check(marker != nil && marker!.X >= item.InnerWidth, "and its marker is past the line's right end (got \(marker?.X ?? -1))")
     check(l.rect("f1")!.X == 350 && l.rect("f2")!.X == 300, "flex items run from the right, margins kept on their sides (got \(l.rect("f1")!.X) \(l.rect("f2")!.X))")
-    check(near(l.rect("c1")!.X + l.rect("c1")!.Width, 400, 0.5) && near(l.rect("c2")!.X, 0, 0.5), "a table's first column is at the right (got \(l.rect("c1")!) \(l.rect("c2")!) cell \(l.box("c1")!.X) row \(l.box("c1")!.Parent!.X) \(l.box("c1")!.Parent!.Width) up \(l.box("c1")!.Parent!.Parent!.X))")
+    check(near(l.rect("c1")!.Width, 100, 0.5) && near(l.rect("c1")!.X, 300, 0.5) && near(l.rect("c2")!.X, 0, 0.5), "a table's first column is at the right (got \(l.rect("c1")!) \(l.rect("c2")!) cell \(l.box("c1")!.X) row \(l.box("c1")!.Parent!.X) \(l.box("c1")!.Parent!.Width) up \(l.box("c1")!.Parent!.Parent!.X))")
     let auto = l.box("auto")!
     check(auto.Style.Direction == .rtl && near(auto.Lines[0].Fragments[0].X + auto.Lines[0].Fragments[0].Width, 400, 1), "dir=auto takes Hebrew's direction (got \(auto.Style.Direction))")
 
@@ -612,6 +631,7 @@ func main() -> int32 {
     testPositioning()
     testColumns()
     testRightToLeft()
+    testContainment()
     if failures == 0 {
         print("ALL LAYOUT CHECKS PASSED")
         return 0

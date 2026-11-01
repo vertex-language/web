@@ -109,19 +109,22 @@ struct Flow {
     var floats: FloatContext
     var x: float32
     var y: float32
+    /// What fixed descendants are positioned against: an ancestor with a
+    /// transform, a filter or containment, or nil for the viewport.
+    var fixed: Box? = nil
 
     /// The flow for a child at a corner relative to this box.
     func at(_ dx: float32, _ dy: float32) -> Flow {
-        return Flow(positioned: positioned, floats: floats, x: x + dx, y: y + dy)
+        return Flow(positioned: positioned, floats: floats, x: x + dx, y: y + dy, fixed: fixed)
     }
 
     /// The flow inside a box that is a formatting root: floats of its
     /// own, coordinates from its corner.
     func root(_ box: Box) -> Flow {
-        return Flow(positioned: box.Style.IsPositioned ? box : positioned, floats: FloatContext(), x: 0, y: 0)
+        return Flow(positioned: box.Style.IsPositioned ? box : positioned, floats: FloatContext(), x: 0, y: 0, fixed: fixed)
     }
 
     func positionedBy(_ box: Box) -> Flow {
-        return Flow(positioned: box, floats: floats, x: x, y: y)
+        return Flow(positioned: box, floats: floats, x: x, y: y, fixed: fixed)
     }
 }

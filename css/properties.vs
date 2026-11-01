@@ -75,6 +75,8 @@ public enum Prop: int32 {
     case breakInside
     case direction
     case unicodeBidi
+    case backgroundAttachment
+    case textFillColor
     case outlineWidth
     case outlineColor
     case accentColor
@@ -321,6 +323,8 @@ let propNames: [string: Prop] = [
     "column-rule-style": .columnRuleStyle, "column-rule-color": .columnRuleColor, "column-fill": .columnFill,
     "column-span": .columnSpan, "break-inside": .breakInside, "page-break-inside": .breakInside,
     "direction": .direction, "unicode-bidi": .unicodeBidi,
+    "background-attachment": .backgroundAttachment,
+    "-webkit-text-fill-color": .textFillColor, "text-fill-color": .textFillColor,
     "transform": .transform, "-webkit-transform": .transform, "transform-origin": .transformOrigin,
     "-webkit-transform-origin": .transformOrigin, "translate": .translate, "rotate": .rotate, "scale": .scale,
     "transition-property": .transitionProperty, "transition-duration": .transitionDuration,
@@ -536,6 +540,7 @@ func longhands(_ d: Declaration) -> [Longhand] {
         var sawImage = false
         var sawRepeat = false
         var sawSize = false
+        var sawAttachment = false
         var positions: [Token] = []
         var afterSlash = false
         while i < tokens.count {
@@ -564,6 +569,9 @@ func longhands(_ d: Declaration) -> [Longhand] {
                 if kw == "no-repeat" || kw == "repeat" || kw == "repeat-x" || kw == "repeat-y" || kw == "space" || kw == "round" {
                     set(.backgroundRepeat, .keyword(kw))
                     sawRepeat = true
+                } else if kw == "fixed" || kw == "local" || kw == "scroll" {
+                    set(.backgroundAttachment, .keyword(kw))
+                    sawAttachment = true
                 } else if afterSlash && (kw == "cover" || kw == "contain" || kw == "auto") {
                     set(.backgroundSize, .keyword(kw))
                     sawSize = true
@@ -590,6 +598,7 @@ func longhands(_ d: Declaration) -> [Longhand] {
         if !sawImage { set(.backgroundImage, .none) }
         if !sawRepeat { set(.backgroundRepeat, .initial) }
         if !sawSize { set(.backgroundSize, .initial) }
+        if !sawAttachment { set(.backgroundAttachment, .initial) }
     case "overflow":
         guard let first = parseOverflow(tokens[0]) else { return [] }
         set(.overflowX, first)
@@ -708,7 +717,6 @@ func longhands(_ d: Declaration) -> [Longhand] {
         if let j = parseValue(.justifyItems, [tokens.count > 1 ? tokens[1] : tokens[0]]) { set(.justifyItems, j) }
     case "quotes", "perspective", "perspective-origin", "backface-visibility",
          "transform-style", "transform-box", "counter-reset", "counter-increment",
-         "background-attachment",
          "font-variant", "font-stretch", "font-feature-settings", "src", "unicode-range",
          "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
          "hyphens",
@@ -869,7 +877,7 @@ func longhandsOf(_ name: string) -> [Prop] {
     case "border-bottom": return [borderWidthProps[2], borderStyleProps[2], borderColorProps[2]]
     case "border-left": return [borderWidthProps[3], borderStyleProps[3], borderColorProps[3]]
     case "border-radius": return [.borderTopLeftRadius, .borderTopRightRadius, .borderBottomRightRadius, .borderBottomLeftRadius]
-    case "background": return [.backgroundColor, .backgroundImage, .backgroundRepeat, .backgroundSize, .backgroundPosition]
+    case "background": return [.backgroundColor, .backgroundImage, .backgroundRepeat, .backgroundSize, .backgroundPosition, .backgroundAttachment]
     case "overflow": return [.overflowX, .overflowY]
     case "outline": return [.outlineWidth, .outlineColor, .outlineStyle]
     case "container": return [.containerName, .containerType]
@@ -1659,6 +1667,11 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
         return parseLengthValue(t, allowAuto: true)
     case .direction:
         return kw == "ltr" || kw == "rtl" ? .keyword(kw) : nil
+    case .backgroundAttachment:
+        return kw == "scroll" || kw == "fixed" || kw == "local" ? .keyword(kw) : nil
+    case .textFillColor:
+        if kw == "currentcolor" { return .currentColor }
+        return parseColorAt(tokens, 0)?.0
     case .unicodeBidi:
         switch kw {
         case "normal", "embed", "isolate", "bidi-override", "isolate-override", "plaintext": return .keyword(kw)

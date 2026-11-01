@@ -25,6 +25,8 @@ public final class Layout {
     public var ViewportHeight: float32
     /// Boxes with position: sticky, whose offsets follow the scroll.
     public var Sticky: [Box] = []
+    /// The root being laid out: what fixed boxes are positioned against.
+    var rootBox: Box? = nil
 
     public init(viewportWidth: float32, viewportHeight: float32) {
         ViewportWidth = viewportWidth
@@ -35,6 +37,7 @@ public final class Layout {
     /// viewport's width; its height is its content's.
     public func Run(_ root: Box) {
         Sticky = []
+        rootBox = root
         let cb = ContainingBlock(width: ViewportWidth, height: ViewportHeight)
         root.X = 0
         root.Y = 0
@@ -184,7 +187,11 @@ public final class Layout {
         if let g = definite {
             box.DefiniteInnerHeight = clampHeight(box, g, cbHeight: cb.Height) - box.Padding.Vertical - box.Border.Vertical
         }
-        let contentHeight = layoutContent(box, flow: box.IsFormattingRoot ? flow.root(box) : (s.IsPositioned ? flow.positionedBy(box) : flow))
+        var inner = box.IsFormattingRoot ? flow.root(box) : (s.IsPositioned ? flow.positionedBy(box) : flow)
+        // A transform, a filter or containment makes the box what its
+        // fixed descendants are placed against, instead of the viewport.
+        if s.HasTransform || s.FilterBlur > 0 || s.ContainPaint || s.LayoutContained { inner.fixed = box }
+        let contentHeight = layoutContent(box, flow: inner)
 
         // Height: given, or the content's, or the ratio's where the
         // content fits in it.
@@ -197,8 +204,21 @@ public final class Layout {
         box.Height = clampHeight(box, h, cbHeight: cb.Height)
         box.ContentHeight = contentHeight
         applyRelativeOffsets(box, cbWidth: cb.Width, cbHeight: cb.Height)
-        if box.Style.IsPositioned {
+        if box.Style.IsPositioned || (!box.Positioned.isEmpty && box.Parent != nil) {
             layoutPositioned(box, cb: ContainingBlock(width: box.PaddingBoxWidth, height: box.PaddingBoxHeight))
+        }
+    }
+
+    /// Hands a box taken out of the flow to what it is positioned
+    /// against: its positioned ancestor, or for position: fixed the
+    /// viewport (the root) or the ancestor standing in for it.
+    func attachPositioned(_ child: Box, _ flow: Flow) {
+        if child.Style.Position == .fixed {
+            child.FixedToViewport = flow.fixed == nil
+            (flow.fixed ?? rootBox ?? flow.positioned).Positioned.append(child)
+        } else {
+            child.FixedToViewport = false
+            flow.positioned.Positioned.append(child)
         }
     }
 
@@ -228,7 +248,7 @@ public final class Layout {
         }
         // Size containment, and content-visibility: hidden: the content
         // doesn't size the box; contain-intrinsic-height stands in.
-        if box.Style.ContainSize || box.Style.ContentVisibility == "hidden" {
+        if box.Style.SizeContained || box.Style.ContentVisibility == "hidden" {
             height = box.Style.ContainIntrinsicHeight?.Resolve(0) ?? 0
         }
         return height
@@ -257,7 +277,6 @@ public final class Layout {
     /// parent's where nothing separates them.
     func layoutBlockChildren(_ box: Box, contentWidth: float32, flow: Flow) -> float32 {
         let cb = ContainingBlock(width: contentWidth, height: definiteInnerHeight(box))
-        let positionedAncestor = flow.positioned
         // The content box's corner in the formatting context, for floats.
         let rootX = flow.x + box.ContentX
         let rootY = flow.y + box.ContentY
@@ -280,7 +299,7 @@ public final class Layout {
                 // have been.
                 child.X = box.ContentX
                 child.Y = box.ContentY + y + positive + negative
-                positionedAncestor.Positioned.append(child)
+                attachPositioned(child, flow)
                 child.Parent = box
                 continue
             }
@@ -516,7 +535,7 @@ public final class Layout {
         if box.Kind == .replaced {
             return replacedIntrinsicWidths(box, ignoringWidth: ignoringWidth)
         }
-        if (s.ContainSize || s.ContentVisibility == "hidden") && (ignoringWidth || s.Width.IsAuto) {
+        if (s.InlineSizeContained || s.ContentVisibility == "hidden") && (ignoringWidth || s.Width.IsAuto) {
             let w = (s.ContainIntrinsicWidth?.Resolve(0) ?? 0) + edges
             return (min: w, max: w)
         }

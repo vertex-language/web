@@ -1480,6 +1480,9 @@ func apply(_ given: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
             s.ColumnGapNormal = false
         }
     case .direction: s.Direction = keywordOf(v) == "rtl" ? .rtl : .ltr
+    case .backgroundAttachment: s.BackgroundAttachment = keywordOf(v) ?? "scroll"
+    case .textFillColor:
+        if case .currentColor = v { s.TextFillColor = nil } else { s.TextFillColor = colorOf(v) }
     case .unicodeBidi:
         switch keywordOf(v) ?? "normal" {
         case "embed": s.UnicodeBidi = .embed
@@ -2193,6 +2196,8 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .rowGap: b.RowGap = a.RowGap
     case .columnGap: b.ColumnGap = a.ColumnGap; b.ColumnGapNormal = a.ColumnGapNormal
     case .direction: b.Direction = a.Direction
+    case .backgroundAttachment: b.BackgroundAttachment = a.BackgroundAttachment
+    case .textFillColor: b.TextFillColor = a.TextFillColor
     case .unicodeBidi: b.UnicodeBidi = a.UnicodeBidi
     case .columnCount: b.ColumnCount = a.ColumnCount
     case .columnWidth: b.ColumnWidth = a.ColumnWidth

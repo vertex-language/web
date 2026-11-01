@@ -99,10 +99,24 @@ public final class ComputedStyle {
     /// break-inside: avoid and its kin.
     public var BreakInsideAvoid: bool = false
 
+    /// background-attachment: scroll, fixed (to the viewport) or local
+    /// (with a scroll container's content).
+    public var BackgroundAttachment: string = "scroll"
+    /// -webkit-text-fill-color, inherited: the color text is painted
+    /// in, over color; nil for color itself.
+    public var TextFillColor: draw.Color? = nil
+
     /// direction, which is inherited, and unicode-bidi, which isn't.
     public var Direction: Direction = .ltr
     public var UnicodeBidi: UnicodeBidi = .normal
     public var IsRightToLeft: bool { return Direction == .rtl }
+
+    /// The containment a box has, from contain and from container-type
+    /// (CSS Containment 3: a size container has size and layout
+    /// containment, an inline-size one inline-size and layout).
+    public var SizeContained: bool { return ContainSize || ContainerType == "size" }
+    public var InlineSizeContained: bool { return SizeContained || ContainerType == "inline-size" }
+    public var LayoutContained: bool { return ContainLayout || ContainerType == "size" || ContainerType == "inline-size" }
 
     /// Whether a block flows its content into columns.
     public var IsMultiColumn: bool {
@@ -313,6 +327,7 @@ public final class ComputedStyle {
         ScrollbarThumb = parent.ScrollbarThumb
         ScrollbarTrack = parent.ScrollbarTrack
         CaretColor = parent.CaretColor
+        TextFillColor = parent.TextFillColor
         ColorScheme = parent.ColorScheme
         EffectiveZoom = parent.EffectiveZoom
         Direction = parent.Direction

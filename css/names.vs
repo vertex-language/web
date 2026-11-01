@@ -28,7 +28,7 @@ let shorthandNames: [string] = [
 let unappliedNames: [string] = [
     "quotes", "perspective", "perspective-origin", "backface-visibility",
     "transform-style", "transform-box", "counter-reset", "counter-increment",
-    "background-attachment", "font-variant", "font-stretch", "font-feature-settings", "src",
+    "font-variant", "font-stretch", "font-feature-settings", "src",
     "unicode-range",
     "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
     "hyphens",

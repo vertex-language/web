@@ -79,9 +79,12 @@ extension Layout {
     }
 
     /// The narrowest and widest each column can be, from its cells.
-    func columnLimits(_ grid: TableGrid, cbWidth: float32) -> (min: [float32], max: [float32]) {
+    func columnLimits(_ grid: TableGrid, cbWidth: float32) -> (min: [float32], max: [float32], fixed: [bool]) {
         var mins = [float32](repeating: 0, count: grid.columns)
         var maxs = [float32](repeating: 0, count: grid.columns)
+        // Columns a cell gives a width: they keep it, and room to spare
+        // goes to the others.
+        var fixed = [bool](repeating: false, count: grid.columns)
         for row in grid.rows {
             for cell in row {
                 resolveEdges(cell.box, cbWidth: cbWidth)
@@ -96,6 +99,7 @@ extension Layout {
                     let i = cell.column + c
                     if w.min / each > mins[i] { mins[i] = w.min / each }
                     if w.max / each > maxs[i] { maxs[i] = w.max / each }
+                    if cell.span == 1 && !cell.box.Style.Width.IsAuto { fixed[i] = true }
                     c += 1
                 }
             }
@@ -105,7 +109,7 @@ extension Layout {
             if maxs[i] < mins[i] { maxs[i] = mins[i] }
             i += 1
         }
-        return (min: mins, max: maxs)
+        return (min: mins, max: maxs, fixed: fixed)
     }
 
     /// The widths a table wants: its columns' limits plus the spacing.
@@ -157,10 +161,28 @@ extension Layout {
         i = 0
         if available >= sumMax {
             // Room to spare: every column gets its widest, and the rest
-            // is shared in proportion.
+            // goes to the columns with no width of their own, in
+            // proportion to how wide they want to be -- to all of them
+            // where every column has one.
             let extra = available - sumMax
+            var autoMax: float32 = 0
+            var autoCount = 0
+            var k = 0
+            while k < grid.columns {
+                if !limits.fixed[k] {
+                    autoMax += limits.max[k]
+                    autoCount += 1
+                }
+                k += 1
+            }
+            let toAuto = autoCount > 0
+            let base = toAuto ? autoMax : sumMax
+            let count = toAuto ? autoCount : grid.columns
             while i < grid.columns {
-                widths[i] = limits.max[i] + (sumMax > 0 ? extra * limits.max[i] / sumMax : extra / float32(grid.columns))
+                widths[i] = limits.max[i]
+                if !toAuto || !limits.fixed[i] {
+                    widths[i] += base > 0 ? extra * limits.max[i] / base : extra / float32(count)
+                }
                 i += 1
             }
         } else if available <= sumMin {

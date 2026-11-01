@@ -124,6 +124,10 @@ public enum PaintKind: Equatable {
     /// a nested document's display list, in its own coordinates.
     case translate
     case untranslate
+    /// What follows, to the matching unfix, is a box fixed to the
+    /// viewport: drawn where it is whatever the page's scroll.
+    case fixed
+    case unfix
 }
 
 /// One thing to paint, in CSS pixels on the page: a filled rectangle, a
@@ -166,6 +170,13 @@ public struct PaintItem {
     public var MaskRect: draw.Rect = draw.Rect.zero
     public var Blend: draw.BlendMode = .normal
     public var Unbounded: bool = false
+    /// A layer kept only where these items -- a box's text -- draw:
+    /// background-clip: text.
+    public var TextMask: [PaintItem] = []
+    /// A background attached to the viewport (background-attachment:
+    /// fixed): its Rect and tile origin are in the viewport's own
+    /// coordinates, the scroll added when it is drawn.
+    public var Pinned: bool = false
     /// A border image's slices (in its pixels, or a gradient's CSS
     /// pixels), whether its middle is drawn, and its repeats.
     public var Slice: draw.Edges = draw.Edges.zero
@@ -345,6 +356,8 @@ final class DisplayListBuilder {
     var fieldSelectionStart: int = -1
     var fieldSelectionEnd: int = -1
     var opacity: float32 = 1
+    var viewportWidth: float32 = 0
+    var viewportHeight: float32 = 0
     /// The current stacking context's positioned boxes, waiting to paint,
     /// each with the origin it paints from.
     var stacked: [Stacked] = []
@@ -359,6 +372,8 @@ final class DisplayListBuilder {
 
     func build(_ root: layout.Box, viewportWidth: float32, viewportHeight: float32, background: draw.Color) -> [PaintItem] {
         items = []
+        self.viewportWidth = viewportWidth
+        self.viewportHeight = viewportHeight
         // The canvas takes the root's background, or the body's where the
         // root has none, over the whole viewport.
         var canvasColor = background
@@ -382,6 +397,30 @@ final class DisplayListBuilder {
         return items
     }
 
+    /// The text a box paints, black and opaque, for masking: what
+    /// background-clip: text keeps its background to.
+    func textMask(_ box: layout.Box, x: float32, y: float32) -> [PaintItem] {
+        let start = items.count
+        let savedStack = stacked
+        let savedOpacity = opacity
+        opacity = 1
+        paintPhase(box, .inlineContent, x: x - box.X - box.OffsetX, y: y - box.Y - box.OffsetY, skipBackground: 0, isRoot: false)
+        var out: [PaintItem] = []
+        var i = start
+        while i < items.count {
+            var it = items[i]
+            if it.Kind == .text {
+                it.Color = draw.Color(0, 0, 0)
+                out.append(it)
+            }
+            i += 1
+        }
+        items.removeLast(items.count - start)
+        stacked = savedStack
+        opacity = savedOpacity
+        return out
+    }
+
     /// Paints a box as CSS orders a stacking context: the backgrounds
     /// and borders of it and its in-flow block descendants, then its
     /// floats, then its inline content and replaced content, then the
@@ -400,6 +439,7 @@ final class DisplayListBuilder {
             : draw.Affine.identity
         // A transform that flattens the box shows nothing of it.
         if transform.Determinant == 0 { opacity = savedOpacity; return }
+        if box.FixedToViewport { items.append(PaintItem(.fixed)) }
         if s.BackdropBlur > 0 {
             var b = PaintItem(.backdrop)
             b.Rect = draw.Rect(x, y, box.Width, box.Height)
@@ -492,6 +532,7 @@ final class DisplayListBuilder {
             styledRing(ring, draw.Edges(all: w), [c, c, c, c], radii, [style, style, style, style])
         }
         if blurred { items.append(PaintItem(.unlayer)) }
+        if box.FixedToViewport { items.append(PaintItem(.unfix)) }
         opacity = savedOpacity
     }
 
@@ -626,13 +667,26 @@ final class DisplayListBuilder {
                 return (rect: rect, radii: radii)
             }
         }
-        let clip = area(s.BackgroundClip == "text" ? "border-box" : s.BackgroundClip)
-        if s.BackgroundColor.A > 0 && s.BackgroundClip != "text" {
-            items.append(.fill(clip.rect, color(s.BackgroundColor), clip.radii))
-        }
-        if let bg = s.BackgroundImage, s.BackgroundClip != "text" {
-            let paddingBox = area(s.BackgroundOrigin).rect
-            let shown = clip.rect.Intersect(s.BackgroundClip == "border-box" ? area("padding-box").rect.Union(clip.rect) : clip.rect)
+        // The background: its color and its image, in a clip area.
+        func background(_ clip: (rect: draw.Rect, radii: draw.Radii), textClip: bool) {
+            if s.BackgroundColor.A > 0 {
+                items.append(.fill(clip.rect, color(s.BackgroundColor), clip.radii))
+            }
+            guard let bg = s.BackgroundImage else { return }
+            var paddingBox = area(s.BackgroundOrigin).rect
+            let shown = textClip ? clip.rect : clip.rect.Intersect(s.BackgroundClip == "border-box" ? area("padding-box").rect.Union(clip.rect) : clip.rect)
+            // background-attachment: fixed positions and sizes the image
+            // against the viewport (in its own coordinates, the scroll
+            // added when drawn); local, against a scroll container's
+            // content, so that it scrolls with it.
+            let pinned = s.BackgroundAttachment == "fixed"
+            if pinned {
+                paddingBox = draw.Rect(0, 0, viewportWidth, viewportHeight)
+            } else if s.BackgroundAttachment == "local" && s.IsScrollContainer {
+                paddingBox = draw.Rect(paddingBox.X - box.ScrollX, paddingBox.Y - box.ScrollY,
+                                       maxf(paddingBox.Width, box.ContentWidth + box.Padding.Horizontal),
+                                       maxf(paddingBox.Height, box.ContentHeight + box.Padding.Vertical))
+            }
             if var g = bg.Gradient {
                 if opacity < 1 {
                     var i = 0
@@ -641,7 +695,17 @@ final class DisplayListBuilder {
                         i += 1
                     }
                 }
-                items.append(.gradient(shown, g, clip.radii))
+                if pinned || s.BackgroundAttachment == "local" && s.IsScrollContainer {
+                    // The gradient over its positioning area, shown in
+                    // the box's.
+                    items.append(.clip(shown))
+                    var it = PaintItem.gradient(paddingBox, g, draw.Radii.zero)
+                    it.Pinned = pinned
+                    items.append(it)
+                    items.append(PaintItem.unclip)
+                } else {
+                    items.append(.gradient(shown, g, clip.radii))
+                }
             } else if !bg.URL.isEmpty, let img = images[bg.URL], img.Width > 0 && img.Height > 0 {
                 var tw = float32(img.Width)
                 var th = float32(img.Height)
@@ -665,9 +729,27 @@ final class DisplayListBuilder {
                 }
                 let ox = paddingBox.X + (paddingBox.Width - tw) * bg.PositionX + bg.OffsetX
                 let oy = paddingBox.Y + (paddingBox.Height - th) * bg.PositionY + bg.OffsetY
-                items.append(.tiles(shown, img, tileWidth: tw, tileHeight: th, originX: ox, originY: oy,
-                                    repeatX: bg.RepeatX, repeatY: bg.RepeatY, opacity: opacity, radii: clip.radii))
+                var it = PaintItem.tiles(shown, img, tileWidth: tw, tileHeight: th, originX: ox, originY: oy,
+                                         repeatX: bg.RepeatX, repeatY: bg.RepeatY, opacity: opacity, radii: clip.radii)
+                it.Pinned = pinned
+                items.append(it)
             }
+        }
+        if s.BackgroundClip == "text" {
+            // The background only where the box's text is: drawn in a
+            // layer kept by the text's glyphs.
+            let mask = textMask(box, x: x, y: y)
+            if !mask.isEmpty && (s.BackgroundColor.A > 0 || s.BackgroundImage != nil) {
+                var layer = PaintItem(.layer)
+                layer.Rect = rect
+                layer.MaskRect = rect
+                layer.TextMask = mask
+                items.append(layer)
+                background(area("border-box"), textClip: true)
+                items.append(PaintItem(.unlayer))
+            }
+        } else {
+            background(area(s.BackgroundClip), textClip: false)
         }
         let widths = box.Border
         if s.HasBorderImage, let bi = borderImage(box, x: x, y: y) {
@@ -913,7 +995,8 @@ final class DisplayListBuilder {
                 // ::first-line recolors what of the line inherits the
                 // block's color.
                 if let fl = firstLineStyle, f.Owner.Style.Color == container.Style.Color { ownColor = fl.Color }
-                let textColor = color(ownColor)
+                // -webkit-text-fill-color paints the glyphs over color.
+                let textColor = color(f.Kind == .text ? (f.Owner.Style.TextFillColor ?? ownColor) : ownColor)
                 if f.Run.Count > 0 {
                     // text-shadow: behind the text, the last listed
                     // furthest back, each blurred in a layer of its own.
@@ -1450,8 +1533,8 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
             let tw = item.TileWidth * scale
             let th = item.TileHeight * scale
             if tw < 1 || th < 1 { continue }
-            let ox = item.X * scale + dx
-            let oy = item.Y * scale + dy
+            let ox = (item.X + (item.Pinned ? scrollX : 0)) * scale + dx
+            let oy = (item.Y + (item.Pinned ? scrollY : 0)) * scale + dy
             var startX = ox
             var startY = oy
             if item.RepeatX { startX = ox - c_ceilf((ox - float32(tiled.Clip.X)) / tw) * tw }
@@ -1476,7 +1559,9 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
                 rows += 1
             }
         case .gradient:
-            let dr = device(item.Rect)
+            var gr = item.Rect
+            if item.Pinned { gr = draw.Rect(gr.X + scrollX, gr.Y + scrollY, gr.Width, gr.Height) }
+            let dr = device(gr)
             if dr.IsEmpty { continue }
             if var g = item.Gradient {
                 if let r = g.Radial { g.Radial = r.Scaled(scale) }
@@ -1578,6 +1663,16 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
             offsets.append((dx, dy))
             dx += item.X * scale
             dy += item.Y * scale
+        case .fixed:
+            // The scroll the page was drawn at, undone.
+            offsets.append((dx, dy))
+            dx += scrollX * scale
+            dy += scrollY * scale
+        case .unfix:
+            if let o = offsets.popLast() {
+                dx = o.0
+                dy = o.1
+            }
         case .untranslate:
             if let o = offsets.popLast() {
                 dx = o.0
@@ -1621,6 +1716,13 @@ func applyClipAndMask(_ layer: draw.Layer, _ item: PaintItem, scale: float32, dx
         }
     }
     let box = device(item.MaskRect)
+    if !item.TextMask.isEmpty {
+        // background-clip: text: kept where the text's glyphs are.
+        let alpha = draw.Layer(layer.Rect)
+        Rasterize(item.TextMask, on: alpha.Canvas, scale: scale, originX: dx, originY: dy, scrollX: 0, scrollY: 0)
+        layer.MaskBy(alpha)
+        alpha.Free()
+    }
     if var g = item.Gradient {
         if let r = g.Radial { g.Radial = r.Scaled(scale) }
         if let c = g.Conic { g.Conic = c.Scaled(scale) }

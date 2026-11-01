@@ -591,14 +591,13 @@ extension Layout {
     func collectItems(_ box: Box, owner: Box, cb: ContainingBlock, flow: Flow,
                       decoration: cascade.TextDecoration, decorationColor: draw.Color,
                       into items: inout [Item], pendingSpace: inout Bool) {
-        let positionedAncestor = flow.positioned
         for child in box.Children {
             if child.Kind != .text && (child.Style.Position == .absolute || child.Style.Position == .fixed) {
                 // Whatever kind of box it was made: laid out against its
                 // containing block later, from where the text had got to.
                 child.X = 0
                 child.Y = 0
-                positionedAncestor.Positioned.append(child)
+                attachPositioned(child, flow)
                 items.append(Item(kind: .positioned, box: child, owner: owner))
                 continue
             }

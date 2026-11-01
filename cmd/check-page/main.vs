@@ -1443,6 +1443,84 @@ func testRightToLeftPaint() {
           "Hebrew in a dir=rtl paragraph is drawn at the right")
 }
 
+@MainActor
+func testFixed() {
+    print("position: fixed and background-attachment: fixed")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(200, 100))
+    view.LoadHTML("""
+    <body style="margin: 0; background: white">
+    <div id=bar style="position: fixed; top: 0; left: 0; width: 200px; height: 10px; background: rgb(255,0,0)"></div>
+    <div style="height: 1000px"></div>
+    </body>
+    """)
+    view.SetScrollOffset(draw.Point(0, 300))
+    var px = [uint8](repeating: 0, count: 200 * 100 * 4)
+    view.Draw(into: &px, width: 200, height: 100, scale: 1)
+    check(pixelAt(px, 200, 50, 5) == draw.Color(255, 0, 0), "a fixed box stays at the top of the viewport when the page scrolls (got \(pixelAt(px, 200, 50, 5)))")
+    check(view.ElementAt(draw.Point(50, 5))?.GetAttribute("id") == "bar", "and takes clicks there")
+    // Inside a transformed box, a fixed box is placed against that box
+    // and scrolls with it.
+    let inT = web.Page()
+    inT.SetViewportSize(draw.Size(200, 100))
+    inT.LoadHTML("<body style='margin:0;background:white'><div style='transform:translate(0,0)'><div style='position:fixed;top:0;left:0;width:200px;height:10px;background:rgb(0,0,255)'></div></div><div style='height:1000px'></div></body>")
+    inT.SetScrollOffset(draw.Point(0, 300))
+    var tp = [uint8](repeating: 0, count: 200 * 100 * 4)
+    inT.Draw(into: &tp, width: 200, height: 100, scale: 1)
+    check(pixelAt(tp, 200, 50, 5) == draw.Color(255, 255, 255), "a transformed ancestor holds a fixed box, which scrolls with it (got \(pixelAt(tp, 200, 50, 5)))")
+
+    // background-attachment: fixed stays with the viewport; local moves
+    // with a scroll container's content.
+    let att = web.Page()
+    att.SetViewportSize(draw.Size(200, 100))
+    att.LoadHTML("""
+    <body style="margin: 0; background: white">
+    <div style="height: 1000px; background: linear-gradient(rgb(255,0,0) 50%, rgb(0,0,255) 50%) fixed"></div>
+    </body>
+    """)
+    att.SetScrollOffset(draw.Point(0, 400))
+    var ap = [uint8](repeating: 0, count: 200 * 100 * 4)
+    att.Draw(into: &ap, width: 200, height: 100, scale: 1)
+    check(pixelAt(ap, 200, 50, 10) == draw.Color(255, 0, 0) && pixelAt(ap, 200, 50, 90) == draw.Color(0, 0, 255),
+          "a fixed background is laid over the viewport, wherever the page is scrolled (got \(pixelAt(ap, 200, 50, 10)) \(pixelAt(ap, 200, 50, 90)))")
+
+    let still = web.Page()
+    still.SetViewportSize(draw.Size(200, 100))
+    still.LoadHTML("<body style='margin:0;background:white'><div style='height:10px;background:rgb(255,0,0)'></div><div style='height:1000px'></div></body>")
+    still.SetScrollOffset(draw.Point(0, 300))
+    var sp = [uint8](repeating: 0, count: 200 * 100 * 4)
+    still.Draw(into: &sp, width: 200, height: 100, scale: 1)
+    check(pixelAt(sp, 200, 50, 5) == draw.Color(255, 255, 255), "a box in the flow scrolls away (got \(pixelAt(sp, 200, 50, 5)))")
+}
+
+@MainActor
+func testTextClip() {
+    print("background-clip: text and text-fill-color")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(200, 60))
+    view.LoadHTML("""
+    <body style="margin: 0; background: white">
+    <div id=t style="font: bold 40px sans-serif; background: rgb(0,0,255); background-clip: text; -webkit-text-fill-color: transparent; width: 200px">MMMM</div>
+    </body>
+    """)
+    var px = [uint8](repeating: 0, count: 200 * 60 * 4)
+    view.Draw(into: &px, width: 200, height: 60, scale: 1)
+    var blue = 0
+    var other = 0
+    var y: int32 = 0
+    while y < 60 {
+        var x: int32 = 0
+        while x < 200 {
+            let c = pixelAt(px, 200, x, y)
+            if c.B > 200 && c.R < 60 { blue += 1 } else if !(c.R > 200 && c.G > 200 && c.B > 200) && !(c.B > c.R) { other += 1 }
+            x += 1
+        }
+        y += 1
+    }
+    check(blue > 400 && pixelAt(px, 200, 199, 59) == draw.Color(255, 255, 255), "the background shows through the letters alone (\(blue) blue pixels)")
+    check(other == 0, "and the transparent fill leaves no text color over it (\(other) other pixels)")
+}
+
 func main() async -> int32 {
     testStacking()
     testTextFeatures()
@@ -1470,6 +1548,8 @@ func main() async -> int32 {
     testBorderImage()
     testColumnsPaint()
     testRightToLeftPaint()
+    testFixed()
+    testTextClip()
     testRange()
     await testDeferredImages()
     await testSVGImages()

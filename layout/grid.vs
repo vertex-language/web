@@ -28,7 +28,7 @@ extension Layout {
             if child.Style.Position == .absolute || child.Style.Position == .fixed {
                 child.X = box.ContentX
                 child.Y = box.ContentY
-                flow.positioned.Positioned.append(child)
+                attachPositioned(child, flow)
                 continue
             }
             resolveEdges(child, cbWidth: contentWidth)

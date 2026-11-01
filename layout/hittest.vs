@@ -47,7 +47,10 @@ func hitTestBox(_ box: Box, _ px: float32, _ py: float32, originX: float32, orig
         var bestZ: int32 = -2147483647
         while i >= 0 {
             let p = box.Positioned[i]
-            if let h = HitTest(p, px, py, originX: sx, originY: sy) {
+            // A box fixed to the viewport is where the scroll leaves it.
+            let fx = p.FixedToViewport ? sx + box.ViewportScrollX : sx
+            let fy = p.FixedToViewport ? sy + box.ViewportScrollY : sy
+            if let h = HitTest(p, px, py, originX: fx, originY: fy) {
                 // Later boxes paint over earlier ones: an earlier box
                 // wins only with a higher z-index.
                 if best == nil || p.Style.ZIndex > bestZ {
@@ -163,7 +166,11 @@ public func PagePosition(_ box: Box) -> (x: float32, y: float32) {
     var x: float32 = 0
     var y: float32 = 0
     var cur: Box? = box
+    var fixed = false
+    var top: Box = box
     while let b = cur {
+        if b.FixedToViewport { fixed = true }
+        top = b
         x += b.X + b.OffsetX
         y += b.Y + b.OffsetY
         if let p = b.Parent {
@@ -171,6 +178,12 @@ public func PagePosition(_ box: Box) -> (x: float32, y: float32) {
             y -= p.ScrollY
         }
         cur = b.Parent
+    }
+    // Inside a box fixed to the viewport: as far down the page as it is
+    // scrolled.
+    if fixed {
+        x += top.ViewportScrollX
+        y += top.ViewportScrollY
     }
     return (x: x, y: y)
 }

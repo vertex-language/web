@@ -134,6 +134,13 @@ public final class Box {
     /// whether their base direction is right to left: the paragraph's
     /// direction, or for unicode-bidi: plaintext its first strong
     /// character's.
+    /// A position: fixed box placed against the viewport: it stays put
+    /// as the page scrolls.
+    public var FixedToViewport: bool = false
+    /// On the root: how far the page is scrolled, which fixed boxes
+    /// undo. The page keeps it current.
+    public var ViewportScrollX: float32 = 0
+    public var ViewportScrollY: float32 = 0
     public var BidiLines: bool = false
     public var LinesRightToLeft: bool = false
     public var ColumnWidthUsed: float32 = 0
@@ -177,7 +184,7 @@ public final class Box {
     /// margins do not collapse through it and floats stay inside.
     public var IsFormattingRoot: bool {
         if Kind != .block { return true }
-        if Style.IsOutOfFlow || Style.ClipsOverflow || Style.IsFlexContainer || Style.IsGridContainer || Style.ContainLayout || Style.IsMultiColumn { return true }
+        if Style.IsOutOfFlow || Style.ClipsOverflow || Style.IsFlexContainer || Style.IsGridContainer || Style.LayoutContained || Style.IsMultiColumn { return true }
         if Style.Display == .table || Style.Display == .tableCell || Style.Display == .inlineBlock { return true }
         return false
     }
