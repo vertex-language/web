@@ -136,6 +136,11 @@ extension Page {
         // What the program changed since the last input -- a field's value
         // set by a handler -- is what this input meets.
         syncValues()
+        switch input {
+        case .keyDown(_): keyboardInput = true
+        case .pointerDown(_): keyboardInput = false
+        default: break
+        }
         if let r = forwardToFrame(input) { return r }
         switch input {
         case .pointerMoved(let p):
@@ -270,9 +275,11 @@ extension Page {
         if selecting {
             // Dragging extends the selection to the text under the pointer.
             update()
-            if let hit = hitAt(clampedToView(p)), let tb = hit.TextBox, let node = tb.Node {
-                let focus = dom.TextPosition(Node: node, Offset: hit.TextOffset)
-                if selectionFocus?.Node.Id != node.Id || selectionFocus?.Offset != hit.TextOffset {
+            let q = clampedToView(p)
+            if let pos = textPositionNear(q) {
+                let node = pos.Node
+                let focus = pos
+                if selectionFocus?.Node.Id != node.Id || selectionFocus?.Offset != focus.Offset {
                     selectionFocus = focus
                     needsPaint = true
                 }
@@ -289,6 +296,35 @@ extension Page {
         setHovered(hit?.Node)
         cursor = cursorFor(hit)
         return .handled
+    }
+
+    /// The text position a drag at p reaches: the text under it, or,
+    /// beside the text of a line, where that line's text starts or ends.
+    func textPositionNear(_ p: draw.Point) -> dom.TextPosition? {
+        guard let hit = hitAt(p) else { return nil }
+        if let tb = hit.TextBox, let node = tb.Node { return dom.TextPosition(Node: node, Offset: hit.TextOffset) }
+        // The block holding lines nearest the hit, and the line at y.
+        var cur: layout.Box? = hit.Box
+        while let b = cur, b.Lines.isEmpty { cur = b.Kind == .block && !b.Children.isEmpty ? nil : b.Parent }
+        guard let block = cur else { return nil }
+        let origin = layout.PagePosition(block)
+        let px = p.X + scroll.X - origin.x + block.ScrollX
+        let py = p.Y + scroll.Y - origin.y + block.ScrollY
+        var best: layout.Line? = nil
+        for line in block.Lines {
+            if best == nil || py >= line.Y { best = line }
+            if py < line.Y + line.Height { break }
+        }
+        guard let line = best else { return nil }
+        var first: layout.Fragment? = nil
+        var last: layout.Fragment? = nil
+        for f in line.Fragments where f.Kind == .text && f.Box.Node != nil {
+            if first == nil { first = f }
+            last = f
+        }
+        guard let a = first, let z = last else { return nil }
+        if px < a.X { return dom.TextPosition(Node: a.Box.Node!, Offset: a.Offset) }
+        return dom.TextPosition(Node: z.Box.Node!, Offset: z.Offset + z.Text.utf8.count)
     }
 
     func clampedToView(_ p: draw.Point) -> draw.Point {
@@ -540,6 +576,8 @@ extension Page {
             let b = [uint8](href.utf8)
             let id = stringOf(b, 1, b.count)
             if let target = Document?.Tree.ElementById(id) {
+                self.target = target
+                needsStyle = true
                 ScrollTo(target)
             } else if id.isEmpty || id == "top" {
                 SetScrollOffset(draw.Point(0, 0))
@@ -963,6 +1001,7 @@ extension Page {
 
     func toggleChecked(_ input: html.Node) {
         if input.HasAttribute("disabled") { return }
+        userEdited.insert(input.Id)
         _ = Document?.ToggleAttribute(input, "checked")
         Focus(input)
         _ = dispatch(dom.Event("change"), to: input)
@@ -978,6 +1017,7 @@ extension Page {
                 }
             }
         }
+        userEdited.insert(radio.Id)
         doc.SetAttribute(radio, "checked", "")
         Focus(radio)
         _ = dispatch(dom.Event("change"), to: radio)

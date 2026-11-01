@@ -61,7 +61,137 @@ struct OpenSpan {
 extension Layout {
     /// Lays out a block container's inline content as lines and answers
     /// the content height.
+    /// Lays out a block's inline content as lines, then as text-wrap-style
+    /// and line-clamp ask: balanced lines, a last line not left with one
+    /// word, or only so many lines with an ellipsis.
     func layoutInline(_ box: Box, contentWidth: float32, flow: Flow) -> float32 {
+        var height = layoutInlineOnce(box, contentWidth: contentWidth, flow: flow)
+        let wrap = box.Style.TextWrapStyle
+        let n = box.Lines.count
+        if (wrap == "balance" || wrap == "pretty") && n >= 2 && canReflow(box, flow) {
+            var narrowest = contentWidth
+            if wrap == "balance" && n <= 10 {
+                // The narrowest width that keeps the same lines.
+                var lo = contentWidth / float32(n)
+                var hi = contentWidth
+                var k = 0
+                while k < 12 {
+                    let mid = (lo + hi) / 2
+                    _ = layoutInlineOnce(box, contentWidth: mid, flow: flow)
+                    if box.Lines.count > n { lo = mid } else { hi = mid }
+                    k += 1
+                }
+                narrowest = hi
+            } else if wrap == "pretty" && lonelyLastLine(box) {
+                // A little narrower, so that a word comes down to the last.
+                var k: float32 = 1
+                while k <= 4 {
+                    let w = contentWidth * (1 - 0.05 * k)
+                    _ = layoutInlineOnce(box, contentWidth: w, flow: flow)
+                    if box.Lines.count == n && !lonelyLastLine(box) { narrowest = w; break }
+                    k += 1
+                }
+            }
+            height = layoutInlineOnce(box, contentWidth: narrowest, flow: flow)
+            if narrowest < contentWidth { shiftForAlignment(box, contentWidth - narrowest) }
+        }
+        let clamp = int(box.Style.LineClamp)
+        if clamp > 0 && box.Lines.count > clamp {
+            box.Lines.removeLast(box.Lines.count - clamp)
+            ellipsize(&box.Lines[clamp - 1], width: contentWidth, box: box)
+            let last = box.Lines[clamp - 1]
+            height = last.Y + last.Height - box.ContentY
+        }
+        return height
+    }
+
+    /// Whether the lines can be laid out again: no floats near, and no
+    /// out-of-flow boxes among the content, which a layout places.
+    func canReflow(_ box: Box, _ flow: Flow) -> bool {
+        if !flow.floats.floats.isEmpty { return false }
+        func clean(_ b: Box) -> bool {
+            for c in b.Children {
+                if c.Style.IsOutOfFlow { return false }
+                if c.Kind == .inline && !clean(c) { return false }
+            }
+            return true
+        }
+        return clean(box)
+    }
+
+    /// Whether the last line is one word under a quarter of the width.
+    func lonelyLastLine(_ box: Box) -> bool {
+        guard let last = box.Lines.last else { return false }
+        return wordsOn(last) <= 1
+    }
+
+    /// How many words a line holds: runs of text between spaces.
+    func wordsOn(_ line: Line) -> int {
+        var words = 0
+        var inWord = false
+        for f in line.Fragments where f.Kind == .text {
+            for c in f.Text.utf8 {
+                let space = c == 32 || c == 10 || c == 9
+                if !space && !inWord { words += 1 }
+                inWord = !space
+            }
+            inWord = false
+        }
+        return words
+    }
+
+    /// Moves the lines over by the room a narrower layout left, as their
+    /// alignment says: half for center, all of it for right and end.
+    func shiftForAlignment(_ box: Box, _ room: float32) {
+        var d: float32 = 0
+        switch box.Style.TextAlign {
+        case .center: d = room / 2
+        case .right, .end: d = room
+        default: return
+        }
+        var i = 0
+        while i < box.Lines.count {
+            box.Lines[i].X += d
+            var k = 0
+            while k < box.Lines[i].Fragments.count {
+                box.Lines[i].Fragments[k].X += d
+                if box.Lines[i].Fragments[k].Kind == .atomic { box.Lines[i].Fragments[k].Box.X += d }
+                k += 1
+            }
+            k = 0
+            while k < box.Lines[i].Spans.count {
+                box.Lines[i].Spans[k].X += d
+                k += 1
+            }
+            i += 1
+        }
+    }
+
+    /// Ends a line with an ellipsis that fits in the width: what
+    /// line-clamp leaves at the last line it keeps.
+    func ellipsize(_ line: inout Line, width: float32, box: Box) {
+        let face = box.Style.Face
+        let ellipsis = face.Shape("…")
+        let limit = box.ContentX + width - ellipsis.Width
+        var fragments = line.Fragments
+        while let last = fragments.last, last.Kind != .text || IsBlank(last.Text) { fragments.removeLast() }
+        while let last = fragments.last, last.X > limit { fragments.removeLast() }
+        guard var last = fragments.last, last.Kind == .text else { return }
+        let f = last.Owner.Style.Face
+        let bytes = [uint8](last.Text.utf8)
+        var cut = bytes.count
+        while cut > 0 && last.X + f.Measure(stringOf(bytes, 0, cut)) > limit {
+            cut -= 1
+            while cut > 0 && (bytes[cut] & 0xC0) == 0x80 { cut -= 1 }
+        }
+        last.Text = stringOf(bytes, 0, cut) + "…"
+        last.Run = f.Shape(last.Text)
+        last.Width = last.Run.Width
+        fragments[fragments.count - 1] = last
+        line.Fragments = fragments
+    }
+
+    func layoutInlineOnce(_ box: Box, contentWidth: float32, flow: Flow) -> float32 {
         box.Lines = []
         var items: [Item] = []
         var pendingSpace = false
@@ -490,7 +620,7 @@ extension Layout {
                         f.Run.Advances.append(item.width)
                         f.Run.Width = item.width
                     }
-                    f.Offset = item.offset
+                    f.Offset = item.offset + item.box.TextStart
                     f.Decoration = item.decoration
                     f.DecorationColor = item.decorationColor
                     fragments.append(f)
@@ -682,7 +812,7 @@ extension Layout {
         if isFirst && !box.Marker.isEmpty {
             var m = Fragment(kind: .marker, box: box, owner: box)
             m.Text = box.Marker
-            m.Run = strutFace.Shape(box.Marker)
+            m.Run = (box.MarkerStyle?.Face ?? strutFace).Shape(box.Marker)
             m.Width = m.Run.Width
             m.Ascent = strutAscent + strutHalf
             m.Height = strutLH

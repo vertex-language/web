@@ -255,6 +255,33 @@ func testCustomProperties() {
     check(styleOf("<div style='outline: 2px solid red; outline: none'>x</div>", "div")?.OutlineWidth == 0, "outline: none takes the outline away")
 }
 
+func testMathAndEnv() {
+    print("Math functions and env()")
+    func width(_ value: string) -> Length? {
+        return styleOf("<div style=\"width: \(value)\">x</div>", "div")?.Width
+    }
+    let cases: [(string, float32)] = [
+        ("round(up, 13px, 5px)", 15), ("round(13px, 5px)", 15), ("round(down, 13px, 5px)", 10),
+        ("calc(mod(17px, 5px) * 2)", 4), ("calc(rem(-17px, 5px) + 10px)", 8), ("calc(mod(-17px, 5px))", 3),
+        ("calc(abs(-7px) + 1px)", 8), ("calc(100px * sin(30deg))", 50), ("calc(pow(2, 3) * 1px)", 8),
+        ("calc(sqrt(16) * 1px + hypot(3px, 4px))", 9), ("calc(sign(-3px) * -10px)", 10),
+        ("calc(10px * cos(pi))", -10), ("calc(atan2(1px, 1px) * 4 / pi * 10px)", 10), ("calc(log(e) * 7px)", 7),
+    ]
+    for (v, want) in cases {
+        let got = width(v)?.Pixels ?? -999
+        check(abs(got - want) < 0.05, "width: \(v) is \(want)px (got \(got))")
+    }
+    func padding(_ value: string) -> Length? {
+        return styleOf("<div style=\"padding-top: \(value)\">x</div>", "div")?.PaddingTop
+    }
+    check(padding("env(safe-area-inset-top)")?.Pixels == 0, "env(safe-area-inset-top) is 0 where the host sets nothing")
+    check(padding("env(nothing-here, 6px)")?.Pixels == 6, "env() takes its fallback for a name it doesn't know")
+    check(padding("calc(env(safe-area-inset-bottom, 3px) + 2px)")?.Pixels == 2, "and works inside calc()")
+    css.EnvironmentVariables["safe-area-inset-top"] = "20px"
+    check(padding("env(safe-area-inset-top)")?.Pixels == 20, "the host's value wins")
+    css.EnvironmentVariables = [:]
+}
+
 func testColorScheme() {
     print("Color scheme and system colors")
     let src = "<style>p { color: red } @media (prefers-color-scheme: dark) { p { color: rgb(1, 2, 3) } } b { color: AccentColor; background-color: Canvas } i { color: light-dark(#010101, color-mix(in srgb, white, black)) }</style><p>x</p><b>y</b><i>z</i>"
@@ -391,6 +418,7 @@ func main() -> int32 {
     testMediaQueries()
     testAtRules()
     testColorScheme()
+    testMathAndEnv()
     testBackgroundPosition()
     testEffects()
     if failures == 0 {

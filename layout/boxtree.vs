@@ -334,10 +334,25 @@ public final class BoxTreeBuilder {
                     if n > 0 { listIndex = n }
                 }
                 box.Marker = markerText(style.ListStyleType, listIndex, node: node)
+                if resolver.HasPseudo("marker"), let ms = resolver.ResolvePseudo(node, "marker", parent: style, context: context) {
+                    box.MarkerStyle = ms
+                    if let content = ms.Content { box.Marker = content.joined() }
+                }
+            }
+            if resolver.HasPseudo("selection") {
+                box.SelectionStyle = resolver.ResolvePseudo(node, "selection", parent: style, context: context)
+            }
+            if resolver.HasPseudo("first-line") && (kind == .block || kind == .inlineBlock) {
+                box.FirstLineStyle = resolver.ResolvePseudo(node, "first-line", parent: style, context: context)
             }
             byNode[node.Id] = box
             buildChildren(of: node, into: box, parentStyle: style)
             addPseudoElements(node, box, style)
+            if resolver.HasPseudo("first-letter") && (kind == .block || kind == .inlineBlock || style.Display == .listItem) {
+                if let fl = resolver.ResolvePseudo(node, "first-letter", parent: style, context: context) {
+                    splitFirstLetter(box, fl)
+                }
+            }
             return box
         }
         byNode[node.Id] = box
@@ -374,6 +389,64 @@ public final class BoxTreeBuilder {
         if node.TagName == "embed" { return true }
         if let data = node.GetAttribute("data"), Images[data] != nil || Vectors[data] != nil { return true }
         return EmbedsDocument(node)
+    }
+
+    /// ::first-letter: the block's first letter, with the punctuation
+    /// before it, moved into an inline box of its own style. It looks
+    /// through inline boxes to the first text, and not into blocks.
+    func splitFirstLetter(_ block: Box, _ style: cascade.ComputedStyle) {
+        var container = block
+        var i = 0
+        while i < container.Children.count {
+            let c = container.Children[i]
+            if c.Kind == .text {
+                let bytes = [uint8](c.Text.utf8)
+                var j = 0
+                while j < bytes.count && (bytes[j] == 32 || bytes[j] == 10 || bytes[j] == 9 || bytes[j] == 13) { j += 1 }
+                if j == bytes.count { i += 1; continue }
+                let start = j
+                // Opening punctuation, then one letter (a whole UTF-8
+                // sequence), then closing punctuation.
+                while j < bytes.count && isPunctuation(bytes[j]) { j += 1 }
+                if j < bytes.count {
+                    j += 1
+                    while j < bytes.count && (bytes[j] & 0xC0) == 0x80 { j += 1 }
+                }
+                while j < bytes.count && isPunctuation(bytes[j]) { j += 1 }
+                let letter = Box(kind: .text, style: style, node: c.Node)
+                letter.Text = stringOf(bytes, start, j)
+                letter.TextStart = c.TextStart + start
+                let span = Box(kind: style.Float != .none ? .block : .inline, style: style, node: nil)
+                span.IsAnonymous = true
+                span.AppendChild(letter)
+                let rest = Box(kind: .text, style: c.Style, node: c.Node)
+                rest.Text = stringOf(bytes, j, bytes.count)
+                rest.TextStart = c.TextStart + j
+                container.Children.remove(at: i)
+                var at = i
+                if start > 0 {
+                    let lead = Box(kind: .text, style: c.Style, node: c.Node)
+                    lead.Text = stringOf(bytes, 0, start)
+                    lead.TextStart = c.TextStart
+                    lead.Parent = container
+                    container.Children.insert(lead, at: at)
+                    at += 1
+                }
+                span.Parent = container
+                container.Children.insert(span, at: at)
+                if !rest.Text.isEmpty {
+                    rest.Parent = container
+                    container.Children.insert(rest, at: at + 1)
+                }
+                return
+            }
+            if c.Kind == .inline || (c.Kind == .block && c.IsAnonymous) {
+                container = c
+                i = 0
+                continue
+            }
+            return
+        }
     }
 
     /// Adds the boxes of ::before and ::after where rules give them
@@ -508,4 +581,12 @@ public func EmbedsDocument(_ node: html.Node) -> bool {
     if !type.isEmpty { return false }
     let src = css.lower(node.GetAttribute(node.TagName == "object" ? "data" : "src") ?? "")
     return src.hasSuffix(".html") || src.hasSuffix(".htm") || src.hasSuffix("/")
+}
+
+/// ASCII punctuation that ::first-letter takes with the letter.
+func isPunctuation(_ b: uint8) -> bool {
+    switch b {
+    case 33, 34, 35, 37, 38, 39, 40, 41, 42, 44, 45, 46, 47, 58, 59, 63, 64, 91, 92, 93, 95, 123, 125: return true
+    default: return false
+    }
 }

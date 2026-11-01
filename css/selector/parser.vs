@@ -248,7 +248,15 @@ func parseComplexSelector(_ selStr: string) -> ComplexSelector? {
                 } else {
                     var pseudo = Pseudo(name: name, argument: argument)
                     if name == "nth-child" || name == "nth-last-child" || name == "nth-of-type" || name == "nth-last-of-type" {
-                        let ab = parseNth(argument)
+                        // `:nth-child(2n+1 of .item)`: counted among the
+                        // siblings the selector list matches.
+                        var nth = argument
+                        if name == "nth-child" || name == "nth-last-child", let at = ofIndex(argument) {
+                            let ab = bytesFrom(argument)
+                            nth = strFrom(ab, 0, at)
+                            pseudo.Inner = ParseSelectors(trim(strFrom(ab, at + 4, ab.count)))
+                        }
+                        let ab = parseNth(nth)
                         pseudo.A = ab.a
                         pseudo.B = ab.b
                     } else if name == "not" || name == "is" || name == "where" || name == "has" {
@@ -445,4 +453,15 @@ func parseNth(_ text: string) -> (a: int, b: int) {
     }
     _ = hasN
     return (a: a, b: b)
+}
+
+/// Where " of " stands in an nth argument, in bytes; nil where it doesn't.
+func ofIndex(_ text: string) -> int? {
+    let b = bytesFrom(toLower(text))
+    var i = 0
+    while i + 4 <= b.count {
+        if b[i] == 32 && b[i + 1] == 111 && b[i + 2] == 102 && b[i + 3] == 32 { return i }
+        i += 1
+    }
+    return nil
 }

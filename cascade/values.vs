@@ -297,6 +297,12 @@ public struct TextDecoration: Equatable {
     public var Underline: bool = false
     public var Overline: bool = false
     public var LineThrough: bool = false
+    /// text-decoration-style: solid, double, dotted, dashed or wavy.
+    public var Style: string = "solid"
+    /// text-decoration-thickness and text-underline-offset in pixels;
+    /// negative thickness, and NaN-free -1000 offset, for auto.
+    public var Thickness: float32 = -1
+    public var UnderlineOffset: float32 = -1000
 
     public init() {}
 
@@ -306,6 +312,12 @@ public struct TextDecoration: Equatable {
 
     public func Union(_ o: TextDecoration) -> TextDecoration {
         var out = self
+        // The decorating box's own look wins where it draws lines.
+        if !o.IsNone {
+            out.Style = o.Style
+            out.Thickness = o.Thickness
+            out.UnderlineOffset = o.UnderlineOffset
+        }
         if o.Underline { out.Underline = true }
         if o.Overline { out.Overline = true }
         if o.LineThrough { out.LineThrough = true }

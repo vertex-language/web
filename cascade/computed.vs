@@ -82,6 +82,28 @@ public final class ComputedStyle {
     /// object-fit, and object-position as fractions of the free space
     /// and offsets, as background-position keeps them.
     public var ObjectFit: string = "fill"
+    /// outline-style ("none" draws none) and outline-offset.
+    public var OutlineStyle: string = "none"
+    public var OutlineOffset: float32 = 0
+    /// text-shadow's shadows, front first; they inherit.
+    public var TextShadows: [Shadow] = []
+    /// background-clip and background-origin: "border-box",
+    /// "padding-box", "content-box" (and "text" for the clip).
+    public var BackgroundClip: string = "border-box"
+    public var BackgroundOrigin: string = "padding-box"
+    /// grid-template-areas: each name's lines (1-based, end exclusive),
+    /// and how many columns and rows the template has.
+    public var GridAreas: [string: GridArea] = [:]
+    public var GridAreaColumns: int32 = 0
+    public var GridAreaRows: int32 = 0
+    /// justify-items and justify-self: how an item sits across its grid
+    /// area ("auto" for justify-self defers to the container's).
+    public var JustifyItems: string = "normal"
+    public var JustifySelf: string = "auto"
+    /// text-wrap-style: "auto", "balance", "pretty" or "stable"; it
+    /// inherits. line-clamp's lines, 0 for none.
+    public var TextWrapStyle: string = "auto"
+    public var LineClamp: int32 = 0
     public var ObjectPositionX: float32 = 0.5
     public var ObjectOffsetX: float32 = 0
     public var ObjectPositionY: float32 = 0.5
@@ -195,6 +217,8 @@ public final class ComputedStyle {
         BorderCollapse = parent.BorderCollapse
         BorderSpacing = parent.BorderSpacing
         TabSize = parent.TabSize
+        TextShadows = parent.TextShadows
+        TextWrapStyle = parent.TextWrapStyle
         customs = parent.customs
         Fill = parent.Fill
         FillCurrent = parent.FillCurrent
@@ -308,4 +332,38 @@ extension ComputedStyle {
         }
         return m.Concat(draw.Affine.translate(-ox, -oy))
     }
+}
+
+/// A named grid area's lines: columns ColumnStart..<ColumnEnd and rows
+/// RowStart..<RowEnd, 1-based.
+public struct GridArea: Equatable {
+    public var RowStart: int32
+    public var RowEnd: int32
+    public var ColumnStart: int32
+    public var ColumnEnd: int32
+}
+
+/// The areas of grid-template-areas' rows (css's "|"-joined form).
+func gridAreasOf(_ text: string) -> (areas: [string: GridArea], columns: int32, rows: int32) {
+    var areas: [string: GridArea] = [:]
+    if text.isEmpty { return (areas: areas, columns: 0, rows: 0) }
+    let rows = text.split(separator: "|").map { $0.split(separator: " ").map { string($0) } }
+    var y: int32 = 0
+    for r in rows {
+        var x: int32 = 0
+        for name in r {
+            if name != "." {
+                if var a = areas[name] {
+                    if y + 2 > a.RowEnd { a.RowEnd = y + 2 }
+                    if x + 2 > a.ColumnEnd { a.ColumnEnd = x + 2 }
+                    areas[name] = a
+                } else {
+                    areas[name] = GridArea(RowStart: y + 1, RowEnd: y + 2, ColumnStart: x + 1, ColumnEnd: x + 2)
+                }
+            }
+            x += 1
+        }
+        y += 1
+    }
+    return (areas: areas, columns: int32(rows.isEmpty ? 0 : rows[0].count), rows: int32(rows.count))
 }

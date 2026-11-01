@@ -201,6 +201,14 @@ public final class Page {
     var captured: html.Node? = nil
     var caret: int = 0
     var values: [int64: string] = [:]
+    /// Whether the last input was the keyboard's: focus it gives shows
+    /// :focus-visible.
+    var keyboardInput = false
+    var focusVisible = false
+    /// The element the last jump to a fragment named: :target.
+    var target: html.Node? = nil
+    /// The controls the user has changed: :user-valid and :user-invalid.
+    var userEdited = Set<int64>()
     var caretVisible = true
     var caretPhase: float64 = 0
     /// The other end of the focused field's selection: the caret when
@@ -255,6 +263,8 @@ public final class Page {
         baseURL = Configuration.BaseURL ?? ""
         let a = animator
         resolver.Animate = { node, style, parent in a.apply(node, style, parent) }
+        context.Interacted = { node in self.userEdited.contains(node.Id) }
+        context.ValueOf = { node in self.valueOf(node) }
     }
 
     // MARK: - Loading
@@ -284,6 +294,8 @@ public final class Page {
 
     func load(_ doc: html.Document) {
         frames = [:]
+        target = nil
+        userEdited = []
         pressedFrame = nil
         hoveredFrame = nil
         focusedFrame = nil
@@ -663,6 +675,8 @@ public final class Page {
             context.Reset()
             context.Hovered = hovered
             context.Focused = focused
+            context.FocusVisible = focusVisible
+            context.Target = target
             context.Active = pressed
             if let v = isVisited, resolver.UsesVisited {
                 context.Visited = { node in
@@ -984,6 +998,7 @@ public final class Page {
         if focused?.Id == node?.Id { return }
         let before = focused
         focused = node
+        focusVisible = keyboardInput
         // blur to what had focus, focus to what has it: neither bubbles.
         if let b = before { _ = dispatch(dom.FocusEvent("blur"), to: b) }
         if let n = node { _ = dispatch(dom.FocusEvent("focus"), to: n) }
@@ -1005,6 +1020,8 @@ public final class Page {
         if resolver.StateTrace.isEmpty { return }
         context.Hovered = hovered
         context.Focused = focused
+        context.FocusVisible = focusVisible
+        context.Target = target
         context.Active = pressed
         if resolver.StateMatchesChanged(context) {
             needsStyle = true
@@ -1049,6 +1066,7 @@ public final class Page {
 
     func setValue(_ node: html.Node, _ value: string) {
         values[node.Id] = value
+        userEdited.insert(node.Id)
         showCaret()
         needsStyle = true
         // The user changed the control: its listeners hear of it.

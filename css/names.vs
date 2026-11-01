@@ -16,14 +16,16 @@ let shorthandNames: [string] = [
     "padding-block-start", "padding-block-end", "border-inline-start-width",
     "border-inline-end-width", "border-start-start-radius", "border-start-end-radius",
     "border-end-start-radius", "border-end-end-radius", "inset-inline-start", "inset-inline-end",
-    "inset-block-start", "inset-block-end", "transition", "-webkit-transition", "animation", "-webkit-animation", "container"
+    "inset-block-start", "inset-block-end", "inline-size", "block-size", "min-inline-size", "max-inline-size",
+    "min-block-size", "max-block-size", "border-inline", "border-block", "border-inline-start", "border-inline-end",
+    "border-block-start", "border-block-end", "border-inline-end-width", "border-block-start-width",
+    "border-block-end-width", "grid-template", "grid", "place-self", "place-content", "text-wrap", "transition", "-webkit-transition", "animation", "-webkit-animation", "container"
 ]
 
 /// Properties the engine knows and parses past, but does not apply yet:
 /// a page that uses them renders without them. The same names as the
 /// case in Longhands that sets nothing.
 let unappliedNames: [string] = [
-    "text-decoration-style", "text-decoration-thickness", "text-underline-offset",
     "quotes", "perspective", "perspective-origin", "backface-visibility",
     "transform-style", "transform-box", "counter-reset", "counter-increment",
     "background-attachment", "font-variant", "font-stretch", "font-feature-settings", "src",
@@ -32,15 +34,13 @@ let unappliedNames: [string] = [
     "backdrop-filter", "clip-path", "will-change", "contain", "isolation", "hyphens",
     "direction", "unicode-bidi", "writing-mode", "columns", "column-count", "column-width",
     "caption-side", "empty-cells", "speak", "orphans", "widows", "page-break-before",
-    "page-break-after", "break-inside", "font-display", "text-shadow", "mix-blend-mode",
-    "background-clip", "background-origin", "outline-offset", "outline-style", "border-image",
+    "page-break-after", "break-inside", "font-display", "mix-blend-mode",
+    "border-image",
     "box-decoration-break", "text-size-adjust", "-webkit-text-size-adjust",
     "-webkit-tap-highlight-color", "touch-action", "overscroll-behavior",
     "scrollbar-color", "list-style-image", "font-kerning", "text-align-last", "text-justify",
     "font-variant-numeric", "font-variant-ligatures", "font-optical-sizing", "color-scheme",
-    "caret-color", "border-inline", "border-block", "min-inline-size",
-    "max-inline-size", "inline-size", "block-size", "place-content", "place-self", "justify-items",
-    "justify-self", "grid", "grid-template", "grid-template-areas"
+    "caret-color"
 ]
 
 /// Every property name the engine applies: its longhands, and the

@@ -267,6 +267,36 @@ func testPseudoClasses() {
 }
 
 
+func testFormAndLanguagePseudoClasses() {
+    print("Form state, language and direction pseudo-classes")
+    let doc = html.Parse("""
+    <div lang=en-US><p id=en>e</p><div lang=fr dir=rtl><p id=fr>f</p></div></div>
+    <form id=f>
+    <input id=req required><input id=filled required value=x><input id=mail type=email value=nope>
+    <input id=num type=number min=1 max=5 value=9><input id=num2 type=number min=1 max=5 value=3>
+    <input id=ro readonly value=r><textarea id=ta></textarea><input id=cb type=checkbox checked>
+    <input type=radio name=g id=r1><input type=radio name=g id=r2>
+    <input id=short minlength=3 value=ab><button id=go>go</button><button id=go2>go</button>
+    </form>
+    <details id=d open><summary>s</summary></details><ul><li class=i id=i1><li id=n><li class=i id=i2><li class=i id=i3></ul>
+    <div contenteditable><p id=ce>c</p></div>
+    """)
+    func ids(_ sel: string) -> string {
+        return selector.QuerySelectorAll(sel, in: doc.Root).map { $0.GetAttribute("id") ?? "?" }.filter { $0 != "?" }.joined(separator: " ")
+    }
+    check(ids(":lang(en)") == "en", ":lang matches a prefix before a hyphen (got \(ids(":lang(en)")))")
+    check(ids("p:lang(fr)") == "fr" && ids("p:lang(\"*-US\")") == "en", ":lang takes the nearest lang, and wildcards")
+    check(ids("p:dir(rtl)") == "fr" && ids("p:dir(ltr)").hasPrefix("en"), ":dir follows dir attributes (got \(ids("p:dir(ltr)")))")
+    check(ids("input:invalid") == "req mail num short", ":invalid: required and empty, a bad email, out of range, too short (got \(ids("input:invalid")))")
+    check(ids("form:invalid") == "f" && ids(":valid").contains("filled"), "a form with an invalid control is :invalid")
+    check(ids(":out-of-range") == "num" && ids(":in-range") == "num2", ":in-range and :out-of-range")
+    check(ids("input:read-only").contains("ro") && ids(":read-write").contains("ta") && ids("p:read-write") == "ce", ":read-only, :read-write and contenteditable")
+    check(ids(":default") == "cb go", ":default: what is checked, and the form's first submit button (got \(ids(":default")))")
+    check(ids(":indeterminate") == "r1 r2", "radios with none checked are :indeterminate")
+    check(ids(":open") == "d", ":open is an open details")
+    check(ids("li:nth-child(2 of .i)") == "i2" && ids("li:nth-last-child(1 of .i)") == "i3", ":nth-child(An+B of S) counts the matching siblings")
+}
+
 func testColors() {
     print("Testing css.ParseColor...")
     check(css.ParseColor("#fff") == draw.Color(255, 255, 255), "#fff")
@@ -377,7 +407,7 @@ func testNames() {
     var unknown: [string] = []
     for n in applied where !css.IsKnownProperty(n) && css.Longhands(css.Declaration(property: n, value: "initial", important: false, tokens: [])).isEmpty && !["outline", "place-items", "flex-flow", "inset", "grid-gap", "border-top", "border-right", "border-bottom", "border-left"].contains(n) { unknown.append(n) }
     check(unknown.isEmpty, "every applied name is one the engine expands (got \(unknown))")
-    check(applied.contains("margin") && applied.contains("color") && applied.contains("transition") && unapplied.contains("text-shadow"), "the lists hold what they should")
+    check(applied.contains("margin") && applied.contains("color") && applied.contains("transition") && unapplied.contains("clip-path"), "the lists hold what they should")
 }
 
 func main() -> int32 {
@@ -387,6 +417,7 @@ func main() -> int32 {
     testSelector()
     testPseudoClasses()
     testColors()
+    testFormAndLanguagePseudoClasses()
 
     if failures == 0 {
         print("ALL CSS CHECKS PASSED")

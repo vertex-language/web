@@ -94,6 +94,15 @@ public final class Box {
     public var RatioOnly: bool = false
     /// A field's ::placeholder style, for the text shown while it's empty.
     public var PlaceholderStyle: cascade.ComputedStyle? = nil
+    /// ::marker's style for a list item, ::selection's for an element's
+    /// text, ::first-line's for a block's first line; nil where no rule
+    /// gives one.
+    public var MarkerStyle: cascade.ComputedStyle? = nil
+    public var SelectionStyle: cascade.ComputedStyle? = nil
+    public var FirstLineStyle: cascade.ComputedStyle? = nil
+    /// Where a text box's text starts in its node's, in bytes: not 0 for
+    /// what follows a ::first-letter.
+    public var TextStart: int = 0
     /// The image a replaced image box shows, once loaded.
     public var Image: draw.Image? = nil
     /// The baseline of the box's first line, from its top, for aligning

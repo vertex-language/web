@@ -134,6 +134,21 @@ public enum Prop: int32 {
     case containerName
     case objectFit
     case objectPosition
+    case outlineStyle
+    case outlineOffset
+    case textDecorationStyle
+    case textDecorationThickness
+    case textUnderlineOffset
+    case textShadow
+    case backgroundClip
+    case backgroundOrigin
+    case gridTemplateAreas
+    case justifyItems
+    case justifySelf
+    case textWrapMode
+    case textWrapStyle
+    case whiteSpaceCollapse
+    case lineClamp
 }
 
 /// A unit a length was written in.
@@ -242,6 +257,13 @@ let propNames: [string: Prop] = [
     "animation-fill-mode": .animationFillMode, "animation-play-state": .animationPlayState,
     "container-type": .containerType, "container-name": .containerName,
     "object-fit": .objectFit, "object-position": .objectPosition,
+    "outline-style": .outlineStyle, "outline-offset": .outlineOffset,
+    "text-decoration-style": .textDecorationStyle, "text-decoration-thickness": .textDecorationThickness,
+    "text-underline-offset": .textUnderlineOffset, "text-shadow": .textShadow,
+    "text-wrap-mode": .textWrapMode, "text-wrap-style": .textWrapStyle, "white-space-collapse": .whiteSpaceCollapse,
+    "line-clamp": .lineClamp, "-webkit-line-clamp": .lineClamp,
+    "grid-template-areas": .gridTemplateAreas, "justify-items": .justifyItems, "justify-self": .justifySelf,
+    "background-clip": .backgroundClip, "-webkit-background-clip": .backgroundClip, "background-origin": .backgroundOrigin,
     "outline-width": .outlineWidth, "outline-color": .outlineColor, "accent-color": .accentColor,
     "vertical-align": .verticalAlign, "text-decoration-line": .textDecorationLine,
     "text-decoration-color": .textDecorationColor,
@@ -265,7 +287,7 @@ let propNames: [string: Prop] = [
 /// A property the engine does not know, or a value it cannot read,
 /// sets nothing, which is how a browser treats them too.
 public func Longhands(_ d: Declaration) -> [Longhand] {
-    let tokens = d.Tokens
+    guard let tokens = substituteEnv(d.Tokens) else { return [] }
     if tokens.isEmpty { return [] }
     let important = d.Important
     let name = d.Property
@@ -305,9 +327,26 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
     case "inset":
         guard let four = fourSides(tokens, allowAuto: true) else { return [] }
         set(.top, four[0]); set(.right, four[1]); set(.bottom, four[2]); set(.left, four[3])
+    case "grid-area" where tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) != "auto":
+        // A template area's name: both axes.
+        var p = GridPlacement.auto
+        p.Area = tokens[0].Value
+        set(.gridRow, .placement(p))
+        set(.gridColumn, .placement(p))
+    case "grid-template", "grid":
+        guard let parts = parseGridTemplate(tokens) else { return [] }
+        for (p, v) in parts { set(p, v) }
+    case "place-self":
+        guard let a = parseValue(.alignSelf, [tokens[0]]) else { return [] }
+        set(.alignSelf, a)
+        if let j = parseValue(.justifySelf, [tokens.count > 1 ? tokens[1] : tokens[0]]) { set(.justifySelf, j) }
+    case "place-content":
+        guard let a = parseValue(.alignContent, [tokens[0]]) else { return [] }
+        set(.alignContent, a)
+        if let j = parseValue(.justifyContent, [tokens.count > 1 ? tokens[1] : tokens[0]]) { set(.justifyContent, j) }
     case "grid-area":
         // row-start / column-start / row-end / column-end, by line
-        // number or span; names of template areas aren't placed.
+        // number or span.
         var parts: [[Token]] = [[]]
         for t in tokens {
             if t.Kind == .delim && t.Value == "/" { parts.append([]) } else { parts[parts.count - 1].append(t) }
@@ -339,11 +378,13 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
     case "border-color":
         guard let four = fourValues(tokens, parseColorValue) else { return [] }
         set(.borderTopColor, four[0]); set(.borderRightColor, four[1]); set(.borderBottomColor, four[2]); set(.borderLeftColor, four[3])
-    case "border", "border-top", "border-right", "border-bottom", "border-left":
+    case "border", "border-top", "border-right", "border-bottom", "border-left", "border-inline", "border-block",
+         "border-inline-start", "border-inline-end", "border-block-start", "border-block-end":
         let parts = parseBorderShorthand(tokens)
         var sides: [int] = [0, 1, 2, 3]
-        if name == "border-top" { sides = [0] } else if name == "border-right" { sides = [1] }
-        else if name == "border-bottom" { sides = [2] } else if name == "border-left" { sides = [3] }
+        if name == "border-top" || name == "border-block-start" { sides = [0] } else if name == "border-right" || name == "border-inline-end" { sides = [1] }
+        else if name == "border-bottom" || name == "border-block-end" { sides = [2] } else if name == "border-left" || name == "border-inline-start" { sides = [3] }
+        else if name == "border-inline" { sides = [3, 1] } else if name == "border-block" { sides = [0, 2] }
         for s in sides {
             set(borderWidthProps[s], parts.width)
             set(borderStyleProps[s], parts.style)
@@ -453,22 +494,40 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
                 i += m.1
                 continue
             }
-            if tokens[i].Kind == .ident { lines.append(lower(tokens[i].Value)) }
+            if tokens[i].Kind == .ident {
+                let kw = lower(tokens[i].Value)
+                switch kw {
+                case "solid", "double", "dotted", "dashed", "wavy": set(.textDecorationStyle, .keyword(kw))
+                case "auto", "from-font": set(.textDecorationThickness, .auto)
+                default: lines.append(kw)
+                }
+            } else if let l = parseLengthValue(tokens[i], allowAuto: false) {
+                set(.textDecorationThickness, l)
+            }
             i += 1
         }
         if lines.isEmpty { lines = ["none"] }
         set(.textDecorationLine, .keyword(joinWords(lines)))
     case "outline":
-        // outline-style isn't kept: a style of none or hidden is no
-        // outline, which is a width of 0 here (`outline: none` takes away
-        // a focus ring).
-        var noStyle = false
-        for t in tokens {
-            if t.Kind == .ident && (lower(t.Value) == "none" || lower(t.Value) == "hidden") { noStyle = true }
-            else if let w = parseBorderWidth(t) { set(.outlineWidth, w) }
-            else if let m = parseColorAt([t], 0) { set(.outlineColor, m.0) }
+        // `outline: none` takes away a focus ring: its style, and its
+        // width with it.
+        var style: Value = .keyword("none")
+        var width: Value = .length(3, .px)
+        var i = 0
+        while i < tokens.count {
+            let t = tokens[i]
+            if t.Kind == .ident, let st = parseValue(.outlineStyle, [t]) { style = st }
+            else if let w = parseBorderWidth(t) { width = w }
+            else if let m = parseColorAt(tokens, i) {
+                set(.outlineColor, m.0)
+                i += m.1
+                continue
+            }
+            i += 1
         }
-        if noStyle { set(.outlineWidth, .length(0, .px)) }
+        if case .keyword(let k) = style, k == "none" || k == "hidden" { width = .length(0, .px) }
+        set(.outlineStyle, style)
+        set(.outlineWidth, width)
     case "container":
         // `container: <name>+ [/ <type>]?`
         var names: [Token] = []
@@ -482,6 +541,13 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
         }
         set(.containerName, n)
         set(.containerType, type)
+    case "text-wrap":
+        // text-wrap-mode and text-wrap-style, either or both.
+        for tok in tokens where tok.Kind == .ident {
+            let w = lower(tok.Value)
+            if w == "wrap" || w == "nowrap" { set(.textWrapMode, .keyword(w)) }
+            else if let st = parseValue(.textWrapStyle, [tok]) { set(.textWrapStyle, st) }
+        }
     case "transition", "-webkit-transition":
         guard let parts = parseTransitionShorthand(tokens) else { return [] }
         for (p, v) in parts { set(p, v) }
@@ -490,8 +556,8 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
         for (p, v) in parts { set(p, v) }
     case "place-items":
         if let v = parseValue(.alignItems, [tokens[0]]) { set(.alignItems, v) }
-    case "text-decoration-style", "text-decoration-thickness", "text-underline-offset",
-         "quotes", "perspective", "perspective-origin", "backface-visibility",
+        if let j = parseValue(.justifyItems, [tokens.count > 1 ? tokens[1] : tokens[0]]) { set(.justifyItems, j) }
+    case "quotes", "perspective", "perspective-origin", "backface-visibility",
          "transform-style", "transform-box", "counter-reset", "counter-increment",
          "background-attachment",
          "font-variant", "font-stretch", "font-feature-settings", "src", "unicode-range",
@@ -501,15 +567,13 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
          "hyphens", "direction",
          "unicode-bidi", "writing-mode", "columns", "column-count", "column-width", "caption-side",
          "empty-cells", "speak", "orphans", "widows", "page-break-before", "page-break-after",
-         "break-inside", "font-display", "text-shadow", "mix-blend-mode", "background-clip",
-         "background-origin", "outline-offset", "outline-style", "border-image", "box-decoration-break",
+         "break-inside", "font-display", "mix-blend-mode",
+         "border-image", "box-decoration-break",
          "text-size-adjust", "-webkit-text-size-adjust", "-webkit-tap-highlight-color", "touch-action",
          "overscroll-behavior", "scrollbar-color", "list-style-image", "font-kerning",
          "text-align-last", "text-justify", "font-variant-numeric", "font-variant-ligatures",
          "font-optical-sizing", "color-scheme", "caret-color",
-         "border-inline", "border-block", "min-inline-size", "max-inline-size", "inline-size", "block-size",
-         "place-content", "place-self", "justify-items", "justify-self", "grid", "grid-template",
-         "grid-template-areas":
+         "unused-placeholder-property":
         break
     default:
         // margin-inline-start and friends, in a left-to-right, top-to-bottom world.
@@ -544,6 +608,16 @@ func logicalProp(_ name: string) -> Prop? {
     case "inset-inline-end": return .right
     case "inset-block-start": return .top
     case "inset-block-end": return .bottom
+    // Flow-relative sizes, in horizontal writing.
+    case "inline-size": return .width
+    case "block-size": return .height
+    case "min-inline-size": return .minWidth
+    case "max-inline-size": return .maxWidth
+    case "min-block-size": return .minHeight
+    case "max-block-size": return .maxHeight
+    case "border-inline-end-width": return .borderRightWidth
+    case "border-block-start-width": return .borderTopWidth
+    case "border-block-end-width": return .borderBottomWidth
     default: return nil
     }
 }
@@ -573,22 +647,33 @@ func longhandsOf(_ name: string) -> [Prop] {
     case "border": return borderWidthProps + borderStyleProps + borderColorProps
     // One side's width, style and color: what var() in border-top waits
     // to expand into.
-    case "border-top": return [borderWidthProps[0], borderStyleProps[0], borderColorProps[0]]
+    case "border-top", "border-block-start": return [borderWidthProps[0], borderStyleProps[0], borderColorProps[0]]
+    case "border-inline-start": return [borderWidthProps[3], borderStyleProps[3], borderColorProps[3]]
+    case "border-inline-end": return [borderWidthProps[1], borderStyleProps[1], borderColorProps[1]]
+    case "border-block-end": return [borderWidthProps[2], borderStyleProps[2], borderColorProps[2]]
+    case "border-inline": return [borderWidthProps[3], borderStyleProps[3], borderColorProps[3], borderWidthProps[1], borderStyleProps[1], borderColorProps[1]]
+    case "border-block": return [borderWidthProps[0], borderStyleProps[0], borderColorProps[0], borderWidthProps[2], borderStyleProps[2], borderColorProps[2]]
     case "border-right": return [borderWidthProps[1], borderStyleProps[1], borderColorProps[1]]
     case "border-bottom": return [borderWidthProps[2], borderStyleProps[2], borderColorProps[2]]
     case "border-left": return [borderWidthProps[3], borderStyleProps[3], borderColorProps[3]]
     case "border-radius": return [.borderTopLeftRadius, .borderTopRightRadius, .borderBottomRightRadius, .borderBottomLeftRadius]
     case "background": return [.backgroundColor, .backgroundImage, .backgroundRepeat, .backgroundSize, .backgroundPosition]
     case "overflow": return [.overflowX, .overflowY]
+    case "outline": return [.outlineWidth, .outlineColor, .outlineStyle]
     case "container": return [.containerName, .containerType]
+    case "text-wrap": return [.textWrapMode, .textWrapStyle]
     case "transition", "-webkit-transition": return transitionProps
     case "animation", "-webkit-animation": return animationProps
     case "font": return [.fontFamily, .fontSize, .fontWeight, .fontStyle, .lineHeight]
     case "flex": return [.flexGrow, .flexShrink, .flexBasis]
     case "gap": return [.rowGap, .columnGap]
     case "grid-area": return [.gridRow, .gridColumn]
+    case "grid-template": return [.gridTemplateRows, .gridTemplateColumns, .gridTemplateAreas]
+    case "grid": return [.gridTemplateRows, .gridTemplateColumns, .gridTemplateAreas, .gridAutoRows, .gridAutoColumns, .gridAutoFlow]
+    case "place-self": return [.alignSelf, .justifySelf]
+    case "place-content": return [.alignContent, .justifyContent]
     case "list-style": return [.listStyleType, .listStylePosition]
-    case "text-decoration": return [.textDecorationLine, .textDecorationColor]
+    case "text-decoration": return [.textDecorationLine, .textDecorationColor, .textDecorationStyle, .textDecorationThickness]
     case "margin-inline", "margin-block", "padding-inline", "padding-block", "inset-inline", "inset-block":
         return logicalPair(name)
     default:
@@ -769,14 +854,32 @@ func calcValueTerm(_ tokens: [Token], _ p: inout int, _ end: int) -> [CalcTerm]?
         return [CalcTerm(Number: t.NumberVal, Unit: .percent)]
     }
     if t.Kind == .dimension {
+        // An angle is a number of radians here, for the trigonometric
+        // functions.
+        if let a = angleRadians(t.NumberVal, lower(t.Unit)) {
+            p += 1
+            return [CalcTerm(Number: a, Unit: nil)]
+        }
         guard let parsed = parseLengthValue(t, allowAuto: false), case .length(let n, let unit) = parsed else { return nil }
         p += 1
         return [CalcTerm(Number: n, Unit: unit)]
     }
+    if t.Kind == .ident {
+        var constant: float32 = 0
+        switch lower(t.Value) {
+        case "pi": constant = 3.14159265
+        case "e": constant = 2.71828183
+        case "infinity": constant = 3.4e38
+        case "-infinity": constant = -3.4e38
+        default: return nil
+        }
+        p += 1
+        return [CalcTerm(Number: constant, Unit: nil)]
+    }
     if t.Kind == .openParen || t.Kind == .function {
         let close = closeParen(tokens, from: p + 1)
         let name = t.Kind == .function ? lower(t.Value) : ""
-        if name == "min" || name == "max" || name == "clamp" {
+        if mathFunctions.contains(name) {
             guard let folded = foldMinMax(name, tokens, p + 1, close) else { return nil }
             p = close + 1
             return [folded]
@@ -826,7 +929,27 @@ func calcAdd(_ a: [CalcTerm], _ b: [CalcTerm]) -> [CalcTerm] {
 }
 
 /// min(), max() or clamp() of arguments that are all one unit, as one term.
-func foldMinMax(_ name: string, _ tokens: [Token], _ start: int, _ end: int) -> CalcTerm? {
+/// The math functions folded where their arguments share a unit:
+/// comparison, stepped values, sign, trigonometry and exponents.
+let mathFunctions: [string] = [
+    "min", "max", "clamp", "round", "mod", "rem", "abs", "sign", "sin", "cos", "tan", "asin", "acos",
+    "atan", "atan2", "pow", "sqrt", "hypot", "log", "exp",
+]
+
+/// A math function's value where its arguments are each one term in one
+/// unit (or unitless), or nil.
+func foldMinMax(_ name: string, _ tokens: [Token], _ start0: int, _ end: int) -> CalcTerm? {
+    var start = start0
+    // round()'s strategy comes first, as a keyword.
+    var strategy = "nearest"
+    if name == "round" && start < end && tokens[start].Kind == .ident {
+        let kw = lower(tokens[start].Value)
+        if kw == "nearest" || kw == "up" || kw == "down" || kw == "to-zero" {
+            strategy = kw
+            start += 1
+            while start < end && tokens[start].Kind == .comma { start += 1 }
+        }
+    }
     var args: [[CalcTerm]] = []
     var current: [CalcTerm] = []
     var i = start
@@ -853,17 +976,77 @@ func foldMinMax(_ name: string, _ tokens: [Token], _ start: int, _ end: int) -> 
         if values.isEmpty { unit = a[0].Unit } else if a[0].Unit != unit { return nil }
         values.append(a[0].Number)
     }
-    var out = values[0]
-    if name == "min" {
+    let a = values[0]
+    let b: float32 = values.count > 1 ? values[1] : 1
+    let n = values.count
+    switch name {
+    case "min":
+        var out = a
         for v in values where v < out { out = v }
-    } else if name == "max" {
+        return CalcTerm(Number: out, Unit: unit)
+    case "max":
+        var out = a
         for v in values where v > out { out = v }
-    } else if values.count == 3 {
-        out = values[1]
+        return CalcTerm(Number: out, Unit: unit)
+    case "clamp":
+        if n != 3 { return nil }
+        var out = values[1]
         if out < values[0] { out = values[0] }
         if out > values[2] { out = values[2] }
+        return CalcTerm(Number: out, Unit: unit)
+    case "round":
+        if n > 2 || b == 0 { return nil }
+        if n == 1 && unit != nil { return nil }
+        let q = a / b
+        var r = math.Floor(q + 0.5)
+        switch strategy {
+        case "up": r = math.Ceil(q)
+        case "down": r = math.Floor(q)
+        case "to-zero": r = q < 0 ? math.Ceil(q) : math.Floor(q)
+        default: break
+        }
+        return CalcTerm(Number: r * b, Unit: unit)
+    case "mod", "rem":
+        if n != 2 || b == 0 { return nil }
+        let q = a / b
+        let k = name == "mod" ? math.Floor(q) : (q < 0 ? math.Ceil(q) : math.Floor(q))
+        return CalcTerm(Number: a - b * k, Unit: unit)
+    case "abs":
+        if n != 1 { return nil }
+        return CalcTerm(Number: a < 0 ? -a : a, Unit: unit)
+    case "sign":
+        if n != 1 { return nil }
+        return CalcTerm(Number: a > 0 ? 1 : (a < 0 ? -1 : 0), Unit: nil)
+    case "hypot":
+        var sum: float32 = 0
+        for v in values { sum += v * v }
+        return CalcTerm(Number: math.Sqrt(sum), Unit: unit)
+    case "atan2":
+        // Two of the same unit: an angle, in radians.
+        if n != 2 { return nil }
+        return CalcTerm(Number: math.Atan2(a, b), Unit: nil)
+    default:
+        break
     }
-    return CalcTerm(Number: out, Unit: unit)
+    // The rest take and give plain numbers (angles in radians).
+    if unit != nil { return nil }
+    var out: float32 = 0
+    switch name {
+    case "sin": out = math.Sin(a)
+    case "cos": out = math.Cos(a)
+    case "tan": out = math.Tan(a)
+    case "asin": out = math.Asin(a)
+    case "acos": out = math.Acos(a)
+    case "atan": out = math.Atan(a)
+    case "pow":
+        if n != 2 { return nil }
+        out = math.Pow(a, b)
+    case "sqrt": out = math.Sqrt(a)
+    case "exp": out = math.Exp(a)
+    case "log": out = n == 2 ? math.Log(a) / math.Log(b) : math.Log(a)
+    default: return nil
+    }
+    return CalcTerm(Number: out, Unit: nil)
 }
 
 /// A calc(), min(), max() or clamp() at the start of a value.
@@ -874,7 +1057,7 @@ func calcValue(_ tokens: [Token]) -> Value? {
     if name == "calc" || name == "-webkit-calc" {
         return parseCalc(tokens, 1, end)
     }
-    if name == "min" || name == "max" || name == "clamp" {
+    if mathFunctions.contains(name) {
         if let t = foldMinMax(name, tokens, 1, end) {
             if let u = t.Unit { return .length(t.Number, u) }
             return .number(t.Number)
@@ -1224,6 +1407,9 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
              "table-footer-group", "table-caption", "table-column", "table-column-group", "contents",
              "grid", "inline-grid", "flow-root":
             return .keyword(kw)
+        // The old flexbox's names, which line-clamp goes with.
+        case "-webkit-box": return .keyword("flow-root")
+        case "-webkit-inline-box": return .keyword("inline-block")
         default: return nil
         }
     case .position:
@@ -1292,6 +1478,61 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
         return parseBackgroundSize(tokens)
     case .backgroundPosition, .objectPosition:
         return parseBackgroundPosition(tokens)
+    case .outlineStyle:
+        switch kw {
+        case "none", "hidden", "auto", "solid", "dashed", "dotted", "double", "groove", "ridge", "inset", "outset": return .keyword(kw)
+        default: return nil
+        }
+    case .outlineOffset:
+        return parseLengthValue(t, allowAuto: false) ?? calcValue(tokens)
+    case .textDecorationStyle:
+        switch kw {
+        case "solid", "double", "dotted", "dashed", "wavy": return .keyword(kw)
+        default: return nil
+        }
+    case .textDecorationThickness, .textUnderlineOffset:
+        if kw == "auto" || kw == "from-font" { return .auto }
+        return parseLengthValue(t, allowAuto: false) ?? calcValue(tokens)
+    case .textShadow:
+        if kw == "none" { return Value.none }
+        return parseShadows(tokens)
+    case .gridTemplateAreas:
+        return parseTemplateAreas(tokens)
+    case .textWrapMode:
+        return kw == "wrap" || kw == "nowrap" ? .keyword(kw) : nil
+    case .textWrapStyle:
+        switch kw {
+        case "auto", "balance", "pretty", "stable": return .keyword(kw)
+        default: return nil
+        }
+    case .whiteSpaceCollapse:
+        switch kw {
+        case "collapse", "preserve", "preserve-breaks", "break-spaces", "preserve-spaces": return .keyword(kw)
+        default: return nil
+        }
+    case .lineClamp:
+        if kw == "none" { return .number(0) }
+        if t.Kind == .number && t.NumberVal >= 1 { return .number(t.NumberVal) }
+        return nil
+    case .justifyItems, .justifySelf:
+        // The leading `legacy`, `safe` and `unsafe` say nothing here.
+        for tok in tokens where tok.Kind == .ident {
+            let w = lower(tok.Value)
+            switch w {
+            case "auto", "normal", "stretch", "start", "end", "center", "left", "right", "self-start", "self-end",
+                 "flex-start", "flex-end", "baseline":
+                if w == "auto" && prop == .justifyItems { return nil }
+                return .keyword(w)
+            default: continue
+            }
+        }
+        return nil
+    case .backgroundClip, .backgroundOrigin:
+        switch kw {
+        case "border-box", "padding-box", "content-box": return .keyword(kw)
+        case "text": return prop == .backgroundClip ? .keyword(kw) : nil
+        default: return nil
+        }
     case .objectFit:
         switch kw {
         case "fill", "contain", "cover", "none", "scale-down": return .keyword(kw)
@@ -1544,7 +1785,8 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
 
 func isGradientName(_ name: string) -> bool {
     return name == "linear-gradient" || name == "-webkit-linear-gradient" || name == "repeating-linear-gradient" ||
-        name == "radial-gradient" || name == "-webkit-radial-gradient"
+        name == "radial-gradient" || name == "-webkit-radial-gradient" || name == "repeating-radial-gradient" ||
+        name == "conic-gradient" || name == "repeating-conic-gradient"
 }
 
 /// The index of the paren closing a function whose arguments start at
@@ -1618,7 +1860,56 @@ func parseGradient(_ tokens: [Token], _ start: int, _ end: int) -> draw.LinearGr
         else { angle = dy > 0 ? 225 : 315 }
         firstStop = 1
     }
-    let radial = start > 0 && tokens[start - 1].Kind == .function && lower(tokens[start - 1].Value).hasSuffix("radial-gradient")
+    let fname = start > 0 && tokens[start - 1].Kind == .function ? lower(tokens[start - 1].Value) : ""
+    let radial = fname.hasSuffix("radial-gradient")
+    let conic = fname.hasSuffix("conic-gradient")
+    var conicShape: draw.ConicShape? = nil
+    if conic {
+        // `from <angle>` and `at <position>`, either or both, before the
+        // stops.
+        angle = 0
+        firstStop = 0
+        var c = draw.ConicShape()
+        if parseColorAt(head, 0) == nil {
+            var k = 0
+            while k < head.count {
+                let word = head[k].Kind == .ident ? lower(head[k].Value) : ""
+                if word == "from" && k + 1 < head.count {
+                    if let a = angleRadians(head[k + 1].NumberVal, lower(head[k + 1].Unit)) { angle = a * 57.29578 }
+                    k += 2
+                    continue
+                }
+                if word == "at" {
+                    var axis = 0
+                    var j = k + 1
+                    while j < head.count && axis < 2 {
+                        let p = head[j]
+                        let kw = p.Kind == .ident ? lower(p.Value) : ""
+                        var frac: float32 = -1
+                        var px: float32 = 0
+                        switch kw {
+                        case "left": frac = 0; axis = 0
+                        case "right": frac = 1; axis = 0
+                        case "top": frac = 0; axis = 1
+                        case "bottom": frac = 1; axis = 1
+                        case "center": frac = 0.5
+                        default:
+                            if p.Kind == .percentage { frac = p.NumberVal / 100 }
+                            else if case .length(let n, .px) = parseLengthValue(p, allowAuto: false) ?? .none { frac = 0; px = n }
+                        }
+                        if axis == 0 { c.CenterX = frac; c.OffsetX = px } else { c.CenterY = frac; c.OffsetY = px }
+                        axis += 1
+                        j += 1
+                    }
+                    k = j
+                    continue
+                }
+                k += 1
+            }
+            firstStop = 1
+        }
+        conicShape = c
+    }
     var shape: draw.RadialShape? = nil
     if radial {
         var r = draw.RadialShape()
@@ -1638,13 +1929,24 @@ func parseGradient(_ tokens: [Token], _ start: int, _ end: int) -> draw.LinearGr
         var color = draw.Color.black
         if case .color(let c) = m.0 { color = c }
         var pos: float32 = -1
-        if m.1 < arg.count {
-            let pt = arg[m.1]
-            if pt.Kind == .percentage { pos = pt.NumberVal / 100 }
-            else if pt.Kind == .number { pos = pt.NumberVal }
+        var second: float32 = -1
+        var p = m.1
+        while p < arg.count && p < m.1 + 2 {
+            let pt = arg[p]
+            var v: float32 = -1
+            if pt.Kind == .percentage { v = pt.NumberVal / 100 }
+            else if pt.Kind == .number { v = pt.NumberVal }
+            else if conic && pt.Kind == .dimension, let a = angleRadians(pt.NumberVal, lower(pt.Unit)) { v = a / 6.2831853 }
+            if p == m.1 { pos = v } else { second = v }
+            p += 1
         }
         stops.append(draw.GradientStop(color, at: pos))
         positions.append(pos)
+        // `red 10% 20%`: a stop at each, one color between.
+        if second >= 0 {
+            stops.append(draw.GradientStop(color, at: second))
+            positions.append(second)
+        }
         k += 1
     }
     if stops.isEmpty { return nil }
@@ -1677,6 +1979,8 @@ func parseGradient(_ tokens: [Token], _ start: int, _ end: int) -> draw.LinearGr
     }
     var g = draw.LinearGradient(angle: angle, stops: stops)
     g.Radial = shape
+    g.Conic = conicShape
+    g.Repeating = fname.hasPrefix("repeating-")
     return g
 }
 
@@ -1873,6 +2177,12 @@ func trackOfCalc(_ v: Value?) -> GridTrack? {
 
 /// grid-column / grid-row: `2`, `span 2`, `1 / 3`, `1 / span 2`, `auto`.
 func parsePlacement(_ tokens: [Token]) -> GridPlacement {
+    if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) != "auto" {
+        // An area's name: its lines on this axis.
+        var p = GridPlacement.auto
+        p.Area = tokens[0].Value
+        return p
+    }
     var start: int32 = 0
     var end: int32 = 0
     var span: int32 = 0
@@ -1908,6 +2218,11 @@ func gridAreaSide(_ parts: [[Token]], _ k: int, end: bool) -> GridPlacement {
 /// side the line is the placement's End.
 func parsePlacementSide(_ tokens: [Token], end: bool) -> GridPlacement {
     var p = GridPlacement(start: 0, span: 0)
+    if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) != "auto" {
+        p.Span = 1
+        p.Area = tokens[0].Value
+        return p
+    }
     var spanNext = false
     for t in tokens {
         if t.Kind == .ident && lower(t.Value) == "span" { spanNext = true; continue }
@@ -1918,4 +2233,190 @@ func parsePlacementSide(_ tokens: [Token], end: bool) -> GridPlacement {
         }
     }
     return p
+}
+
+/// env()'s variables, by name, as the host sets them: the safe area's
+/// insets and the like. A name not here takes env()'s fallback; the
+/// safe-area, keyboard and title-bar areas are 0 where nothing is set.
+public var EnvironmentVariables: [string: string] = [:]
+
+/// The tokens of a piece of CSS.
+public func Tokenize(_ text: string) -> [Token] {
+    let scanner = Scanner(source: text)
+    var out: [Token] = []
+    while true {
+        let t = scanner.Next()
+        if t.Kind == .eof { break }
+        out.append(t)
+    }
+    return out
+}
+
+/// Tokens with every env(name, fallback) replaced by its value; nil
+/// where one names nothing and has no fallback.
+func substituteEnv(_ tokens: [Token]) -> [Token]? {
+    var has = false
+    for t in tokens where t.Kind == .function && lower(t.Value) == "env" { has = true }
+    if !has { return tokens }
+    var out: [Token] = []
+    var i = 0
+    while i < tokens.count {
+        let t = tokens[i]
+        if t.Kind == .function && lower(t.Value) == "env" {
+            let close = closeParen(tokens, from: i + 1)
+            let args = splitArgs(tokens, i + 1, close)
+            var name = ""
+            if let first = args.first, let n = first.first, n.Kind == .ident { name = n.Value }
+            var value: [Token]? = nil
+            if let text = EnvironmentVariables[name] {
+                value = Tokenize(text)
+            } else if name.hasPrefix("safe-area-inset-") || name.hasPrefix("keyboard-inset-") || name.hasPrefix("titlebar-area-") {
+                // Defined, as 0: the fallback is for names that aren't.
+                value = [Token(kind: .number, value: "0", numberVal: 0)]
+            } else if args.count > 1 {
+                value = args[1]
+            }
+            guard var v = value else { return nil }
+            if !v.isEmpty { v[0].SpaceBefore = t.SpaceBefore }
+            out.append(contentsOf: v)
+            i = close + 1
+            continue
+        }
+        out.append(t)
+        i += 1
+    }
+    return out
+}
+
+/// grid-template-areas: none, or one string a row, each cell a name or a
+/// run of dots (no area); kept as the rows' cells, space-separated and
+/// joined by "|". Nil where the rows differ in length or an area isn't
+/// a rectangle.
+func parseTemplateAreas(_ tokens: [Token]) -> Value? {
+    if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) == "none" { return .string("") }
+    var rows: [[string]] = []
+    for t in tokens {
+        guard t.Kind == .string else { return nil }
+        var cells: [string] = []
+        for w in t.Value.split(separator: " ") {
+            let cell = string(w)
+            if cell.isEmpty { continue }
+            var dots = true
+            for c in cell.utf8 where c != 46 { dots = false }
+            cells.append(dots ? "." : cell)
+        }
+        if cells.isEmpty { return nil }
+        rows.append(cells)
+    }
+    if rows.isEmpty { return nil }
+    for r in rows where r.count != rows[0].count { return nil }
+    // Each name's cells must fill the rectangle they span.
+    var seen: [string] = []
+    for r in rows {
+        for name in r where name != "." && !seen.contains(name) {
+            seen.append(name)
+            var r0 = 1000
+            var r1 = -1
+            var c0 = 1000
+            var c1 = -1
+            var count = 0
+            var y = 0
+            while y < rows.count {
+                var x = 0
+                while x < rows[y].count {
+                    if rows[y][x] == name {
+                        count += 1
+                        if y < r0 { r0 = y }
+                        if y > r1 { r1 = y }
+                        if x < c0 { c0 = x }
+                        if x > c1 { c1 = x }
+                    }
+                    x += 1
+                }
+                y += 1
+            }
+            if count != (r1 - r0 + 1) * (c1 - c0 + 1) { return nil }
+        }
+    }
+    return .string(rows.map { $0.joined(separator: " ") }.joined(separator: "|"))
+}
+
+/// grid-template (and grid's template forms): none; rows / columns; or
+/// rows of area strings, each with its height, then / columns.
+func parseGridTemplate(_ tokens: [Token]) -> [(Prop, Value)]? {
+    if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) == "none" {
+        return [(.gridTemplateRows, Value.none), (.gridTemplateColumns, Value.none), (.gridTemplateAreas, .string(""))]
+    }
+    var slash = -1
+    var i = 0
+    var depth = 0
+    while i < tokens.count {
+        if tokens[i].Kind == .function || tokens[i].Kind == .openParen { depth += 1 }
+        if tokens[i].Kind == .closeParen { depth -= 1 }
+        if depth == 0 && tokens[i].Kind == .delim && tokens[i].Value == "/" { slash = i }
+        i += 1
+    }
+    let rowPart = slash >= 0 ? Array(tokens[0..<slash]) : tokens
+    let colPart = slash >= 0 ? Array(tokens[(slash + 1)...]) : []
+    var out: [(Prop, Value)] = []
+    // grid: auto-flow forms.
+    var flowRow = false
+    var flowColumn = false
+    for t in rowPart where t.Kind == .ident && lower(t.Value) == "auto-flow" { flowRow = true }
+    for t in colPart where t.Kind == .ident && lower(t.Value) == "auto-flow" { flowColumn = true }
+    if flowRow || flowColumn {
+        let tracksOf: ([Token]) -> [Token] = { list in list.filter { !($0.Kind == .ident && (lower($0.Value) == "auto-flow" || lower($0.Value) == "dense")) } }
+        if flowRow {
+            out.append((.gridAutoFlow, .keyword("row")))
+            let rows = parseTracks(tracksOf(rowPart), 0, tracksOf(rowPart).count)
+            if !rows.isEmpty { out.append((.gridAutoRows, .tracks(rows))) }
+            let cols = parseTracks(colPart, 0, colPart.count)
+            if !cols.isEmpty { out.append((.gridTemplateColumns, .tracks(cols))) }
+        } else {
+            out.append((.gridAutoFlow, .keyword("column")))
+            let cols = parseTracks(tracksOf(colPart), 0, tracksOf(colPart).count)
+            if !cols.isEmpty { out.append((.gridAutoColumns, .tracks(cols))) }
+            let rows = parseTracks(rowPart, 0, rowPart.count)
+            if !rows.isEmpty { out.append((.gridTemplateRows, .tracks(rows))) }
+        }
+        return out
+    }
+    var hasStrings = false
+    for t in rowPart where t.Kind == .string { hasStrings = true }
+    if hasStrings {
+        var areaTokens: [Token] = []
+        var rowTracks: [GridTrack] = []
+        var j = 0
+        while j < rowPart.count {
+            let t = rowPart[j]
+            if t.Kind == .string {
+                areaTokens.append(t)
+                // The row's height follows its string, or it is auto.
+                var k = j + 1
+                var size: [Token] = []
+                while k < rowPart.count && rowPart[k].Kind != .string { size.append(rowPart[k]); k += 1 }
+                let tracks = parseTracks(size, 0, size.count)
+                rowTracks.append(tracks.isEmpty ? GridTrack.auto : tracks[0])
+                j = k
+                continue
+            }
+            j += 1
+        }
+        guard let areas = parseTemplateAreas(areaTokens) else { return nil }
+        out.append((.gridTemplateAreas, areas))
+        out.append((.gridTemplateRows, .tracks(rowTracks)))
+    } else {
+        let rows = parseTracks(rowPart, 0, rowPart.count)
+        if rows.isEmpty { return nil }
+        out.append((.gridTemplateRows, .tracks(rows)))
+        out.append((.gridTemplateAreas, .string("")))
+    }
+    if !colPart.isEmpty {
+        let cols = parseTracks(colPart, 0, colPart.count)
+        if cols.isEmpty { return nil }
+        out.append((.gridTemplateColumns, .tracks(cols)))
+    } else {
+        out.append((.gridTemplateColumns, Value.none))
+    }
+    return out
 }

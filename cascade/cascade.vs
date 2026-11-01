@@ -69,6 +69,9 @@ public final class RuleSet {
     /// way: they match an element's generated content, not the element.
     let before = Buckets()
     let after = Buckets()
+    /// The rules of the other pseudo-elements, by name: ::marker,
+    /// ::selection, ::first-line, ::first-letter.
+    var otherPseudos: [string: Buckets] = [:]
     /// Rules on a field's ::placeholder text.
     let placeholder = Buckets()
     var order: int32 = 0
@@ -251,9 +254,24 @@ public final class RuleSet {
         let last = r.Selector.Compounds[r.Selector.Compounds.count - 1].Part
         if let pe = last.PseudoElement {
             if pe == "before" { before.add(r) } else if pe == "after" { after.add(r) } else if pe == "placeholder" { placeholder.add(r) }
+            else {
+                let b = otherPseudos[pe] ?? Buckets()
+                b.add(r)
+                otherPseudos[pe] = b
+            }
             return
         }
         main.add(r)
+    }
+
+    /// The rules of a pseudo-element; an empty set for one with none.
+    func pseudoBuckets(_ which: string) -> Buckets? {
+        switch which {
+        case "before": return before
+        case "after": return after
+        case "placeholder": return placeholder
+        default: return otherPseudos[which] ?? Buckets()
+        }
     }
 
     /// Re-evaluates every @media rule for a viewport.
@@ -718,6 +736,14 @@ public final class StyleResolver {
     public var UsesActive: bool { return Author.UsesActive || UA.UsesActive }
     public var UsesVisited: bool { return Author.UsesVisited || UA.UsesVisited }
 
+    /// Whether a sheet has rules for a pseudo-element: ::marker,
+    /// ::selection, ::first-line or ::first-letter.
+    public func HasPseudo(_ which: string) -> bool {
+        if let b = UA.otherPseudos[which], !b.isEmpty { return true }
+        if let b = Author.otherPseudos[which], !b.isEmpty { return true }
+        return false
+    }
+
     /// Whether any rule generates content before or after elements.
     public var HasPseudoElements: bool { return !UA.before.isEmpty || !UA.after.isEmpty || !Author.before.isEmpty || !Author.after.isEmpty }
 
@@ -725,8 +751,7 @@ public final class StyleResolver {
     /// The style of an element's ::before or ::after, or nil where no
     /// rule gives it content.
     public func ResolvePseudo(_ node: html.Node, _ which: string, parent: ComputedStyle, context: selector.MatchContext) -> ComputedStyle? {
-        let uaBuckets = which == "before" ? UA.before : (which == "after" ? UA.after : UA.placeholder)
-        let authorBuckets = which == "before" ? Author.before : (which == "after" ? Author.after : Author.placeholder)
+        guard let uaBuckets = UA.pseudoBuckets(which), let authorBuckets = Author.pseudoBuckets(which) else { return nil }
         if uaBuckets.isEmpty && authorBuckets.isEmpty { return nil }
         var uaList: [StyleRule] = []
         uaBuckets.candidates(node, into: &uaList)
@@ -775,7 +800,7 @@ public final class StyleResolver {
         for d in declarations where d.Prop != .fontSize { apply(d, style, ctx) }
         // ::before and ::after exist only with content; ::placeholder
         // is the field's own.
-        if which != "placeholder" && style.Content == nil { return nil }
+        if (which == "before" || which == "after") && style.Content == nil { return nil }
         finish(style, node: node, root: false)
         return style
     }
@@ -1179,6 +1204,47 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
         applyAnimationProperty(d.Prop, v, s)
     case .containerType: if let k = keywordOf(v) { s.ContainerType = k }
     case .objectFit: if let k = keywordOf(v) { s.ObjectFit = k }
+    case .outlineStyle: if let k = keywordOf(v) { s.OutlineStyle = k }
+    case .outlineOffset: if let p = pixels(v, s, ctx) { s.OutlineOffset = p }
+    case .textDecorationStyle: if let k = keywordOf(v) { s.TextDecoration.Style = k }
+    case .textDecorationThickness:
+        if case .auto = v { s.TextDecoration.Thickness = -1 }
+        else if case .length(let n, .percent) = v { s.TextDecoration.Thickness = n * s.FontSize / 100 }
+        else if let p = pixels(v, s, ctx) { s.TextDecoration.Thickness = p }
+    case .textUnderlineOffset:
+        if case .auto = v { s.TextDecoration.UnderlineOffset = -1000 }
+        else if case .length(let n, .percent) = v { s.TextDecoration.UnderlineOffset = n * s.FontSize / 100 }
+        else if let p = pixels(v, s, ctx) { s.TextDecoration.UnderlineOffset = p }
+    case .textShadow:
+        if case .shadows(let list) = v {
+            var out: [Shadow] = []
+            for sh in list {
+                out.append(Shadow(x: pixels(sh.X, s, ctx) ?? 0, y: pixels(sh.Y, s, ctx) ?? 0,
+                                  blur: pixels(sh.Blur, s, ctx) ?? 0, spread: 0, color: sh.Color ?? s.Color, inset: false))
+            }
+            s.TextShadows = out
+        } else {
+            s.TextShadows = []
+        }
+    case .gridTemplateAreas:
+        if case .string(let text) = v {
+            let g = gridAreasOf(text)
+            s.GridAreas = g.areas
+            s.GridAreaColumns = g.columns
+            s.GridAreaRows = g.rows
+        }
+    case .justifyItems: if let k = keywordOf(v) { s.JustifyItems = k }
+    case .textWrapStyle: if let k = keywordOf(v) { s.TextWrapStyle = k }
+    case .lineClamp: if case .number(let n) = v { s.LineClamp = int32(n) }
+    case .textWrapMode:
+        // white-space is wrapping and collapsing together: this sets the
+        // first and keeps the second.
+        if let k = keywordOf(v) { s.WhiteSpace = whiteSpaceOf(collapse: collapseOf(s.WhiteSpace), wraps: k == "wrap") }
+    case .whiteSpaceCollapse:
+        if let k = keywordOf(v) { s.WhiteSpace = whiteSpaceOf(collapse: k, wraps: s.WhiteSpace.Wraps) }
+    case .justifySelf: if let k = keywordOf(v) { s.JustifySelf = k }
+    case .backgroundClip: if let k = keywordOf(v) { s.BackgroundClip = k }
+    case .backgroundOrigin: if let k = keywordOf(v) { s.BackgroundOrigin = k }
     case .objectPosition:
         if let k = keywordOf(v) {
             let p = backgroundPosition(words(k), s)
@@ -1246,6 +1312,9 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
     case .textDecorationLine:
         if let k = keywordOf(v) {
             var td = TextDecoration()
+            td.Style = s.TextDecoration.Style
+            td.Thickness = s.TextDecoration.Thickness
+            td.UnderlineOffset = s.TextDecoration.UnderlineOffset
             for word in words(k) {
                 if word == "underline" { td.Underline = true }
                 if word == "overline" { td.Overline = true }
@@ -1678,6 +1747,24 @@ func nonNegative(_ l: css.Length) -> css.Length {
     }
 }
 
+/// white-space-collapse's word for a white-space value.
+func collapseOf(_ w: WhiteSpace) -> string {
+    switch w {
+    case .pre, .preWrap: return "preserve"
+    case .preLine: return "preserve-breaks"
+    default: return "collapse"
+    }
+}
+
+/// The white-space value of a collapse and whether lines wrap.
+func whiteSpaceOf(collapse: string, wraps: bool) -> WhiteSpace {
+    switch collapse {
+    case "preserve", "break-spaces", "preserve-spaces": return wraps ? .preWrap : .pre
+    case "preserve-breaks": return wraps ? .preLine : .pre
+    default: return wraps ? .normal : .nowrap
+    }
+}
+
 func displayOf(_ k: string) -> Display {
     switch k {
     case "none": return .none
@@ -1823,6 +1910,23 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
         copyAnimationProperty(p, from: a, to: b)
     case .containerType: b.ContainerType = a.ContainerType
     case .objectFit: b.ObjectFit = a.ObjectFit
+    case .outlineStyle: b.OutlineStyle = a.OutlineStyle
+    case .outlineOffset: b.OutlineOffset = a.OutlineOffset
+    case .textDecorationStyle: b.TextDecoration.Style = a.TextDecoration.Style
+    case .textDecorationThickness: b.TextDecoration.Thickness = a.TextDecoration.Thickness
+    case .textUnderlineOffset: b.TextDecoration.UnderlineOffset = a.TextDecoration.UnderlineOffset
+    case .textShadow: b.TextShadows = a.TextShadows
+    case .gridTemplateAreas:
+        b.GridAreas = a.GridAreas
+        b.GridAreaColumns = a.GridAreaColumns
+        b.GridAreaRows = a.GridAreaRows
+    case .justifyItems: b.JustifyItems = a.JustifyItems
+    case .textWrapStyle: b.TextWrapStyle = a.TextWrapStyle
+    case .lineClamp: b.LineClamp = a.LineClamp
+    case .textWrapMode, .whiteSpaceCollapse: b.WhiteSpace = a.WhiteSpace
+    case .justifySelf: b.JustifySelf = a.JustifySelf
+    case .backgroundClip: b.BackgroundClip = a.BackgroundClip
+    case .backgroundOrigin: b.BackgroundOrigin = a.BackgroundOrigin
     case .objectPosition:
         b.ObjectPositionX = a.ObjectPositionX
         b.ObjectOffsetX = a.ObjectOffsetX

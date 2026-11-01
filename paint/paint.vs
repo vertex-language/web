@@ -360,11 +360,16 @@ final class DisplayListBuilder {
                 items.append(.fill(bar, color(draw.Color(0, 0, 0, 80)), draw.Radii(all: 2.5)))
             }
         }
-        if s.Visibility == .visible && s.OutlineWidth > 0 && box.Node != nil && box.Node!.Id == focused {
+        if s.Visibility == .visible && s.OutlineWidth > 0 && s.OutlineStyle != "none" && s.OutlineStyle != "hidden" {
             let w = s.OutlineWidth
-            let ring = draw.Rect(x - w, y - w, box.Width + 2 * w, box.Height + 2 * w)
+            let o = s.OutlineOffset
+            let ring = draw.Rect(x - w - o, y - w - o, box.Width + 2 * (w + o), box.Height + 2 * (w + o))
             let c = color(s.OutlineColor ?? draw.Color(0, 95, 204))
-            items.append(.border(ring, draw.Edges(all: w), [c, c, c, c], !s.HasBorderRadius ? draw.Radii.zero : draw.Radii(all: s.Radii(width: box.Width, height: box.Height).TopLeft + w)))
+            // auto follows the box's corners; the rest are square
+            // unless the box is round, as browsers draw them.
+            let radii = !s.HasBorderRadius ? draw.Radii.zero : draw.Radii(all: s.Radii(width: box.Width, height: box.Height).TopLeft + w + o)
+            let style = s.OutlineStyle == "auto" ? "solid" : s.OutlineStyle
+            styledRing(ring, draw.Edges(all: w), [c, c, c, c], radii, [style, style, style, style])
         }
         if blurred { items.append(PaintItem(.unlayer)) }
         opacity = savedOpacity
@@ -410,8 +415,10 @@ final class DisplayListBuilder {
                     paintFloatsWithin(child, x: sx, y: sy, skipBackground: skipBackground)
                 }
             } else if phase == .inlineContent {
+                var first = true
                 for line in box.Lines {
-                    paintLine(box, line, x: sx, y: sy, visible: visible)
+                    paintLine(box, line, x: sx, y: sy, visible: visible, firstLine: first)
+                    first = false
                 }
             }
             return
@@ -485,11 +492,27 @@ final class DisplayListBuilder {
                 i += 1
             }
         }
-        if s.BackgroundColor.A > 0 {
-            items.append(.fill(rect, color(s.BackgroundColor), radii))
+        // background-clip: where the background shows; background-origin:
+        // what the image is positioned and sized in.
+        func area(_ which: string) -> (rect: draw.Rect, radii: draw.Radii) {
+            switch which {
+            case "padding-box":
+                return (rect: draw.Rect(x + box.Border.Left, y + box.Border.Top, box.PaddingBoxWidth, box.PaddingBoxHeight), radii: radii.Inset(box.Border))
+            case "content-box":
+                let inset = draw.Edges(box.Border.Top + box.Padding.Top, box.Border.Right + box.Padding.Right,
+                                       box.Border.Bottom + box.Padding.Bottom, box.Border.Left + box.Padding.Left)
+                return (rect: draw.Rect(x + inset.Left, y + inset.Top, box.Width - inset.Horizontal, box.Height - inset.Vertical), radii: radii.Inset(inset))
+            default:
+                return (rect: rect, radii: radii)
+            }
         }
-        if let bg = s.BackgroundImage {
-            let paddingBox = draw.Rect(x + box.Border.Left, y + box.Border.Top, box.PaddingBoxWidth, box.PaddingBoxHeight)
+        let clip = area(s.BackgroundClip == "text" ? "border-box" : s.BackgroundClip)
+        if s.BackgroundColor.A > 0 && s.BackgroundClip != "text" {
+            items.append(.fill(clip.rect, color(s.BackgroundColor), clip.radii))
+        }
+        if let bg = s.BackgroundImage, s.BackgroundClip != "text" {
+            let paddingBox = area(s.BackgroundOrigin).rect
+            let shown = clip.rect.Intersect(s.BackgroundClip == "border-box" ? area("padding-box").rect.Union(clip.rect) : clip.rect)
             if var g = bg.Gradient {
                 if opacity < 1 {
                     var i = 0
@@ -498,7 +521,7 @@ final class DisplayListBuilder {
                         i += 1
                     }
                 }
-                items.append(.gradient(paddingBox, g, radii.Inset(box.Border)))
+                items.append(.gradient(shown, g, clip.radii))
             } else if !bg.URL.isEmpty, let img = images[bg.URL], img.Width > 0 && img.Height > 0 {
                 var tw = float32(img.Width)
                 var th = float32(img.Height)
@@ -522,8 +545,8 @@ final class DisplayListBuilder {
                 }
                 let ox = paddingBox.X + (paddingBox.Width - tw) * bg.PositionX + bg.OffsetX
                 let oy = paddingBox.Y + (paddingBox.Height - th) * bg.PositionY + bg.OffsetY
-                items.append(.tiles(paddingBox, img, tileWidth: tw, tileHeight: th, originX: ox, originY: oy,
-                                    repeatX: bg.RepeatX, repeatY: bg.RepeatY, opacity: opacity, radii: radii.Inset(box.Border)))
+                items.append(.tiles(shown, img, tileWidth: tw, tileHeight: th, originX: ox, originY: oy,
+                                    repeatX: bg.RepeatX, repeatY: bg.RepeatY, opacity: opacity, radii: clip.radii))
             }
         }
         let widths = box.Border
@@ -534,7 +557,81 @@ final class DisplayListBuilder {
                 colors.append(color(borderSideColor(s, side)))
                 side += 1
             }
+            styledRing(rect, widths, colors, radii, [styleName(s.BorderTopStyle), styleName(s.BorderRightStyle),
+                                                     styleName(s.BorderBottomStyle), styleName(s.BorderLeftStyle)])
+        }
+    }
+
+    func styleName(_ b: cascade.BorderStyle) -> string {
+        switch b {
+        case .dashed: return "dashed"
+        case .dotted: return "dotted"
+        case .double: return "double"
+        default: return "solid"
+        }
+    }
+
+    /// A border or outline whose sides may be dashed, dotted or double:
+    /// the solid sides as one ring, the others drawn side by side. On a
+    /// rounded box every side is drawn solid.
+    func styledRing(_ rect: draw.Rect, _ widths: draw.Edges, _ colors: [draw.Color], _ radii: draw.Radii, _ styles: [string]) {
+        var plain = true
+        for st in styles where st != "solid" { plain = false }
+        if plain || !radii.IsZero {
             items.append(.border(rect, widths, colors, radii))
+            return
+        }
+        let w = [widths.Top, widths.Right, widths.Bottom, widths.Left]
+        var solid = widths
+        if styles[0] != "solid" { solid.Top = 0 }
+        if styles[1] != "solid" { solid.Right = 0 }
+        if styles[2] != "solid" { solid.Bottom = 0 }
+        if styles[3] != "solid" { solid.Left = 0 }
+        if solid.Top > 0 || solid.Right > 0 || solid.Bottom > 0 || solid.Left > 0 {
+            items.append(.border(rect, solid, colors, draw.Radii.zero))
+        }
+        var side = 0
+        while side < 4 {
+            let st = styles[side]
+            let t = w[side]
+            if st == "solid" || t <= 0 { side += 1; continue }
+            // The side's strip, along its length.
+            var strip = draw.Rect.zero
+            var horizontal = true
+            switch side {
+            case 0: strip = draw.Rect(rect.X, rect.Y, rect.Width, t)
+            case 1: strip = draw.Rect(rect.Right - t, rect.Y, t, rect.Height); horizontal = false
+            case 2: strip = draw.Rect(rect.X, rect.Bottom - t, rect.Width, t)
+            default: strip = draw.Rect(rect.X, rect.Y, t, rect.Height); horizontal = false
+            }
+            let c = colors[side]
+            if st == "double" {
+                let third = t / 3
+                if horizontal {
+                    items.append(.fill(draw.Rect(strip.X, strip.Y, strip.Width, third), c, draw.Radii.zero))
+                    items.append(.fill(draw.Rect(strip.X, strip.Bottom - third, strip.Width, third), c, draw.Radii.zero))
+                } else {
+                    items.append(.fill(draw.Rect(strip.X, strip.Y, third, strip.Height), c, draw.Radii.zero))
+                    items.append(.fill(draw.Rect(strip.Right - third, strip.Y, third, strip.Height), c, draw.Radii.zero))
+                }
+                side += 1
+                continue
+            }
+            // Dashes three widths long, dots one, with gaps between,
+            // spaced so that the side starts and ends with one.
+            let length = horizontal ? strip.Width : strip.Height
+            let mark = st == "dotted" ? t : t * 3
+            var n = int((length + mark) / (2 * mark))
+            if n < 1 { n = 1 }
+            let gap = n > 1 ? (length - float32(n) * mark) / float32(n - 1) : 0
+            var k = 0
+            while k < n {
+                let at = float32(k) * (mark + gap)
+                let r = horizontal ? draw.Rect(strip.X + at, strip.Y, mark, t) : draw.Rect(strip.X, strip.Y + at, t, mark)
+                items.append(.fill(r, c, st == "dotted" ? draw.Radii(all: t / 2) : draw.Radii.zero))
+                k += 1
+            }
+            side += 1
         }
     }
 
@@ -560,7 +657,11 @@ final class DisplayListBuilder {
         return draw.Color(uint8(float32(c.R) * f), uint8(float32(c.G) * f), uint8(float32(c.B) * f), c.A)
     }
 
-    func paintLine(_ container: layout.Box, _ line: layout.Line, x: float32, y: float32, visible: Bool) {
+    func paintLine(_ container: layout.Box, _ line: layout.Line, x: float32, y: float32, visible: Bool, firstLine: bool = false) {
+        let firstLineStyle = firstLine ? container.FirstLineStyle : nil
+        // Selected text drawn again in ::selection's color, clipped to
+        // where it is selected.
+        var reselected: [(rect: draw.Rect, color: draw.Color)] = []
         // Inline elements' backgrounds and borders, outer first.
         for sp in line.Spans {
             let b = sp.Box
@@ -592,7 +693,13 @@ final class DisplayListBuilder {
                     let bytes = [uint8](f.Text.utf8)
                     let x0 = x + f.X + face.Measure(stringOf(bytes, 0, part.from))
                     let x1 = part.to >= bytes.count ? x + f.X + f.Width : x + f.X + face.Measure(stringOf(bytes, 0, part.to))
-                    items.append(.fill(draw.Rect(x0, y + line.Y, x1 - x0, line.Height), draw.Color(179, 212, 252), draw.Radii.zero))
+                    let rect = draw.Rect(x0, y + line.Y, x1 - x0, line.Height)
+                    var highlight = draw.Color(179, 212, 252)
+                    if let ss = selectionStyle(f.Owner) {
+                        if ss.BackgroundColor.A > 0 { highlight = ss.BackgroundColor }
+                        if ss.Color != f.Owner.Style.Color { reselected.append((rect: rect, color: ss.Color)) }
+                    }
+                    items.append(.fill(rect, color(highlight), draw.Radii.zero))
                 }
             }
         }
@@ -600,32 +707,102 @@ final class DisplayListBuilder {
             switch f.Kind {
             case .text, .marker:
                 if f.Owner.Style.Visibility != .visible { continue }
-                let textColor = color(f.Owner.Style.Color)
+                var ownColor = f.Owner.Style.Color
+                if f.Kind == .marker, let ms = f.Box.MarkerStyle { ownColor = ms.Color }
+                // ::first-line recolors what of the line inherits the
+                // block's color.
+                if let fl = firstLineStyle, f.Owner.Style.Color == container.Style.Color { ownColor = fl.Color }
+                let textColor = color(ownColor)
                 if f.Run.Count > 0 {
+                    // text-shadow: behind the text, the last listed
+                    // furthest back, each blurred in a layer of its own.
+                    let shadows = f.Owner.Style.TextShadows
+                    var k = shadows.count - 1
+                    while k >= 0 {
+                        let sh = shadows[k]
+                        k -= 1
+                        if sh.Color.A == 0 { continue }
+                        if sh.Blur > 0 {
+                            var layer = PaintItem(.layer)
+                            layer.Rect = draw.Rect(x + f.X + sh.X - sh.Blur, y + f.Y + sh.Y - sh.Blur, f.Width + 2 * sh.Blur, f.Height + 2 * sh.Blur)
+                            layer.Blur = sh.Blur / 2
+                            items.append(layer)
+                        }
+                        items.append(.text(x + f.X + sh.X, y + f.Y + f.Ascent + sh.Y, f.Run, color(sh.Color), f.Owner.Style.LetterSpacing))
+                        if sh.Blur > 0 { items.append(PaintItem(.unlayer)) }
+                    }
                     items.append(.text(x + f.X, y + f.Y + f.Ascent, f.Run, textColor, f.Owner.Style.LetterSpacing))
                 }
                 if !f.Decoration.IsNone {
                     let face = f.Owner.Style.Face
-                    let thickness = face.Size / 14 > 1 ? face.Size / 14 : 1
+                    let d = f.Decoration
+                    let thickness = d.Thickness >= 0 ? math.Max(d.Thickness, 1) : (face.Size / 14 > 1 ? face.Size / 14 : 1)
                     let c = color(f.DecorationColor)
                     let baseline = y + f.Y + f.Ascent
-                    if f.Decoration.Underline {
-                        items.append(.fill(draw.Rect(x + f.X, baseline + face.Descent * 0.4, f.Width, thickness), c, draw.Radii.zero))
+                    if d.Underline {
+                        let under = d.UnderlineOffset > -999 ? baseline + d.UnderlineOffset : baseline + face.Descent * 0.4
+                        decorationLine(x + f.X, under, f.Width, thickness, c, d.Style)
                     }
-                    if f.Decoration.LineThrough {
-                        items.append(.fill(draw.Rect(x + f.X, baseline - face.XHeight / 2, f.Width, thickness), c, draw.Radii.zero))
+                    if d.LineThrough {
+                        decorationLine(x + f.X, baseline - face.XHeight / 2, f.Width, thickness, c, d.Style)
                     }
-                    if f.Decoration.Overline {
-                        items.append(.fill(draw.Rect(x + f.X, baseline - face.Ascent, f.Width, thickness), c, draw.Radii.zero))
+                    if d.Overline {
+                        decorationLine(x + f.X, baseline - face.Ascent, f.Width, thickness, c, d.Style)
                     }
                 }
             case .atomic:
                 paintBox(f.Box, x: x, y: y, skipBackground: 0)
             }
         }
+        for r in reselected {
+            items.append(.clip(r.rect))
+            for f in line.Fragments where f.Kind == .text && f.Run.Count > 0 {
+                items.append(.text(x + f.X, y + f.Y + f.Ascent, f.Run, color(r.color), f.Owner.Style.LetterSpacing))
+            }
+            items.append(PaintItem.unclip)
+        }
     }
 
-    /// Paints what a control or image shows inside its box.
+    /// A line of text decoration from (x, y) along width, in a style:
+    /// double as two lines, dotted and dashed as marks, wavy as a wave.
+    func decorationLine(_ x: float32, _ y: float32, _ width: float32, _ t: float32, _ c: draw.Color, _ style: string) {
+        switch style {
+        case "double":
+            items.append(.fill(draw.Rect(x, y, width, t), c, draw.Radii.zero))
+            items.append(.fill(draw.Rect(x, y + t * 2, width, t), c, draw.Radii.zero))
+        case "dotted", "dashed":
+            let mark = style == "dotted" ? t : t * 3
+            var at: float32 = 0
+            while at < width {
+                items.append(.fill(draw.Rect(x + at, y, math.Min(mark, width - at), t), c, style == "dotted" ? draw.Radii(all: t / 2) : draw.Radii.zero))
+                at += mark * 2
+            }
+        case "wavy":
+            // A sine of period 4t and height 2t, a column at a time.
+            let amp = t
+            let period = t * 4
+            var at: float32 = 0
+            while at < width {
+                let phase = at / period * 2 * float32(math.Pi)
+                items.append(.fill(draw.Rect(x + at, y + amp + amp * math.Sin(phase), 1, t), c, draw.Radii.zero))
+                at += 1
+            }
+        default:
+            items.append(.fill(draw.Rect(x, y, width, t), c, draw.Radii.zero))
+        }
+    }
+
+    /// The ::selection style text in a box takes: its own element's, or
+    /// the nearest ancestor's that has one.
+    func selectionStyle(_ box: layout.Box) -> cascade.ComputedStyle? {
+        var cur: layout.Box? = box
+        while let b = cur {
+            if let s = b.SelectionStyle { return s }
+            cur = b.Parent
+        }
+        return nil
+    }
+
     /// Where a replaced element's image goes in its content box, as
     /// object-fit and object-position say.
     func objectRect(_ s: cascade.ComputedStyle, _ inner: draw.Rect, _ iw: float32, _ ih: float32) -> draw.Rect {
@@ -651,6 +828,7 @@ final class DisplayListBuilder {
         return draw.Rect(x, y, w, h)
     }
 
+    /// Paints what a control or image shows inside its box.
     func paintReplaced(_ box: layout.Box, x: float32, y: float32) {
         let s = box.Style
         let inner = draw.Rect(x + box.ContentX, y + box.ContentY, box.InnerWidth, box.InnerHeight)
@@ -1040,6 +1218,7 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
             if dr.IsEmpty { continue }
             if var g = item.Gradient {
                 if let r = g.Radial { g.Radial = r.Scaled(scale) }
+                if let c = g.Conic { g.Conic = c.Scaled(scale) }
                 canvas.FillGradient(dr, radii: item.Radii.Scaled(scale), g)
             }
         case .layer:

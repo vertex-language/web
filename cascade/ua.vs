@@ -94,7 +94,7 @@ input[type=radio] { border-radius: 50%; }
 input[type=range], input[type=color], input[type=file] { border: none; background-color: transparent; }
 input:disabled, textarea:disabled, select:disabled, button:disabled { color: #a0a0a0; background-color: #fafafa; cursor: default; }
 input::placeholder, textarea::placeholder { color: #757575; }
-input:focus, textarea:focus, select:focus, button:focus { outline-width: 2px; outline-color: #005fcc; }
+:focus-visible { outline: 2px auto #005fcc; }
 label { cursor: default; }
 progress, meter { display: inline-block; width: 160px; height: 16px; }
 """

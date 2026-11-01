@@ -42,9 +42,26 @@ extension Layout {
         // tracks (-1 being the last line).
         var columnOf: [int: css.GridPlacement] = [:]
         var rowOf: [int: css.GridPlacement] = [:]
+        // A template of areas with fewer column tracks than columns
+        // has auto tracks for the rest.
+        while int32(columns.count) < s.GridAreaColumns { columns.append(s.GridAutoColumns) }
+        let explicitRows = int32(s.GridRows.count) > s.GridAreaRows ? int32(s.GridRows.count) : s.GridAreaRows
         for b in boxes {
-            columnOf[b.Id] = b.Style.GridColumn.Resolved(explicitTracks: int32(columns.count))
-            rowOf[b.Id] = b.Style.GridRow.Resolved(explicitTracks: int32(s.GridRows.count))
+            var col = b.Style.GridColumn
+            var row = b.Style.GridRow
+            // A name places the item in that template area.
+            if !col.Area.isEmpty, let a = s.GridAreas[col.Area] {
+                col = css.GridPlacement(start: a.ColumnStart, span: a.ColumnEnd - a.ColumnStart)
+            } else if !col.Area.isEmpty {
+                col = css.GridPlacement.auto
+            }
+            if !row.Area.isEmpty, let a = s.GridAreas[row.Area] {
+                row = css.GridPlacement(start: a.RowStart, span: a.RowEnd - a.RowStart)
+            } else if !row.Area.isEmpty {
+                row = css.GridPlacement.auto
+            }
+            columnOf[b.Id] = col.Resolved(explicitTracks: int32(columns.count))
+            rowOf[b.Id] = row.Resolved(explicitTracks: explicitRows)
         }
         if columns.isEmpty { columns = [s.GridAutoColumns] }
         var maxColumnNeeded = 1
@@ -311,6 +328,34 @@ extension Layout {
             c += 1
         }
         columnX[columnCount] = x - columnGap
+        // justify-content: tracks narrower than the grid move over, or
+        // spread out, as a group.
+        let freeX = contentWidth - columnX[columnCount]
+        if freeX > 0.5 && columnCount > 0 {
+            var shift: float32 = 0
+            var between: float32 = 0
+            switch s.JustifyContent {
+            case .center: shift = freeX / 2
+            case .flexEnd: shift = freeX
+            case .spaceBetween: between = columnCount > 1 ? freeX / float32(columnCount - 1) : 0
+            case .spaceAround:
+                between = freeX / float32(columnCount)
+                shift = between / 2
+            case .spaceEvenly:
+                between = freeX / float32(columnCount + 1)
+                shift = between
+            default: break
+            }
+            if shift != 0 || between != 0 {
+                c = 0
+                while c <= columnCount {
+                    let move = shift + between * float32(c)
+                    columnX[c] += move
+                    if c < columnCount { columnEnd[c] += move }
+                    c += 1
+                }
+            }
+        }
 
         // Row heights: given tracks, else the tallest item in the row
         // once laid out at its column width.
@@ -328,8 +373,11 @@ extension Layout {
             var itemWidth = w
             if let given = widthFromStyle(child, child.Style.Width, cbWidth: w) {
                 itemWidth = clampWidth(child, given, cbWidth: w)
-            } else if alignFor(child, container: s) != .stretch && s.AlignItems != .auto && false {
-                itemWidth = w
+            } else if justifyFor(child, container: s) != "stretch" {
+                // Not stretched across its area: as wide as its content,
+                // within the area.
+                let widths = intrinsicWidths(child)
+                itemWidth = clampWidth(child, widths.max < w ? widths.max : w, cbWidth: w)
             }
             layoutFixed(child, width: itemWidth, height: nil, cb: ContainingBlock(width: w, height: nil), flow: flow.root(child))
             if it.rowSpan == 1 {
@@ -381,9 +429,9 @@ extension Layout {
             if align == .center { dy = (cellH - child.OuterHeight) / 2 } else if align == .flexEnd { dy = cellH - child.OuterHeight }
             var dx: float32 = 0
             if child.Width + child.Margin.Horizontal < cellW {
-                switch s.JustifyContent {
-                case .center: dx = (cellW - child.OuterWidth) / 2
-                case .flexEnd: dx = cellW - child.OuterWidth
+                switch justifyFor(child, container: s) {
+                case "center": dx = (cellW - child.OuterWidth) / 2
+                case "end", "right", "flex-end", "self-end": dx = cellW - child.OuterWidth
                 default: dx = 0
                 }
             }
@@ -429,5 +477,18 @@ extension Layout {
         i = marker + 1
         while i < tracks.count { out.append(tracks[i]); i += 1 }
         return out
+    }
+}
+
+extension Layout {
+    /// How a grid item sits across its area: its justify-self, else the
+    /// container's justify-items; normal is stretch, except for a
+    /// replaced element with a size of its own, which starts.
+    func justifyFor(_ child: Box, container: cascade.ComputedStyle) -> string {
+        var j = child.Style.JustifySelf
+        if j == "auto" { j = container.JustifyItems }
+        if j == "normal" || j == "legacy" { return child.Kind == .replaced ? "start" : "stretch" }
+        if j == "left" || j == "flex-start" || j == "self-start" || j == "baseline" { return "start" }
+        return j
     }
 }

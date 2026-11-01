@@ -637,6 +637,224 @@ func testFrames() {
 }
 
 @MainActor
+func testFocusVisibleAndTarget() {
+    print(":focus-visible and :target")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(400, 300))
+    view.LoadHTML("""
+    <style>
+    body { margin: 0 } button, input { display: block; width: 100px; height: 20px; border: 0; padding: 0 }
+    :focus-visible { width: 50px } #t { height: 10px } #t:target { height: 30px }
+    </style>
+    <button id=b>b</button><input id=i><a id=l href="#t">go</a><div id=t></div>
+    """)
+    func w(_ id: string) -> float32 { return view.BoxFor(view.QuerySelector("#" + id)!)!.Width }
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(10, 10))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(10, 10))))
+    check(w("b") == 100, "a button clicked into focus shows no :focus-visible (got \(w("b")))")
+    _ = view.Handle(.keyDown(web.Key(Key: "Tab", Code: "Tab")))
+    check(w("i") == 50, "tabbing to a control shows it (got \(w("i")))")
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(10, 30))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(10, 30))))
+    check(w("i") == 50, "a text field shows it however it was focused")
+    let link = view.BoundsOf(view.QuerySelector("#l")!)!
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(link.X + 2, link.Y + 5))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(link.X + 2, link.Y + 5))))
+    check(view.BoxFor(view.QuerySelector("#t")!)!.Height == 30, "following a fragment link makes its element :target")
+}
+
+@MainActor
+func testPseudoElements() {
+    print("::marker, ::first-letter, ::first-line, ::selection")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(400, 300))
+    view.LoadHTML("""
+    <style>
+    body { margin: 0; font: 20px Helvetica } ul { margin: 0; padding-left: 40px }
+    li::marker { color: rgb(255, 0, 0) }
+    #fl { margin: 0 } #fl::first-letter { font-size: 40px; color: rgb(0, 0, 255) }
+    #ln { margin: 0; width: 120px } #ln::first-line { color: rgb(0, 160, 0) }
+    #sel::selection { background-color: rgb(255, 255, 0); color: rgb(255, 0, 0) } #sel { margin: 0 }
+    </style>
+    <ul><li id=li>item</li></ul>
+    <p id=fl>"Drop cap</p>
+    <p id=ln>first line here and then the second line</p>
+    <p id=sel>select me</p>
+    """)
+    var px = [uint8](repeating: 0, count: 400 * 300 * 4)
+    func count(_ c: draw.Color, _ r: draw.Rect) -> int {
+        var n = 0
+        var y = int32(r.Y)
+        while y < int32(r.Y + r.Height) {
+            var x = int32(r.X)
+            while x < int32(r.X + r.Width) {
+                if pixelAt(px, 400, x, y) == c { n += 1 }
+                x += 1
+            }
+            y += 1
+        }
+        return n
+    }
+    func bounds(_ id: string) -> draw.Rect { return view.BoundsOf(view.QuerySelector("#" + id)!)! }
+    view.Draw(into: &px, width: 400, height: 300, scale: 1)
+    let li = bounds("li")
+    check(count(draw.Color(255, 0, 0), draw.Rect(0, li.Y, 40, li.Height)) > 4, "::marker colors the bullet")
+    let flBox = view.BoxFor(view.QuerySelector("#fl")!)!
+    var letter = ""
+    for c in flBox.Children where c.Kind == .inline { for t in c.Children { letter += t.Text } ; check(c.Style.FontSize == 40, "::first-letter's font size applies") }
+    check(letter == "\"D", "::first-letter takes the punctuation before the letter (got '\(letter)')")
+    let fl = bounds("fl")
+    check(count(draw.Color(0, 0, 255), fl) > 20 && fl.Height >= 40, "and lays it out larger, in its color (got height \(fl.Height))")
+    let ln = bounds("ln")
+    check(count(draw.Color(0, 160, 0), draw.Rect(ln.X, ln.Y, ln.Width, 22)) > 10 && count(draw.Color(0, 160, 0), draw.Rect(ln.X, ln.Y + 26, ln.Width, ln.Height - 26)) == 0,
+          "::first-line colors the first line only")
+    let sel = bounds("sel")
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(sel.X + 1, sel.Y + 10))))
+    _ = view.Handle(.pointerMoved(draw.Point(sel.X + 80, sel.Y + 10)))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(sel.X + 80, sel.Y + 10))))
+    view.Draw(into: &px, width: 400, height: 300, scale: 1)
+    check(count(draw.Color(255, 255, 0), sel) > 50 && count(draw.Color(255, 0, 0), sel) > 5, "::selection sets the highlight and the selected text's color")
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(fl.X + 1, fl.Y + 30))))
+    _ = view.Handle(.pointerMoved(draw.Point(fl.X + 300, fl.Y + 30)))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(fl.X + 300, fl.Y + 30))))
+    check(view.SelectedText() == "\"Drop cap", "a selection across a ::first-letter reads the text whole (got '\(view.SelectedText())')")
+}
+
+@MainActor
+func testDecorations() {
+    print("Border and outline styles, decorations, text-shadow, background-clip")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(400, 300))
+    view.LoadHTML("""
+    <style>
+    body { margin: 0; background: white; font: 20px Helvetica }
+    #d { position: absolute; left: 0; top: 0; width: 100px; height: 20px; border-top: 4px dashed rgb(0, 0, 0) }
+    #o { position: absolute; left: 50px; top: 50px; width: 20px; height: 20px; outline: 2px solid rgb(255, 0, 0); outline-offset: 4px }
+    #u { position: absolute; left: 0; top: 100px; margin: 0; color: rgb(0, 0, 0); text-decoration: underline 3px rgb(0, 0, 255); text-underline-offset: 8px }
+    #s { position: absolute; left: 0; top: 150px; margin: 0; color: rgb(0, 0, 0); text-shadow: 3px 3px 0 rgb(255, 0, 0) }
+    #c { position: absolute; left: 200px; top: 0; width: 20px; height: 20px; padding: 10px; background: rgb(0, 200, 0); background-clip: content-box }
+    </style>
+    <div id=d></div><div id=o></div><p id=u>under</p><p id=s>shadow</p><div id=c></div>
+    """)
+    var px = [uint8](repeating: 0, count: 400 * 300 * 4)
+    view.Draw(into: &px, width: 400, height: 300, scale: 1)
+    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 400, x, y) }
+    func count(_ c: draw.Color, _ x0: int32, _ y0: int32, _ x1: int32, _ y1: int32) -> int {
+        var n = 0
+        var y = y0
+        while y < y1 { var x = x0; while x < x1 { if at(x, y) == c { n += 1 }; x += 1 }; y += 1 }
+        return n
+    }
+    let black = draw.Color(0, 0, 0)
+    let dashes = count(black, 0, 1, 100, 2)
+    check(dashes > 30 && dashes < 80, "a dashed border has gaps (got \(dashes) of 100)")
+    check(at(45, 60) == draw.Color(255, 0, 0) && at(48, 60) == draw.Color(255, 255, 255), "outline-offset moves the outline out from the box")
+    let u = view.BoundsOf(view.QuerySelector("#u")!)!
+    var rows: [int32] = []
+    var ry = int32(u.Y)
+    while ry < int32(u.Y) + 40 { if count(draw.Color(0, 0, 255), 0, ry, 40, ry + 1) > 5 { rows.append(ry) }; ry += 1 }
+    // The font's ascent is about 15px: an auto underline would sit near
+    // 17px down, the offset one 8px below the baseline.
+    check(rows.count == 3 && rows[0] - int32(u.Y) >= 21 && rows[0] - int32(u.Y) <= 26,
+          "text-underline-offset and thickness place the underline (rows \(rows) from \(u.Y))")
+    let sh = view.BoundsOf(view.QuerySelector("#s")!)!
+    check(count(draw.Color(255, 0, 0), 0, int32(sh.Y), 80, int32(sh.Y + sh.Height) + 4) > 20, "text-shadow draws behind the text")
+    check(at(205, 5) == draw.Color(255, 255, 255) && at(215, 15) == draw.Color(0, 200, 0), "background-clip: content-box keeps out of the padding")
+
+    view.LoadHTML("""
+    <style>body { margin: 0 } div { position: absolute; width: 100px; height: 100px }</style>
+    <div style="left: 0; top: 0; background: conic-gradient(rgb(255, 0, 0) 0deg 90deg, rgb(0, 0, 255) 90deg 360deg)"></div>
+    <div style="left: 150px; top: 0; background: conic-gradient(from 90deg at 0% 0%, rgb(0, 255, 0) 0 25%, rgb(0, 0, 0) 25% 100%)"></div>
+    <div style="left: 0; top: 150px; background: repeating-linear-gradient(90deg, rgb(255, 0, 0) 0 10%, rgb(0, 0, 255) 10% 20%)"></div>
+    """)
+    view.Draw(into: &px, width: 400, height: 300, scale: 1)
+    check(at(75, 25) == draw.Color(255, 0, 0) && at(25, 75) == draw.Color(0, 0, 255), "conic-gradient goes round from the top, clockwise, in hard stops")
+    // From the top-left corner, starting rightwards, the box lies in
+    // the first quarter turn: green all over.
+    check(at(245, 5) == draw.Color(0, 255, 0) && at(155, 95) == draw.Color(0, 255, 0) && at(200, 50) == draw.Color(0, 255, 0),
+          "from and at move its start and centre (got \(at(245, 5)) \(at(155, 95)))")
+    check(at(5, 200) == draw.Color(255, 0, 0) && at(15, 200) == draw.Color(0, 0, 255) && at(45, 200) == draw.Color(255, 0, 0) && at(95, 200) == draw.Color(0, 0, 255),
+          "repeating-linear-gradient repeats its stops (got \(at(45, 200)) \(at(95, 200)))")
+}
+
+@MainActor
+func testGridAreasAndLogical() {
+    print("Grid areas, justify, logical sizes")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(400, 300))
+    view.LoadHTML("""
+    <style>
+    body { margin: 0 }
+    #g { display: grid; width: 300px; grid-template: "head head" 20px "side main" 50px / 100px 1fr }
+    #h { grid-area: head } #s { grid-area: side } #m { grid-area: main }
+    #j { display: grid; width: 300px; grid-template-columns: 100px 50px; justify-content: center; justify-items: center }
+    #j div { height: 10px } #e { justify-self: end; width: 10px }
+    #l { inline-size: 50px; block-size: 7px; border-inline: 2px solid black }
+    #a { display: grid; grid-template-areas: "x y"; grid-template-columns: 100px 100px; width: 200px } #ay { grid-column: y }
+    </style>
+    <div id=g><div id=m>m</div><div id=h>h</div><div id=s>s</div></div>
+    <div id=j><div id=jc><span style="display:inline-block;width:20px">x</span></div><div id=e></div></div>
+    <div id=l></div>
+    <div id=a><div id=ay>y</div></div>
+    """)
+    func box(_ id: string) -> layout.Box { return view.BoxFor(view.QuerySelector("#" + id)!)! }
+    func at(_ id: string) -> draw.Rect { return view.BoundsOf(view.QuerySelector("#" + id)!)! }
+    check(at("h").X == 0 && at("h").Y == 0 && at("h").Width == 300 && at("h").Height == 20, "a named area spans its cells (got \(at("h")))")
+    check(at("s").X == 0 && at("s").Y == 20 && at("s").Width == 100 && at("s").Height == 50, "grid-template sets rows, areas and columns (got \(at("s")))")
+    check(at("m").X == 100 && at("m").Y == 20 && at("m").Width == 200, "and source order doesn't matter (got \(at("m")))")
+    let jc = at("jc")
+    let jy = at("j").Y
+    check(jc.Width == 20 && jc.X == 75 + 40, "justify-content centers the tracks, justify-items an item in its area (got \(jc))")
+    check(at("e").X == 75 + 100 + 40 && at("e").Y == jy, "justify-self: end puts one at the area's end (got \(at("e")))")
+    check(box("l").Width == 54 && box("l").Height == 7 && box("l").Border.Left == 2 && box("l").Border.Top == 0, "inline-size, block-size and border-inline")
+    check(at("ay").X == 100, "a placement may name an area on one axis (got \(at("ay").X))")
+}
+
+@MainActor
+func testTextWrap() {
+    print("text-wrap, white-space-collapse, line-clamp")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(400, 400))
+    view.LoadHTML("""
+    <style>
+    body { margin: 0; font: 16px Helvetica } p { margin: 0; width: 220px }
+    #b { text-wrap: balance } #n { text-wrap: nowrap } #c { line-clamp: 2; overflow: hidden }
+    #w { white-space-collapse: preserve } #pr { text-wrap: pretty; width: 200px }
+    </style>
+    <p id=plain style="width: 300px">one two three four five six seven eight nine ten eleven twelve</p>
+    <p id=b style="width: 300px">one two three four five six seven eight nine ten eleven twelve</p>
+    <p id=n>one two three four five six seven eight nine ten eleven</p>
+    <p id=c>one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen</p>
+    <p id=w>a    b</p>
+    <p id=pr>aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm</p>
+    """)
+    func box(_ id: string) -> layout.Box { return view.BoxFor(view.QuerySelector("#" + id)!)! }
+    func widths(_ b: layout.Box) -> [float32] {
+        return b.Lines.map { l in
+            var right: float32 = 0
+            for f in l.Fragments where f.Kind == .text && !layout.IsBlank(f.Text) { right = f.X + f.Width }
+            return right
+        }
+    }
+    let plain = widths(box("plain"))
+    let bal = widths(box("b"))
+    check(plain.count == 2 && bal.count == 2, "balance keeps the lines there are (got \(plain.count) \(bal.count))")
+    check(abs(bal[0] - bal[1]) < abs(plain[0] - plain[1]) && abs(bal[0] - bal[1]) < 40, "and evens them out (got \(bal), plain \(plain))")
+    check(box("n").Lines.count == 1, "text-wrap: nowrap keeps one line")
+    let c = box("c")
+    check(c.Lines.count == 2 && (c.Lines[1].Fragments.last?.Text.hasSuffix("…") ?? false), "line-clamp keeps two lines and ends with an ellipsis")
+    check(c.Height == 2 * c.Style.LineHeightPx || abs(c.Height - c.Lines[1].Y - c.Lines[1].Height + c.ContentY) < 0.5, "and is as tall as them (got \(c.Height))")
+    var text = ""
+    for f in box("w").Lines[0].Fragments { text += f.Text }
+    check(text == "a    b", "white-space-collapse: preserve keeps the spaces (got '\(text)')")
+    let pr = box("pr")
+    var lastText = ""
+    for f in pr.Lines[pr.Lines.count - 1].Fragments where f.Kind == .text { lastText += f.Text }
+    let lastWords = lastText.split(separator: " ").filter { !$0.isEmpty }.count
+    check(lastWords >= 2, "text-wrap: pretty brings a word down to a lonely last one (got \(lastWords))")
+}
+
+@MainActor
 func testPointerEventsAndUserSelect() {
     print("pointer-events and user-select")
     let view = web.Page()
@@ -869,6 +1087,11 @@ func main() async -> int32 {
     testAnimations()
     testContainerQueries()
     testFrames()
+    testFocusVisibleAndTarget()
+    testPseudoElements()
+    testDecorations()
+    testGridAreasAndLogical()
+    testTextWrap()
     testPointerEventsAndUserSelect()
     testRange()
     await testDeferredImages()

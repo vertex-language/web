@@ -60,6 +60,8 @@ public struct GridPlacement: Equatable {
     /// The end line where one was named: 1-based, or counted back from
     /// the last explicit line when negative (-1 is the last); 0 for none.
     public var End: int32 = 0
+    /// A grid-template-areas name the item is placed in, or "".
+    public var Area: string = ""
 
     public init(start: int32 = 0, span: int32 = 1) {
         Start = start

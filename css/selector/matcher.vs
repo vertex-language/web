@@ -16,6 +16,19 @@ public final class MatchContext {
     /// Whether a link has been visited, asked with its element: the
     /// host knows its history. Nothing is visited without it.
     public var Visited: ((html.Node) -> bool)?
+    /// Whether focus came from the keyboard, so that :focus-visible
+    /// shows a ring (a text field shows one however it was focused).
+    public var FocusVisible: bool = false
+    /// The element the URL's fragment names: :target.
+    public var Target: html.Node? = nil
+    /// A form control's value as the user left it; its attribute where
+    /// this is nil.
+    public var ValueOf: ((html.Node) -> string)? = nil
+    /// Whether the user has changed a control: :user-valid and
+    /// :user-invalid wait for that.
+    public var Interacted: ((html.Node) -> bool)? = nil
+    /// What :scope is: the root where nothing says.
+    public var Scope: html.Node? = nil
     // Each element's 1-based place among its parent's element children,
     // and each parent's count of them, filled in a parent at a time: the
     // nth-child family asks for every element on a page.
@@ -157,11 +170,21 @@ func matchPseudo(_ p: Pseudo, _ node: html.Node, _ ctx: MatchContext) -> bool {
         return nextOfType(node) == nil
     case "only-of-type":
         return previousOfType(node) == nil && nextOfType(node) == nil
-    case "nth-child":
-        return nthMatches(p.A, p.B, ctx.siblingIndex(node).index)
-    case "nth-last-child":
+    case "nth-child", "nth-last-child":
+        if !p.Inner.isEmpty {
+            // Counted among the siblings the "of" list matches.
+            if !matchesAny(p.Inner, node, ctx) { return false }
+            guard let parent = node.Parent else { return nthMatches(p.A, p.B, 1) }
+            var index = 0
+            var count = 0
+            for c in parent.Children where c.Kind == html.NodeKind.element && matchesAny(p.Inner, c, ctx) {
+                count += 1
+                if c.Id == node.Id { index = count }
+            }
+            return nthMatches(p.A, p.B, p.Name == "nth-child" ? index : count - index + 1)
+        }
         let s = ctx.siblingIndex(node)
-        return nthMatches(p.A, p.B, s.count - s.index + 1)
+        return nthMatches(p.A, p.B, p.Name == "nth-child" ? s.index : s.count - s.index + 1)
     case "first-child":
         return ctx.siblingIndex(node).index == 1
     case "last-child":
@@ -186,9 +209,12 @@ func matchPseudo(_ p: Pseudo, _ node: html.Node, _ ctx: MatchContext) -> bool {
         return ctx.isHovered(node)
     case "active":
         return ctx.isActive(node)
-    case "focus", "focus-visible":
+    case "focus":
         if let f = ctx.Focused { return f.Id == node.Id }
         return false
+    case "focus-visible":
+        guard let f = ctx.Focused, f.Id == node.Id else { return false }
+        return ctx.FocusVisible || isTextEntry(node)
     case "focus-within":
         var cur = ctx.Focused
         while let n = cur {
@@ -236,8 +262,47 @@ func matchPseudo(_ p: Pseudo, _ node: html.Node, _ ctx: MatchContext) -> bool {
             i += 1
         }
         return false
-    case "lang", "dir", "target", "defined":
-        return p.Name == "defined"
+    case "target":
+        if let t = ctx.Target { return t.Id == node.Id }
+        return false
+    case "lang":
+        return langMatches(p.Argument, node)
+    case "dir":
+        return css.lower(trimSpace(p.Argument)) == directionOf(node)
+    case "defined":
+        return true
+    case "scope":
+        if let s = ctx.Scope { return s.Id == node.Id }
+        return node.Parent == nil || node.Parent?.Kind == html.NodeKind.document
+    case "valid", "invalid", "user-valid", "user-invalid":
+        if !isValidatable(node) && node.TagName != "form" && node.TagName != "fieldset" { return false }
+        if p.Name.hasPrefix("user-") {
+            guard let i = ctx.Interacted, i(node) else { return false }
+        }
+        let valid = isValid(node, ctx)
+        return p.Name.hasSuffix("invalid") ? !valid : valid
+    case "in-range", "out-of-range":
+        guard let inRange = rangeState(node, ctx) else { return false }
+        return p.Name == "in-range" ? inRange : !inRange
+    case "read-write":
+        return isReadWrite(node)
+    case "read-only":
+        return !isReadWrite(node)
+    case "default":
+        return isDefault(node)
+    case "indeterminate":
+        return isIndeterminate(node)
+    case "open":
+        let t = node.TagName
+        return (t == "details" || t == "dialog") && node.HasAttribute("open")
+    case "paused":
+        // Nothing plays yet: every media element is paused.
+        return node.TagName == "video" || node.TagName == "audio"
+    case "muted":
+        return (node.TagName == "video" || node.TagName == "audio") && node.HasAttribute("muted")
+    case "autofill", "popover-open", "modal", "fullscreen", "picture-in-picture", "playing", "seeking",
+         "buffering", "stalled", "volume-locked", "state":
+        return false
     default:
         return false
     }
@@ -448,4 +513,274 @@ func contains(_ str: string, _ needle: string) -> bool {
         i += 1
     }
     return false
+}
+
+func matchesAny(_ list: [ComplexSelector], _ node: html.Node, _ ctx: MatchContext) -> bool {
+    for sel in list where MatchComplexIn(sel, node, ctx) { return true }
+    return false
+}
+
+func trimSpace(_ s: string) -> string {
+    let b = [uint8](s.utf8)
+    var i = 0
+    var j = b.count
+    while i < j && (b[i] == 32 || b[i] == 9 || b[i] == 10) { i += 1 }
+    while j > i && (b[j - 1] == 32 || b[j - 1] == 9 || b[j - 1] == 10) { j -= 1 }
+    return strFrom(b, i, j)
+}
+
+/// A field one types into: what shows :focus-visible however focused.
+func isTextEntry(_ node: html.Node) -> bool {
+    if node.TagName == "textarea" { return true }
+    if node.TagName != "input" { return false }
+    switch inputType(node) {
+    case "checkbox", "radio", "button", "submit", "reset", "image", "range", "color", "file", "hidden": return false
+    default: return true
+    }
+}
+
+func inputType(_ node: html.Node) -> string {
+    return css.lower(node.GetAttribute("type") ?? "text")
+}
+
+/// :lang(): the element's language, from the nearest lang attribute,
+/// matches a range: equal, or a prefix before a hyphen; `*` matches any.
+func langMatches(_ arg: string, _ node: html.Node) -> bool {
+    var lang: string? = nil
+    var cur: html.Node? = node
+    while let n = cur {
+        if let l = n.GetAttribute("lang") ?? n.GetAttribute("xml:lang") { lang = css.lower(l); break }
+        cur = n.Parent
+    }
+    guard let have = lang else { return false }
+    for raw in arg.split(separator: ",") {
+        var want = css.lower(trimSpace(string(raw)))
+        if want.hasPrefix("\"") && want.hasSuffix("\"") && want.count >= 2 { want = string(want.dropFirst().dropLast()) }
+        if want == "*" { if !have.isEmpty { return true }; continue }
+        if want.hasPrefix("*-") { want = string(want.dropFirst(2)); if have.contains(want) { return true }; continue }
+        if have == want || have.hasPrefix(want + "-") { return true }
+    }
+    return false
+}
+
+/// The element's direction, from the nearest dir attribute: ltr where
+/// none says (and for auto, since the engine has no bidi analysis).
+func directionOf(_ node: html.Node) -> string {
+    var cur: html.Node? = node
+    while let n = cur {
+        if let d = n.GetAttribute("dir") {
+            let v = css.lower(d)
+            if v == "rtl" { return "rtl" }
+            if v == "ltr" { return "ltr" }
+        }
+        cur = n.Parent
+    }
+    return "ltr"
+}
+
+func valueFor(_ node: html.Node, _ ctx: MatchContext) -> string {
+    if let v = ctx.ValueOf { return v(node) }
+    if node.TagName == "textarea" { return node.InnerText() }
+    return node.GetAttribute("value") ?? ""
+}
+
+/// Whether constraint validation looks at a control: barred are the
+/// disabled, the read-only, buttons, hidden inputs, and what is in a
+/// <datalist>.
+func isValidatable(_ node: html.Node) -> bool {
+    let t = node.TagName
+    if t != "input" && t != "textarea" && t != "select" { return false }
+    if node.HasAttribute("disabled") { return false }
+    if t != "select" && node.HasAttribute("readonly") { return false }
+    if t == "input" {
+        switch inputType(node) {
+        case "hidden", "button", "submit", "reset", "image": return false
+        default: break
+        }
+    }
+    var cur = node.Parent
+    while let n = cur {
+        if n.TagName == "datalist" { return false }
+        if n.TagName == "fieldset" && n.HasAttribute("disabled") { return false }
+        cur = n.Parent
+    }
+    return true
+}
+
+/// Whether a control meets its constraints -- required, type, length
+/// and range -- or, for a form or fieldset, whether everything in it
+/// does. `pattern` isn't checked: there is no regular-expression engine.
+func isValid(_ node: html.Node, _ ctx: MatchContext) -> bool {
+    if node.TagName == "form" || node.TagName == "fieldset" {
+        for c in node.Children where c.Kind == html.NodeKind.element {
+            if isValidatable(c) && !isValid(c, ctx) { return false }
+            if !isValidatable(c) && c.TagName != "form" && !isValid(c, ctx) { return false }
+        }
+        return true
+    }
+    if !isValidatable(node) { return true }
+    let type = node.TagName == "input" ? inputType(node) : node.TagName
+    let required = node.HasAttribute("required")
+    if type == "checkbox" { return !required || node.HasAttribute("checked") }
+    if type == "radio" {
+        if !required && !groupRequired(node) { return true }
+        return radioGroupChecked(node)
+    }
+    if type == "select" {
+        if !required { return true }
+        for o in descendants(node) where o.TagName == "option" && o.HasAttribute("selected") {
+            return !(o.GetAttribute("value") ?? o.InnerText()).isEmpty
+        }
+        return false
+    }
+    let value = valueFor(node, ctx)
+    if value.isEmpty { return !required }
+    let chars = value.count
+    if let n = intAttr(node, "minlength"), chars < n { return false }
+    if let n = intAttr(node, "maxlength"), chars > n { return false }
+    switch type {
+    case "email":
+        let list = node.HasAttribute("multiple") ? value.split(separator: ",").map { trimSpace(string($0)) } : [value]
+        for e in list where !looksLikeEmail(e) { return false }
+    case "url":
+        if !value.contains(":") { return false }
+    case "number", "range":
+        guard let n = numberOf(value) else { return false }
+        if let lo = numberAttr(node, "min"), n < lo { return false }
+        if let hi = numberAttr(node, "max"), n > hi { return false }
+    default:
+        break
+    }
+    return true
+}
+
+func looksLikeEmail(_ s: string) -> bool {
+    let parts = s.split(separator: "@", omittingEmptySubsequences: false)
+    if parts.count != 2 || parts[0].isEmpty || parts[1].isEmpty { return false }
+    for c in s.utf8 where c == 32 { return false }
+    return true
+}
+
+/// :in-range or not, for a number or range input with a min or max;
+/// nil where it has no range.
+func rangeState(_ node: html.Node, _ ctx: MatchContext) -> bool? {
+    if node.TagName != "input" { return nil }
+    let type = inputType(node)
+    if type != "number" && type != "range" { return nil }
+    let lo = numberAttr(node, "min")
+    let hi = numberAttr(node, "max")
+    if lo == nil && hi == nil && type != "range" { return nil }
+    guard let n = numberOf(valueFor(node, ctx)) else { return true }
+    if let l = lo, n < l { return false }
+    if let h = hi, n > h { return false }
+    return true
+}
+
+func isReadWrite(_ node: html.Node) -> bool {
+    if node.TagName == "textarea" { return !node.HasAttribute("readonly") && !node.HasAttribute("disabled") }
+    if node.TagName == "input" {
+        if !isTextEntry(node) && inputType(node) != "number" { return false }
+        return !node.HasAttribute("readonly") && !node.HasAttribute("disabled")
+    }
+    var cur: html.Node? = node
+    while let n = cur {
+        if let ce = n.GetAttribute("contenteditable") {
+            let v = css.lower(ce)
+            return v == "" || v == "true" || v == "plaintext-only"
+        }
+        cur = n.Parent
+    }
+    return false
+}
+
+func isDefault(_ node: html.Node) -> bool {
+    switch node.TagName {
+    case "option": return node.HasAttribute("selected")
+    case "input":
+        let type = inputType(node)
+        if type == "checkbox" || type == "radio" { return node.HasAttribute("checked") }
+        if type == "submit" || type == "image" { return isDefaultButton(node) }
+        return false
+    case "button":
+        let type = css.lower(node.GetAttribute("type") ?? "submit")
+        return type == "submit" && isDefaultButton(node)
+    default:
+        return false
+    }
+}
+
+/// Whether a submit button is the first of its form's.
+func isDefaultButton(_ node: html.Node) -> bool {
+    var form = node.Parent
+    while let f = form, f.TagName != "form" { form = f.Parent }
+    guard let f = form else { return false }
+    for d in descendants(f) {
+        let isSubmit = (d.TagName == "button" && css.lower(d.GetAttribute("type") ?? "submit") == "submit")
+            || (d.TagName == "input" && (inputType(d) == "submit" || inputType(d) == "image"))
+        if isSubmit { return d.Id == node.Id }
+    }
+    return false
+}
+
+func isIndeterminate(_ node: html.Node) -> bool {
+    if node.TagName == "progress" { return !node.HasAttribute("value") }
+    if node.TagName != "input" { return false }
+    let type = inputType(node)
+    if type == "checkbox" { return node.HasAttribute("indeterminate") }
+    if type == "radio" { return !radioGroupChecked(node) }
+    return false
+}
+
+/// The radio buttons of node's group: the same name in the same form.
+func radioGroup(_ node: html.Node) -> [html.Node] {
+    guard let name = node.GetAttribute("name"), !name.isEmpty else { return [node] }
+    var top: html.Node = node
+    while let p = top.Parent {
+        top = p
+        if p.TagName == "form" { break }
+    }
+    return descendants(top).filter { $0.TagName == "input" && inputType($0) == "radio" && $0.GetAttribute("name") == name }
+}
+
+func radioGroupChecked(_ node: html.Node) -> bool {
+    for r in radioGroup(node) where r.HasAttribute("checked") { return true }
+    return false
+}
+
+func groupRequired(_ node: html.Node) -> bool {
+    for r in radioGroup(node) where r.HasAttribute("required") { return true }
+    return false
+}
+
+func descendants(_ node: html.Node) -> [html.Node] {
+    var out: [html.Node] = []
+    for c in node.Children where c.Kind == html.NodeKind.element {
+        out.append(c)
+        out.append(contentsOf: descendants(c))
+    }
+    return out
+}
+
+func numberOf(_ s: string) -> float64? {
+    let t = trimSpace(s)
+    if t.isEmpty { return nil }
+    let b = [uint8](t.utf8)
+    var digits = 0
+    for c in b {
+        if c >= 48 && c <= 57 { digits += 1; continue }
+        if c == 45 || c == 43 || c == 46 || c == 101 || c == 69 { continue }
+        return nil
+    }
+    if digits == 0 { return nil }
+    return float64(css.ParseNumberText(t))
+}
+
+func numberAttr(_ node: html.Node, _ name: string) -> float64? {
+    guard let v = node.GetAttribute(name) else { return nil }
+    return numberOf(v)
+}
+
+func intAttr(_ node: html.Node, _ name: string) -> int? {
+    guard let v = numberAttr(node, name), v >= 0 else { return nil }
+    return int(v)
 }
