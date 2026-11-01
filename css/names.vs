@@ -32,7 +32,7 @@ let unappliedNames: [string] = [
     "unicode-range",
     "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
     "hyphens",
-    "direction", "unicode-bidi", "writing-mode",
+    "writing-mode",
     "caption-side", "empty-cells", "speak", "orphans", "widows", "page-break-before",
     "page-break-after", "font-display",
     "box-decoration-break", "text-size-adjust", "-webkit-text-size-adjust",

@@ -17,6 +17,14 @@ head, link, meta, script, style, title, base, template, area, datalist, param, r
 input[type=hidden] { display: none; }
 
 html { font-family: system-ui; font-size: 16px; color: #000000; }
+[dir=ltr] { direction: ltr; }
+[dir=rtl] { direction: rtl; }
+[dir=auto]:dir(ltr) { direction: ltr; }
+[dir=auto]:dir(rtl) { direction: rtl; }
+bdi, output, [dir=ltr], [dir=rtl], [dir=auto] { unicode-bidi: isolate; }
+bdi:not([dir]) { unicode-bidi: plaintext; }
+bdo, bdo[dir] { unicode-bidi: isolate-override; }
+textarea[dir=auto], pre[dir=auto] { unicode-bidi: plaintext; }
 body { margin: 8px; }
 h1 { font-size: 2em; margin: 0.67em 0; font-weight: bold; }
 h2 { font-size: 1.5em; margin: 0.83em 0; font-weight: bold; }
@@ -27,8 +35,8 @@ h6 { font-size: 0.67em; margin: 2.33em 0; font-weight: bold; }
 p, dl, blockquote, figure, dir, menu, ol, ul, pre, listing, plaintext, xmp { margin: 1em 0; }
 blockquote, figure { margin-left: 40px; margin-right: 40px; }
 address { font-style: italic; }
-dd { margin-left: 40px; }
-dir, menu, ol, ul { padding-left: 40px; }
+dd { margin-inline-start: 40px; }
+dir, menu, ol, ul { padding-inline-start: 40px; }
 ol { list-style-type: decimal; }
 ul, menu, dir { list-style-type: disc; }
 ol ul, ul ul, menu ul, dir ul { list-style-type: circle; }

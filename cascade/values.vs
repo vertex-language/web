@@ -390,3 +390,22 @@ public struct Shadow: Equatable {
         Inset = inset
     }
 }
+
+/// direction: the inline base direction.
+public enum Direction: Equatable {
+    case ltr
+    case rtl
+}
+
+/// unicode-bidi: how an element takes part in ordering bidirectional
+/// text -- as an embedding, an isolate, an override of its characters'
+/// own directions, or (plaintext) a paragraph that finds its direction
+/// from its text.
+public enum UnicodeBidi: Equatable {
+    case normal
+    case embed
+    case isolate
+    case bidiOverride
+    case isolateOverride
+    case plaintext
+}

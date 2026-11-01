@@ -144,6 +144,10 @@ public final class Layout {
                 box.Margin.Left = free - box.Margin.Right
             } else if s.MarginRight.IsAuto {
                 box.Margin.Right = free - box.Margin.Left
+            } else if rightToLeftContainer(box) {
+                // Over-constrained: the end margin gives way, which right
+                // to left is the left one.
+                box.Margin.Left = free - box.Margin.Right
             }
         } else if s.Width == .minContent || s.Width == .maxContent || s.Width == .fitContent || box.Style.Float != .none || box.Style.IsOutOfFlow || box.Style.Display == .table || box.Style.Display == .inlineTable {
             let widths = intrinsicWidths(box)
@@ -163,6 +167,8 @@ public final class Layout {
                     box.Margin.Left = free - box.Margin.Right
                 } else if s.MarginRight.IsAuto {
                     box.Margin.Right = free - box.Margin.Left
+                } else if rightToLeftContainer(box) {
+                    box.Margin.Left = free - box.Margin.Right
                 }
             }
         }
@@ -204,8 +210,10 @@ public final class Layout {
             height = layoutTable(box, contentWidth: contentWidth, flow: flow)
         } else if box.Style.IsFlexContainer {
             height = layoutFlex(box, contentWidth: contentWidth, flow: flow)
+            if box.Style.Direction == .rtl { mirrorChildren(box) }
         } else if box.Style.IsGridContainer {
             height = layoutGrid(box, contentWidth: contentWidth, flow: flow)
+            if box.Style.Direction == .rtl { mirrorChildren(box) }
         } else if box.Style.IsMultiColumn && box.Kind == .block {
             height = layoutColumns(box, contentWidth: contentWidth, flow: flow)
         } else if box.HasInlineChildren {
@@ -224,6 +232,24 @@ public final class Layout {
             height = box.Style.ContainIntrinsicHeight?.Resolve(0) ?? 0
         }
         return height
+    }
+
+    /// Whether a box's containing block runs right to left: an in-flow
+    /// block there sits against the right.
+    func rightToLeftContainer(_ box: Box) -> bool {
+        guard let p = box.Parent else { return false }
+        return p.Style.Direction == .rtl && !box.Style.IsOutOfFlow && box.Style.Float == .none
+    }
+
+    /// Flex and grid laid out left to right, turned round for right to
+    /// left: each in-flow child's margin box mirrored in the content
+    /// box, its margins staying on their sides.
+    func mirrorChildren(_ box: Box) {
+        let left = box.ContentX
+        let right = box.ContentX + box.InnerWidth
+        for c in box.Children where !c.Style.IsOutOfFlow {
+            c.X = left + right - c.X - c.Width + c.Margin.Left - c.Margin.Right
+        }
     }
 
     /// Stacks block children top to bottom, collapsing the margins that

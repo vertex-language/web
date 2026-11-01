@@ -1427,6 +1427,22 @@ func testColumnsPaint() {
     check(view.ElementAt(draw.Point(170, 10))?.GetAttribute("id") == "p", "a click on text in the second column lands on its paragraph")
 }
 
+@MainActor
+func testRightToLeftPaint() {
+    print("Right-to-left painting")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(300, 40))
+    view.LoadHTML("""
+    <body style="margin: 0; background: white; font-size: 16px">
+    <p dir=rtl style="margin: 0">שלום עולם</p>
+    </body>
+    """)
+    var px = [uint8](repeating: 0, count: 300 * 40 * 4)
+    view.Draw(into: &px, width: 300, height: 40, scale: 1)
+    check(countDark(px, 300, draw.IRect(200, 0, 100, 25)) > 20 && countDark(px, 300, draw.IRect(0, 0, 150, 25)) == 0,
+          "Hebrew in a dir=rtl paragraph is drawn at the right")
+}
+
 func main() async -> int32 {
     testStacking()
     testTextFeatures()
@@ -1453,6 +1469,7 @@ func main() async -> int32 {
     testCompositing()
     testBorderImage()
     testColumnsPaint()
+    testRightToLeftPaint()
     testRange()
     await testDeferredImages()
     await testSVGImages()

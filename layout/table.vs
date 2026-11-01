@@ -233,7 +233,8 @@ extension Layout {
                     start += widths[k] + spacing
                     k += 1
                 }
-                b.X = start
+                // Right to left, the first column is at the right.
+                b.X = table.Style.Direction == .rtl ? contentWidth - start - b.Width : start
                 b.Y = 0
                 if b.Height < rowHeight {
                     let extra = rowHeight - b.Height

@@ -884,8 +884,16 @@ final class DisplayListBuilder {
                 if let part = SelectedPart(f, node, (start: start, end: end), textOrder) {
                     let face = f.Owner.Style.Face
                     let bytes = [uint8](f.Text.utf8)
-                    let x0 = x + f.X + face.Measure(stringOf(bytes, 0, part.from))
-                    let x1 = part.to >= bytes.count ? x + f.X + f.Width : x + f.X + face.Measure(stringOf(bytes, 0, part.to))
+                    var x0 = x + f.X + face.Measure(stringOf(bytes, 0, part.from))
+                    var x1 = part.to >= bytes.count ? x + f.X + f.Width : x + f.X + face.Measure(stringOf(bytes, 0, part.to))
+                    if f.RightToLeft {
+                        // Measured from the right, where the text starts.
+                        let right = x + f.X + f.Width
+                        let a = right - (x0 - x - f.X)
+                        let b = right - (x1 - x - f.X)
+                        x0 = b
+                        x1 = a
+                    }
                     let rect = draw.Rect(x0, y + line.Y, x1 - x0, line.Height)
                     var highlight = draw.Color(179, 212, 252)
                     if let ss = selectionStyle(f.Owner) {

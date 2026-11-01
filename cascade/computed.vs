@@ -99,6 +99,11 @@ public final class ComputedStyle {
     /// break-inside: avoid and its kin.
     public var BreakInsideAvoid: bool = false
 
+    /// direction, which is inherited, and unicode-bidi, which isn't.
+    public var Direction: Direction = .ltr
+    public var UnicodeBidi: UnicodeBidi = .normal
+    public var IsRightToLeft: bool { return Direction == .rtl }
+
     /// Whether a block flows its content into columns.
     public var IsMultiColumn: bool {
         if ColumnCount == 0 && ColumnWidth == nil { return false }
@@ -310,6 +315,7 @@ public final class ComputedStyle {
         CaretColor = parent.CaretColor
         ColorScheme = parent.ColorScheme
         EffectiveZoom = parent.EffectiveZoom
+        Direction = parent.Direction
         customs = parent.customs
         Fill = parent.Fill
         FillCurrent = parent.FillCurrent

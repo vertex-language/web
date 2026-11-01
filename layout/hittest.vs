@@ -81,7 +81,9 @@ func hitTestBox(_ box: Box, _ px: float32, _ py: float32, originX: float32, orig
                         if f.Kind == .atomic {
                             if let h = HitTest(f.Box, px, py, originX: sx, originY: sy) { return h }
                         } else if f.Kind == .text && py >= fy - 2 && py < fy + f.Height + 2 && f.Owner.Style.PointerEvents != .none {
-                            let offset = f.Offset + offsetInRun(f, at: px - fx, letterSpacing: f.Owner.Style.LetterSpacing)
+                            // Right-to-left text starts at its right.
+                            let along = f.RightToLeft ? f.Width - (px - fx) : px - fx
+                            let offset = f.Offset + offsetInRun(f, at: along, letterSpacing: f.Owner.Style.LetterSpacing)
                             return Hit(Box: f.Owner, Node: f.Owner.Element, TextBox: f.Box, TextOffset: offset, PageX: fx, PageY: fy)
                         }
                     }

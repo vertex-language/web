@@ -530,6 +530,74 @@ func testColumns() {
     check(f.rect("mc")!.Width == 210 && f.rect("mc")!.Height == 40, "a shrink-to-fit box makes room for every column (got \(f.rect("mc")!))")
 }
 
+/// A box's line's fragments' texts, left to right.
+func lineTexts(_ b: layout.Box, _ line: int) -> [string] {
+    var frags = b.Lines[line].Fragments
+    frags.sort { $0.X < $1.X }
+    var out: [string] = []
+    for f in frags where f.Kind == .text { out.append(f.Text) }
+    return out
+}
+
+func testRightToLeft() {
+    print("Right to left")
+    guard let l = layoutOf("""
+    <body style='margin:0;font-size:16px'>
+    <div dir=rtl style='width:400px'>
+    <p id=en style='margin:0'>abc def</p>
+    <p id=num style='margin:0'>אב 12</p>
+    <p id=left style='margin:0;text-align:left'>אב</p>
+    <div id=fixed style='width:100px;height:10px'></div>
+    <div id=logical style='margin-inline-start:20px;height:10px'></div>
+    <ul id=list style='margin:0'><li id=item>א</li></ul>
+    <div style='display:flex'><div id=f1 style='width:50px;height:10px'></div><div id=f2 style='width:50px;height:10px;margin-left:10px'></div></div>
+    <table style='border-spacing:0;width:400px'><tr><td id=c1 style='width:100px;padding:0'>א</td><td id=c2 style='padding:0'>ב</td></tr></table>
+    </div>
+    <p id=mixed style='margin:0'>ab אב גד cd</p>
+    <p id=auto dir=auto style='margin:0;width:400px'>שלום</p>
+    </body>
+    """) else { check(false, "layout"); return }
+    let en = l.box("en")!
+    let enLine = en.Lines[0]
+    let enEnd = enLine.Fragments[enLine.Fragments.count - 1]
+    check(near(enEnd.X + enEnd.Width, 400, 1) && lineTexts(en, 0) == ["abc def"], "English in a right-to-left block is set at the right, in its own order (got \(enEnd.X + enEnd.Width) \(lineTexts(en, 0)))")
+    guard let st = layoutOf("<body style='margin:0'><p id=p dir=rtl style='margin:0;width:400px'>אב 2026.</p></body>") else { check(false, "layout"); return }
+    check(lineTexts(st.box("p")!, 0) == [".", "2026", " ", "אב"], "a full stop after a number at the end goes to the far left (got \(lineTexts(st.box("p")!, 0)))")
+    check(lineTexts(l.box("num")!, 0) == ["12", " ", "אב"], "a number in Hebrew shows to its left, its digits in order (got \(lineTexts(l.box("num")!, 0)))")
+    check(l.box("left")!.Lines[0].Fragments[0].X < 5, "text-align: left stays left right to left")
+    check(lineTexts(l.box("mixed")!, 0) == ["ab ", "גד", " ", "אב", " cd"], "Hebrew words in English read right to left (got \(lineTexts(l.box("mixed")!, 0)))")
+    check(l.rect("fixed")!.X == 300, "a fixed-width block sits at the right (got \(l.rect("fixed")!.X))")
+    let logical = l.box("logical")!
+    check(logical.Margin.Right == 20 && logical.Margin.Left == 0 && l.rect("logical")!.X == 0, "margin-inline-start is the right margin (got \(logical.Margin.Left) \(logical.Margin.Right))")
+    check(l.box("list")!.Padding.Right == 40 && l.box("list")!.Padding.Left == 0, "a list is indented at the right (got \(l.box("list")!.Padding.Left) \(l.box("list")!.Padding.Right))")
+    let item = l.box("item")!
+    let marker = item.Lines[0].Fragments.first { $0.Kind == .marker }
+    check(marker != nil && marker!.X >= item.InnerWidth, "and its marker is past the line's right end (got \(marker?.X ?? -1))")
+    check(l.rect("f1")!.X == 350 && l.rect("f2")!.X == 300, "flex items run from the right, margins kept on their sides (got \(l.rect("f1")!.X) \(l.rect("f2")!.X))")
+    check(near(l.rect("c1")!.X + l.rect("c1")!.Width, 400, 0.5) && near(l.rect("c2")!.X, 0, 0.5), "a table's first column is at the right (got \(l.rect("c1")!) \(l.rect("c2")!) cell \(l.box("c1")!.X) row \(l.box("c1")!.Parent!.X) \(l.box("c1")!.Parent!.Width) up \(l.box("c1")!.Parent!.Parent!.X))")
+    let auto = l.box("auto")!
+    check(auto.Style.Direction == .rtl && near(auto.Lines[0].Fragments[0].X + auto.Lines[0].Fragments[0].Width, 400, 1), "dir=auto takes Hebrew's direction (got \(auto.Style.Direction))")
+
+    guard let o = layoutOf("<body style='margin:0'><p id=o style='margin:0'><bdo dir=rtl>abc</bdo> <span style='unicode-bidi:bidi-override;direction:rtl'>xy</span></p></body>") else { check(false, "layout"); return }
+    let reversed = o.box("o")!.Lines[0].Fragments.filter { $0.Text == "abc" }
+    let shapedBack = reversed.count == 1 ? o.box("o")!.Style.Face.Shape("cba").Glyphs : []
+    check(reversed.count == 1 && reversed[0].Run.Glyphs == shapedBack && reversed[0].RightToLeft, "bdo dir=rtl shows its letters reversed")
+
+    // A click near a Hebrew word's right edge is at its start.
+    let nb = l.box("num")!
+    var hebrew: layout.Fragment? = nil
+    for f in nb.Lines[0].Fragments where f.Text == "אב" { hebrew = f }
+    if let h = hebrew {
+        let r = l.rect("num")!
+        let atRight = layout.HitTest(l.root, r.X + h.X + h.Width - 1, r.Y + h.Y + 4, originX: 0, originY: 0)
+        let atLeft = layout.HitTest(l.root, r.X + h.X + 1, r.Y + h.Y + 4, originX: 0, originY: 0)
+        check(h.RightToLeft && atRight?.TextOffset == h.Offset && atLeft?.TextOffset == h.Offset + 4,
+              "a Hebrew word's first letter is at its right (got \(atRight?.TextOffset ?? -1) \(atLeft?.TextOffset ?? -1) from \(h.Offset))")
+    } else {
+        check(false, "the Hebrew word is on the line")
+    }
+}
+
 func main() -> int32 {
     testBlockLayout()
     testImages()
@@ -543,6 +611,7 @@ func main() -> int32 {
     testGrid()
     testPositioning()
     testColumns()
+    testRightToLeft()
     if failures == 0 {
         print("ALL LAYOUT CHECKS PASSED")
         return 0

@@ -797,10 +797,10 @@ public final class StyleResolver {
             for d in r.Declarations where d.Important { declarations.append(d) }
             for p in r.Pending where p.Important { declarations.append(contentsOf: expand(p, scope)) }
         }
-        for d in declarations where d.Prop == .zoom || d.Prop == .colorScheme { apply(d, style, ctx) }
+        for d in declarations where d.Prop == .zoom || d.Prop == .colorScheme || d.Prop == .direction { apply(d, style, ctx) }
         ctx.dark = style.UsesDark(pageDark: Dark)
         for d in declarations where d.Prop == .fontSize { apply(d, style, ctx) }
-        for d in declarations where d.Prop != .fontSize && d.Prop != .zoom && d.Prop != .colorScheme { apply(d, style, ctx) }
+        for d in declarations where d.Prop != .fontSize && d.Prop != .zoom && d.Prop != .colorScheme && d.Prop != .direction { apply(d, style, ctx) }
         // ::before and ::after exist only with content; ::placeholder
         // is the field's own.
         if (which == "before" || which == "after") && style.Content == nil { return nil }
@@ -897,18 +897,19 @@ public final class StyleResolver {
             for d in r.Declarations where d.Important { declarations.append(d) }
         }
 
-        // zoom and color-scheme first, which what follows reads: the
-        // lengths zoom multiplies, the colors light-dark() picks. Then
+        // zoom, color-scheme and direction first, which what follows
+        // reads: the lengths zoom multiplies, the colors light-dark()
+        // picks, the side an inline-start property is on. Then
         // font size, since em lengths in the same element measure
         // against it whatever order the declarations came in.
-        for d in declarations where d.Prop == .zoom || d.Prop == .colorScheme {
+        for d in declarations where d.Prop == .zoom || d.Prop == .colorScheme || d.Prop == .direction {
             apply(d, style, ctx)
         }
         ctx.dark = style.UsesDark(pageDark: Dark)
         for d in declarations where d.Prop == .fontSize {
             apply(d, style, ctx)
         }
-        for d in declarations where d.Prop != .fontSize && d.Prop != .zoom && d.Prop != .colorScheme {
+        for d in declarations where d.Prop != .fontSize && d.Prop != .zoom && d.Prop != .colorScheme && d.Prop != .direction {
             apply(d, style, ctx)
         }
 
@@ -1068,7 +1069,10 @@ struct ApplyContext {
 
 // MARK: - Applying declarations
 
-func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
+func apply(_ given: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
+    // An inline-start or -end property right to left is the other side.
+    var d = given
+    if d.FlipsInRightToLeft && s.Direction == .rtl { d.Prop = css.MirroredProp(d.Prop) }
     switch d.Value {
     case .inherit:
         copyProperty(d.Prop, from: ctx.parent, to: s)
@@ -1474,6 +1478,16 @@ func apply(_ d: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
         } else if let l = length(v, s, ctx) {
             s.ColumnGap = l
             s.ColumnGapNormal = false
+        }
+    case .direction: s.Direction = keywordOf(v) == "rtl" ? .rtl : .ltr
+    case .unicodeBidi:
+        switch keywordOf(v) ?? "normal" {
+        case "embed": s.UnicodeBidi = .embed
+        case "isolate": s.UnicodeBidi = .isolate
+        case "bidi-override": s.UnicodeBidi = .bidiOverride
+        case "isolate-override": s.UnicodeBidi = .isolateOverride
+        case "plaintext": s.UnicodeBidi = .plaintext
+        default: s.UnicodeBidi = .normal
         }
     case .columnCount:
         if case .number(let n) = v { s.ColumnCount = int32(n) } else { s.ColumnCount = 0 }
@@ -2178,6 +2192,8 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .order: b.Order = a.Order
     case .rowGap: b.RowGap = a.RowGap
     case .columnGap: b.ColumnGap = a.ColumnGap; b.ColumnGapNormal = a.ColumnGapNormal
+    case .direction: b.Direction = a.Direction
+    case .unicodeBidi: b.UnicodeBidi = a.UnicodeBidi
     case .columnCount: b.ColumnCount = a.ColumnCount
     case .columnWidth: b.ColumnWidth = a.ColumnWidth
     case .columnRuleWidth: b.ColumnRuleWidth = a.ColumnRuleWidth

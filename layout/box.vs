@@ -130,6 +130,12 @@ public final class Box {
     /// A multi-column box's columns as laid out: how many hold content,
     /// their width, the gap between them, and how tall they are.
     public var ColumnsUsed: int = 0
+    /// Whether the box's lines were ordered by the bidi algorithm, and
+    /// whether their base direction is right to left: the paragraph's
+    /// direction, or for unicode-bidi: plaintext its first strong
+    /// character's.
+    public var BidiLines: bool = false
+    public var LinesRightToLeft: bool = false
     public var ColumnWidthUsed: float32 = 0
     public var ColumnGapUsed: float32 = 0
     public var ColumnHeightUsed: float32 = 0
@@ -261,6 +267,8 @@ public struct Fragment {
     public var Offset: int
     public var Decoration: cascade.TextDecoration
     public var DecorationColor: draw.Color
+    /// Text set right to left: its first character is at its right.
+    public var RightToLeft: bool = false
 
     public init(kind: FragmentKind, box: Box, owner: Box) {
         Kind = kind

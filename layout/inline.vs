@@ -2,6 +2,7 @@ package layout
 
 import (
     "image/draw"
+    "text/bidi"
     "text/font"
     "web/cascade"
 )
@@ -34,6 +35,8 @@ struct Item {
     var breakable: bool
     var decoration: cascade.TextDecoration
     var decorationColor: draw.Color
+    /// The bidi embedding level: odd is right to left.
+    var level: uint8 = 0
 
     init(kind: ItemKind, box: Box, owner: Box) {
         self.kind = kind
@@ -144,9 +147,12 @@ extension Layout {
     /// alignment says: half for center, all of it for right and end.
     func shiftForAlignment(_ box: Box, _ room: float32) {
         var d: float32 = 0
+        let rtl = box.LinesRightToLeft
         switch box.Style.TextAlign {
         case .center: d = room / 2
-        case .right, .end: d = room
+        case .right: d = room
+        case .end: if rtl { return } else { d = room }
+        case .start, .justify: if rtl { d = room } else { return }
         default: return
         }
         var i = 0
@@ -219,6 +225,7 @@ extension Layout {
         if phantom {
             return 0
         }
+        resolveBidi(box, &items)
 
         let indent = box.Style.TextIndent.Or(0, base: contentWidth)
         var y: float32 = 0
@@ -404,6 +411,182 @@ extension Layout {
         return y
     }
 
+    /// Gives each item its bidi level, where the paragraph is right to
+    /// left or holds right-to-left text: the text of the items in order,
+    /// with inline elements' unicode-bidi as the explicit marks it
+    /// stands for, through the bidi algorithm. A word takes the highest
+    /// level of its characters.
+    func resolveBidi(_ box: Box, _ items: inout [Item]) {
+        box.BidiLines = false
+        box.LinesRightToLeft = box.Style.Direction == .rtl
+        var text: [uint32] = []
+        var at: [int] = []
+        var any = box.Style.Direction == .rtl || box.Style.UnicodeBidi == .plaintext
+        for it in items {
+            at.append(text.count)
+            switch it.kind {
+            case .word, .space:
+                if it.text.isEmpty { text.append(0x20) }
+                for u in it.text.unicodeScalars {
+                    text.append(u.value)
+                    if !any && u.value >= 0x590 { any = true }
+                }
+            case .atomic:
+                text.append(0xFFFC)
+            case .open:
+                let st = it.box.Style
+                let rtl = st.Direction == .rtl
+                switch st.UnicodeBidi {
+                case .embed: text.append(rtl ? 0x202B : 0x202A)
+                case .isolate: text.append(rtl ? 0x2067 : 0x2066)
+                case .bidiOverride: text.append(rtl ? 0x202E : 0x202D)
+                case .isolateOverride:
+                    text.append(rtl ? 0x2067 : 0x2066)
+                    text.append(rtl ? 0x202E : 0x202D)
+                case .plaintext: text.append(0x2068)
+                case .normal: break
+                }
+                if st.UnicodeBidi != .normal && rtl { any = true }
+            case .close:
+                switch it.box.Style.UnicodeBidi {
+                case .embed, .bidiOverride: text.append(0x202C)
+                case .isolate, .plaintext: text.append(0x2069)
+                case .isolateOverride:
+                    text.append(0x202C)
+                    text.append(0x2069)
+                case .normal: break
+                }
+            case .lineBreak, .newline:
+                text.append(0x20)
+            case .float, .positioned:
+                break
+            }
+        }
+        if !any || !bidi.HasRightToLeft(text) && box.Style.Direction != .rtl { return }
+        let base: bidi.Direction? = box.Style.UnicodeBidi == .plaintext ? nil : (box.Style.Direction == .rtl ? .rtl : .ltr)
+        let resolved = bidi.Levels(text, base: base)
+        box.BidiLines = true
+        box.LinesRightToLeft = resolved.base == 1
+        var out: [Item] = []
+        var i = 0
+        while i < items.count {
+            let from = at[i]
+            let to = i + 1 < items.count ? at[i + 1] : text.count
+            var item = items[i]
+            var level: uint8 = resolved.base
+            var mixed = false
+            var k = from
+            while k < to {
+                if k == from { level = resolved.levels[k] } else if resolved.levels[k] != resolved.levels[from] { mixed = true }
+                if resolved.levels[k] > level { level = resolved.levels[k] }
+                k += 1
+            }
+            if item.kind == .word && mixed {
+                // A word whose characters sit at different levels -- a
+                // number and the full stop after it, right to left -- is
+                // cut where the level changes, each piece shaped alone.
+                let face = item.owner.Style.Face
+                let spacing = item.owner.Style.LetterSpacing
+                var piece = ""
+                var pieceStart = 0
+                var bytesSoFar = 0
+                var pieceLevel = resolved.levels[from]
+                var j = from
+                for u in item.text.unicodeScalars {
+                    if resolved.levels[j] != pieceLevel && !piece.isEmpty {
+                        var p = item
+                        p.text = piece
+                        p.run = face.Shape(piece)
+                        p.width = p.run.Width + spacing * float32(p.run.Count)
+                        p.offset = item.offset + pieceStart
+                        p.length = bytesSoFar - pieceStart
+                        p.level = pieceLevel
+                        out.append(p)
+                        piece = ""
+                        pieceStart = bytesSoFar
+                        pieceLevel = resolved.levels[j]
+                    }
+                    piece += string(Character(u))
+                    bytesSoFar += string(Character(u)).utf8.count
+                    j += 1
+                }
+                var p = item
+                p.text = piece
+                p.run = face.Shape(piece)
+                p.width = p.run.Width + spacing * float32(p.run.Count)
+                p.offset = item.offset + pieceStart
+                p.length = bytesSoFar - pieceStart
+                p.level = pieceLevel
+                out.append(p)
+            } else {
+                item.level = level
+                out.append(item)
+            }
+            i += 1
+        }
+        items = out
+    }
+
+    /// Puts a line's fragments in the order they show (L2), each moved
+    /// along with the room before it, and the spans over their
+    /// fragments again. Answers how far the line now reaches.
+    func reorderLine(_ box: Box, _ fragments: inout [Fragment], _ levels: [uint8], _ spans: inout [Span],
+                     indent: float32, end: float32) -> float32 {
+        if fragments.isEmpty { return end }
+        let rtl = box.LinesRightToLeft
+        var gaps: [float32] = []
+        var prev = indent
+        for f in fragments {
+            gaps.append(f.X - prev)
+            prev = f.X + f.Width
+        }
+        let after = end - prev
+        let order = bidi.VisualOrder(levels)
+        var reordered: [Fragment] = []
+        // Right to left, the indent is at the right: the line starts at
+        // the left edge.
+        var x: float32 = rtl ? 0 : indent
+        for i in order {
+            var f = fragments[i]
+            x += gaps[i]
+            f.X = x
+            f.RightToLeft = levels[i] & 1 == 1 && f.Kind == .text
+            x += f.Width
+            reordered.append(f)
+        }
+        fragments = reordered
+        // Each span now runs over what of its element is on the line,
+        // its padding and border at the sides its ends are on.
+        var s = 0
+        while s < spans.count {
+            let b = spans[s].Box
+            var lo: float32 = 1e9
+            var hi: float32 = -1e9
+            for f in fragments {
+                var owner: Box? = f.Kind == .atomic ? f.Box : f.Owner
+                var inside = false
+                while let o = owner {
+                    if o.Id == b.Id { inside = true; break }
+                    owner = o.Parent
+                }
+                if inside {
+                    if f.X < lo { lo = f.X }
+                    if f.X + f.Width > hi { hi = f.X + f.Width }
+                }
+            }
+            if hi >= lo {
+                let leftEnd = rtl ? spans[s].IsLast : spans[s].IsFirst
+                let rightEnd = rtl ? spans[s].IsFirst : spans[s].IsLast
+                let left = leftEnd ? b.Padding.Left + b.Border.Left : 0
+                let right = rightEnd ? b.Padding.Right + b.Border.Right : 0
+                spans[s].X = lo - left
+                spans[s].Width = hi - lo + left + right
+            }
+            s += 1
+        }
+        return x + after + (rtl ? indent : 0)
+    }
+
     /// Gathers the items of a box's inline content, in order.
     func collectItems(_ box: Box, owner: Box, cb: ContainingBlock, flow: Flow,
                       decoration: cascade.TextDecoration, decorationColor: draw.Color,
@@ -568,6 +751,8 @@ extension Layout {
         var line = Line(x: box.ContentX + startX, y: box.ContentY + y, width: contentWidth)
 
         var fragments: [Fragment] = []
+        // Each fragment's bidi level, beside it.
+        var levels: [uint8] = []
         var x: float32 = indent
         // Spans open from earlier lines continue at the line's start.
         var i = 0
@@ -593,7 +778,10 @@ extension Layout {
             case .word, .space:
                 // Join with the previous fragment when it is the same text
                 // in the same style.
-                if let last = fragments.last, last.Kind == .text, last.Box.Id == item.box.Id, last.Owner.Id == item.owner.Id {
+                // Right-to-left words stay apart: each shows its own
+                // glyphs in order, and the line puts the words in theirs.
+                if let last = fragments.last, last.Kind == .text, last.Box.Id == item.box.Id, last.Owner.Id == item.owner.Id,
+                   levels[levels.count - 1] == item.level, item.level & 1 == 0 {
                     var f = fragments[fragments.count - 1]
                     f.Text += item.text
                     f.Run.Glyphs.append(contentsOf: item.run.Glyphs)
@@ -614,6 +802,23 @@ extension Layout {
                     f.Width = item.width
                     f.Text = item.text
                     f.Run = item.run
+                    if item.level & 1 == 1 && item.kind == .word {
+                        // Text with no right-to-left letters of its own at a
+                        // right-to-left level -- an override, or brackets and
+                        // punctuation -- is reversed and mirrored here; the
+                        // shaper orders only what is right to left itself.
+                        var cps: [uint32] = []
+                        for u in item.text.unicodeScalars { cps.append(u.value) }
+                        if !bidi.HasRightToLeft(cps) {
+                            var shown = ""
+                            var k = cps.count - 1
+                            while k >= 0 {
+                                if let u = Unicode.Scalar(bidi.Mirror(cps[k])) { shown += string(Character(u)) }
+                                k -= 1
+                            }
+                            f.Run = item.owner.Style.Face.Shape(shown)
+                        }
+                    }
                     if item.kind == .space {
                         f.Run.Glyphs.append(0)
                         f.Run.Faces.append(0)
@@ -624,6 +829,7 @@ extension Layout {
                     f.Decoration = item.decoration
                     f.DecorationColor = item.decorationColor
                     fragments.append(f)
+                    levels.append(item.level)
                 }
                 x += item.width
             case .atomic:
@@ -631,6 +837,7 @@ extension Layout {
                 f.X = x
                 f.Width = item.width
                 fragments.append(f)
+                levels.append(item.level)
                 x += item.width
             case .open:
                 open.append(OpenSpan(box: item.box, startX: x, isFirst: true))
@@ -678,8 +885,12 @@ extension Layout {
                     fragments[keep - 1] = last
                 }
                 while fragments.count > keep { fragments.removeLast() }
+                while levels.count > keep { levels.removeLast() }
                 used = fragments[keep - 1].X + fragments[keep - 1].Width
             }
+        }
+        if box.BidiLines {
+            used = reorderLine(box, &fragments, levels, &spans, indent: indent, end: used)
         }
 
         // Vertical metrics: each fragment's box around the baseline.
@@ -759,17 +970,22 @@ extension Layout {
         line.Height = bottom - top
         line.Baseline = baseline
 
-        // Horizontal alignment.
+        // Horizontal alignment: start and end are the right and left
+        // where the lines run right to left.
         var dx: float32 = 0
         let free = contentWidth - used
+        let rtl = box.LinesRightToLeft
         if free > 0 {
             switch strutStyle.TextAlign {
             case .center: dx = free / 2
-            case .right, .end: dx = free
+            case .right: dx = free
+            case .end: dx = rtl ? 0 : free
+            case .start: dx = rtl ? free : 0
             case .justify:
                 // Every line but the last spreads its free room over its
                 // spaces; the fragments and spans after each one move on.
-                if !isLast { justify(&fragments, &spans, free: free) }
+                // The last starts at the start.
+                if !isLast { justify(&fragments, &spans, free: free) } else if rtl { dx = free }
             default: dx = 0
             }
         }
@@ -817,7 +1033,24 @@ extension Layout {
             m.Ascent = strutAscent + strutHalf
             m.Height = strutLH
             m.Y = line.Y + baseline - m.Ascent
-            if box.Style.ListStylePosition == .inside {
+            if rtl {
+                // Right to left, the marker is at the right: outside,
+                // past the line's end; inside, the line's last thing.
+                m.X = box.Style.ListStylePosition == .inside ? line.X + dx + used : line.X + contentWidth + strutFace.SpaceWidth * 1.5
+                if box.Style.ListStylePosition == .inside {
+                    var k = 0
+                    while k < line.Fragments.count {
+                        line.Fragments[k].X -= m.Width + strutFace.SpaceWidth
+                        k += 1
+                    }
+                    k = 0
+                    while k < line.Spans.count {
+                        line.Spans[k].X -= m.Width + strutFace.SpaceWidth
+                        k += 1
+                    }
+                    m.X -= m.Width
+                }
+            } else if box.Style.ListStylePosition == .inside {
                 m.X = line.X + dx
                 var k = 0
                 while k < line.Fragments.count {

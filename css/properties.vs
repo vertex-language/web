@@ -73,6 +73,8 @@ public enum Prop: int32 {
     case columnFill
     case columnSpan
     case breakInside
+    case direction
+    case unicodeBidi
     case outlineWidth
     case outlineColor
     case accentColor
@@ -279,6 +281,9 @@ public struct Longhand {
     public var Prop: Prop
     public var Value: Value
     public var Important: bool
+    /// Written as an inline-start or inline-end property: Prop is its
+    /// side left to right, and right to left it is the other side.
+    public var FlipsInRightToLeft: bool = false
 
     public init(_ prop: Prop, _ value: Value, important: bool = false) {
         self.Prop = prop
@@ -315,6 +320,7 @@ let propNames: [string: Prop] = [
     "column-count": .columnCount, "column-width": .columnWidth, "column-rule-width": .columnRuleWidth,
     "column-rule-style": .columnRuleStyle, "column-rule-color": .columnRuleColor, "column-fill": .columnFill,
     "column-span": .columnSpan, "break-inside": .breakInside, "page-break-inside": .breakInside,
+    "direction": .direction, "unicode-bidi": .unicodeBidi,
     "transform": .transform, "-webkit-transform": .transform, "transform-origin": .transformOrigin,
     "-webkit-transform-origin": .transformOrigin, "translate": .translate, "rotate": .rotate, "scale": .scale,
     "transition-property": .transitionProperty, "transition-duration": .transitionDuration,
@@ -365,6 +371,49 @@ let propNames: [string: Prop] = [
 /// A property the engine does not know, or a value it cannot read,
 /// sets nothing, which is how a browser treats them too.
 public func Longhands(_ d: Declaration) -> [Longhand] {
+    var out = longhands(d)
+    if isInlineLogical(d.Property) {
+        var i = 0
+        while i < out.count {
+            out[i].FlipsInRightToLeft = true
+            i += 1
+        }
+    }
+    return out
+}
+
+/// Whether a property name is one of the inline-start and inline-end
+/// ones, whose sides swap right to left.
+func isInlineLogical(_ name: string) -> bool {
+    if name.hasSuffix("inline-size") { return false }
+    return name.contains("inline") || name.hasPrefix("border-start-") || name.hasPrefix("border-end-")
+}
+
+/// The other side of a physical property, as right to left puts an
+/// inline-start one: left for right, a top-left corner for a top-right.
+public func MirroredProp(_ p: Prop) -> Prop {
+    switch p {
+    case .marginLeft: return .marginRight
+    case .marginRight: return .marginLeft
+    case .paddingLeft: return .paddingRight
+    case .paddingRight: return .paddingLeft
+    case .left: return .right
+    case .right: return .left
+    case .borderLeftWidth: return .borderRightWidth
+    case .borderRightWidth: return .borderLeftWidth
+    case .borderLeftStyle: return .borderRightStyle
+    case .borderRightStyle: return .borderLeftStyle
+    case .borderLeftColor: return .borderRightColor
+    case .borderRightColor: return .borderLeftColor
+    case .borderTopLeftRadius: return .borderTopRightRadius
+    case .borderTopRightRadius: return .borderTopLeftRadius
+    case .borderBottomLeftRadius: return .borderBottomRightRadius
+    case .borderBottomRightRadius: return .borderBottomLeftRadius
+    default: return p
+    }
+}
+
+func longhands(_ d: Declaration) -> [Longhand] {
     guard let tokens = substituteEnv(d.Tokens) else { return [] }
     if tokens.isEmpty { return [] }
     let important = d.Important
@@ -662,8 +711,8 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
          "background-attachment",
          "font-variant", "font-stretch", "font-feature-settings", "src", "unicode-range",
          "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
-         "hyphens", "direction",
-         "unicode-bidi", "writing-mode", "caption-side",
+         "hyphens",
+         "writing-mode", "caption-side",
          "empty-cells", "speak", "orphans", "widows", "page-break-before", "page-break-after",
          "font-display",
          "box-decoration-break",
@@ -1608,6 +1657,13 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
     case .marginTop, .marginRight, .marginBottom, .marginLeft:
         if let c = calcValue(tokens) { return c }
         return parseLengthValue(t, allowAuto: true)
+    case .direction:
+        return kw == "ltr" || kw == "rtl" ? .keyword(kw) : nil
+    case .unicodeBidi:
+        switch kw {
+        case "normal", "embed", "isolate", "bidi-override", "isolate-override", "plaintext": return .keyword(kw)
+        default: return nil
+        }
     case .columnCount:
         if kw == "auto" { return .auto }
         if t.Kind == .number && t.NumberVal >= 1 { return .number(t.NumberVal.rounded(.down)) }

@@ -1,6 +1,7 @@
 package selector
 
 import (
+    "text/bidi"
     "web/css"
     "web/html"
 )
@@ -572,7 +573,9 @@ func langMatches(_ arg: string, _ node: html.Node) -> bool {
 }
 
 /// The element's direction, from the nearest dir attribute: ltr where
-/// none says (and for auto, since the engine has no bidi analysis).
+/// none says. dir=auto takes the direction of the first strong
+/// character of the element's text, as HTML has it (ltr where there is
+/// none; a textarea's or input's from its value).
 func directionOf(_ node: html.Node) -> string {
     var cur: html.Node? = node
     while let n = cur {
@@ -580,6 +583,12 @@ func directionOf(_ node: html.Node) -> string {
             let v = css.lower(d)
             if v == "rtl" { return "rtl" }
             if v == "ltr" { return "ltr" }
+            if v == "auto" {
+                let text = n.TagName == "input" ? (n.GetAttribute("value") ?? "") : n.InnerText()
+                var cps: [uint32] = []
+                for u in text.unicodeScalars { cps.append(u.value) }
+                return bidi.FirstStrong(cps) == .rtl ? "rtl" : "ltr"
+            }
         }
         cur = n.Parent
     }
