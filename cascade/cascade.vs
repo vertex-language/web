@@ -242,6 +242,7 @@ public final class RuleSet {
                 if p.Name == "hover" { UsesHover = true; uses = true }
                 if p.Name == "focus" || p.Name == "focus-within" || p.Name == "focus-visible" { UsesFocus = true; uses = true }
                 if p.Name == "active" { UsesActive = true; uses = true }
+                if p.Name == "modal" || p.Name == "popover-open" || p.Name == "target" || p.Name == "open" { uses = true }
                 if p.Name == "visited" { UsesVisited = true }
                 for inner in p.Inner { if noteState(inner) { uses = true } }
             }

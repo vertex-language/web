@@ -29,6 +29,10 @@ public final class MatchContext {
     public var Interacted: ((html.Node) -> bool)? = nil
     /// What :scope is: the root where nothing says.
     public var Scope: html.Node? = nil
+    /// The modal dialogs and the open popovers, by element id: :modal
+    /// and :popover-open.
+    public var Modal = Set<int64>()
+    public var PopoverOpen = Set<int64>()
     // Each element's 1-based place among its parent's element children,
     // and each parent's count of them, filled in a parent at a time: the
     // nth-child family asks for every element on a page.
@@ -300,7 +304,11 @@ func matchPseudo(_ p: Pseudo, _ node: html.Node, _ ctx: MatchContext) -> bool {
         return node.TagName == "video" || node.TagName == "audio"
     case "muted":
         return (node.TagName == "video" || node.TagName == "audio") && node.HasAttribute("muted")
-    case "autofill", "popover-open", "modal", "fullscreen", "picture-in-picture", "playing", "seeking",
+    case "modal":
+        return ctx.Modal.contains(node.Id)
+    case "popover-open":
+        return ctx.PopoverOpen.contains(node.Id)
+    case "autofill", "fullscreen", "picture-in-picture", "playing", "seeking",
          "buffering", "stalled", "volume-locked", "state":
         return false
     default:
@@ -587,6 +595,15 @@ func valueFor(_ node: html.Node, _ ctx: MatchContext) -> string {
 /// Whether constraint validation looks at a control: barred are the
 /// disabled, the read-only, buttons, hidden inputs, and what is in a
 /// <datalist>.
+/// Whether a control meets its constraints, as :valid asks; true for
+/// what constraint validation doesn't look at.
+public func IsValid(_ node: html.Node, _ ctx: MatchContext) -> bool {
+    return !isValidatable(node) || isValid(node, ctx)
+}
+
+/// Whether constraint validation looks at a control.
+public func IsValidatable(_ node: html.Node) -> bool { return isValidatable(node) }
+
 func isValidatable(_ node: html.Node) -> bool {
     let t = node.TagName
     if t != "input" && t != "textarea" && t != "select" { return false }

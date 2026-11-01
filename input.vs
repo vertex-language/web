@@ -151,6 +151,7 @@ extension Page {
             update()
             if e.Button == .primary && startResize(at: e.Position) { return .handled }
             let target = hitAt(e.Position)?.Node
+            if !topLayer.isEmpty && lightDismiss(target) { return .handled }
             let button: int32 = e.Button == .primary ? 0 : (e.Button == .middle ? 1 : 2)
             captured = target
             mouseSuppressed = false
@@ -641,6 +642,9 @@ extension Page {
     }
 
     func activateButton(_ button: html.Node) {
+        // popovertarget and commandfor: the button opens or closes what
+        // it names, and does nothing else.
+        if invoke(button) { return }
         let type = lower(button.GetAttribute("type") ?? (button.TagName == "button" ? "submit" : "button"))
         if type == "reset" {
             if let form = dom.Ancestor(button, "form") { resetForm(form) }
@@ -714,6 +718,8 @@ extension Page {
                      to: focused ?? Document?.Tree.ElementsByTagName("body").first) {
             return .handled
         }
+        // Escape closes the top modal dialog or auto popover first.
+        if k.Code == "Escape" && !topLayer.isEmpty && escapeTopLayer() { return .handled }
         if let f = focused, dom.IsTextControl(f) {
             return editKey(f, k)
         }
@@ -1043,7 +1049,8 @@ extension Page {
 
     func moveFocus(backwards: bool) {
         guard let doc = Document else { return }
-        let order = dom.FocusOrder(doc.Root)
+        // A modal dialog keeps focus inside it.
+        let order = dom.FocusOrder(topModal ?? doc.Root)
         if order.isEmpty { return }
         var index = -1
         if let f = focused {
@@ -1101,10 +1108,16 @@ extension Page {
     }
 
     func submit(_ form: html.Node, submitter: html.Node?) {
+        let method = lower(form.GetAttribute("method") ?? "get")
+        if method != "dialog" && !validate(form, submitter: submitter) { return }
         if !dispatch(dom.SubmitEvent("submit", Submitter: submitter), to: form) { return }
+        // <form method=dialog> closes its dialog, with the submitter's value.
+        if method == "dialog" {
+            if let d = dom.Ancestor(form, "dialog") { Close(d, returnValue: submitter.map { dom.ButtonValue($0) } ?? "") }
+            return
+        }
         let fields = dom.FormData(form, submitter: submitter, value: { c in self.valueOf(c) })
         let action = form.GetAttribute("action") ?? ""
-        let method = lower(form.GetAttribute("method") ?? "get")
         if let cb = onSubmit {
             cb(dom.Submission(Action: Resolve(action), Method: method, Fields: fields))
         } else if let cb = onAction {

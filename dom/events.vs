@@ -129,6 +129,19 @@ public final class SubmitEvent: Event {
     }
 }
 
+/// A popover or details opening or closing: beforetoggle and toggle,
+/// with the state it leaves ("open" or "closed") and the one it takes.
+public final class ToggleEvent: Event {
+    public let OldState: string
+    public let NewState: string
+
+    public init(_ type: string, OldState: string, NewState: string) {
+        self.OldState = OldState
+        self.NewState = NewState
+        super.init(type, bubbles: false)
+    }
+}
+
 /// A transition starting, ending or cancelled: transitionrun,
 /// transitionstart, transitionend, transitioncancel.
 public final class TransitionEvent: Event {

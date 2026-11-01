@@ -7,6 +7,7 @@ import (
     "image/png"
     "web"
     "web/dom"
+    "web/html"
     "web/layout"
     "web/fetch"
 )
@@ -947,6 +948,68 @@ func testSmoothScrollAndSnap() {
 }
 
 @MainActor
+func testDialogsAndPopovers() {
+    print("<dialog>, popovers, constraint validation")
+    let view = web.Page()
+    view.SetViewportSize(draw.Size(400, 300))
+    view.LoadHTML("""
+    <style>body { margin: 0; background: white } button { display: block; width: 80px; height: 20px } #d { width: 100px; height: 60px; padding: 0 }</style>
+    <button id=open commandfor=d command=show-modal>open</button><button id=other>other</button>
+    <dialog id=d><form method=dialog><input id=di><button id=ok value=yes>OK</button></form></dialog>
+    <button id=pb popovertarget=p>pop</button><div id=p popover>hi</div>
+    <form id=f><input id=req required><button id=go>go</button></form>
+    """)
+    let doc = view.Document!
+    func node(_ id: string) -> html.Node { return view.QuerySelector("#" + id)! }
+    func click(_ id: string) {
+        let r = view.BoundsOf(node(id))!
+        _ = view.Handle(.pointerDown(web.Pointer(draw.Point(r.X + 2, r.Y + 2))))
+        _ = view.Handle(.pointerUp(web.Pointer(draw.Point(r.X + 2, r.Y + 2))))
+    }
+    var events: [string] = []
+    var otherClicks = 0
+    _ = doc.AddEventListener(node("d"), "close", { e in events.append("close") })
+    _ = doc.AddEventListener(node("d"), "cancel", { e in events.append("cancel") })
+    _ = doc.AddEventListener(node("other"), "click", { e in otherClicks += 1 })
+    _ = doc.AddEventListener(node("p"), "toggle", { e in events.append("toggle") })
+    _ = doc.AddEventListener(node("req"), "invalid", { e in events.append("invalid") })
+    var submitted = 0
+    view.OnSubmit { s in submitted += 1 }
+    check(view.BoxFor(node("d")) == nil, "a closed dialog shows nothing")
+    let otherBounds = view.BoundsOf(node("other"))!
+    click("open")
+    let d = view.BoundsOf(node("d"))!
+    check(abs(d.X - 148) < 2 && abs(d.Y - 118) < 2, "commandfor show-modal opens it, centered in the viewport (got \(d))")
+    check(view.FocusedElement === node("di"), "and focuses the first control in it")
+    var px = [uint8](repeating: 0, count: 400 * 300 * 4)
+    view.Draw(into: &px, width: 400, height: 300, scale: 1)
+    check(pixelAt(px, 400, 390, 290).R < 250, "its ::backdrop dims the page")
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(otherBounds.X + 2, otherBounds.Y + 2))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(otherBounds.X + 2, otherBounds.Y + 2))))
+    check(otherClicks == 0 && view.BoxFor(node("d")) != nil, "the page behind a modal dialog is inert")
+    _ = view.Handle(.keyDown(web.Key(Key: "Tab", Code: "Tab")))
+    _ = view.Handle(.keyDown(web.Key(Key: "Tab", Code: "Tab")))
+    check(view.FocusedElement === node("di") || view.FocusedElement === node("ok"), "Tab stays inside it")
+    _ = view.Handle(.keyDown(web.Key(Key: "Escape", Code: "Escape")))
+    check(view.BoxFor(node("d")) == nil && events == ["cancel", "close"], "Escape cancels and closes it (got \(events))")
+    click("open")
+    click("ok")
+    check(view.BoxFor(node("d")) == nil && view.ReturnValue(of: node("d")) == "yes", "a form method=dialog closes it with the button's value")
+    events = []
+    click("pb")
+    check(view.BoxFor(node("p")) != nil && view.IsPopoverOpen(node("p")), "popovertarget shows a popover")
+    _ = view.Handle(.pointerDown(web.Pointer(draw.Point(390, 290))))
+    _ = view.Handle(.pointerUp(web.Pointer(draw.Point(390, 290))))
+    check(view.BoxFor(node("p")) == nil && events == ["toggle", "toggle"], "a click outside closes an auto popover (got \(events))")
+    events = []
+    click("go")
+    check(submitted == 0 && events == ["invalid"] && view.FocusedElement === node("req"), "a required field left empty stops the submit, fires invalid and takes focus")
+    _ = view.Handle(.text("x"))
+    click("go")
+    check(submitted == 1, "filled in, the form is sent")
+}
+
+@MainActor
 func testPointerEventsAndUserSelect() {
     print("pointer-events and user-select")
     let view = web.Page()
@@ -1186,6 +1249,7 @@ func main() async -> int32 {
     testTextWrap()
     testScrollbarsZoomAndContainment()
     testSmoothScrollAndSnap()
+    testDialogsAndPopovers()
     testPointerEventsAndUserSelect()
     testRange()
     await testDeferredImages()

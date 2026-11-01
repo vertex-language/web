@@ -56,6 +56,13 @@ nobr { white-space: nowrap; }
 img, video, iframe, embed, object, svg, audio { display: inline-block; }
 audio:not([controls]) { display: none; }
 iframe { border: 2px inset #767676; }
+dialog:not([open]) { display: none; }
+dialog { position: absolute; left: 0; right: 0; width: fit-content; height: fit-content; margin: auto; border: 2px solid; padding: 1em; background-color: Canvas; color: CanvasText; }
+dialog:modal { position: fixed; top: 0; bottom: 0; max-width: calc(100% - 6px - 2em); max-height: calc(100% - 6px - 2em); overflow: auto; z-index: 2147480000; }
+[popover]:not(:popover-open):not(dialog[open]) { display: none; }
+[popover] { position: fixed; top: 0; right: 0; bottom: 0; left: 0; width: fit-content; height: fit-content; margin: auto; border: 1px solid; padding: 0.25em; overflow: auto; color: CanvasText; background-color: Canvas; z-index: 2147480000; }
+::backdrop { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 2147470000; }
+dialog::backdrop { background-color: rgba(0, 0, 0, 0.1); }
 video { object-fit: contain; }
 br { display: inline; }
 table { display: table; box-sizing: border-box; border-spacing: 2px; border-collapse: separate; text-indent: 0; }

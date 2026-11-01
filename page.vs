@@ -216,6 +216,13 @@ public final class Page {
     /// a smooth scroll under way; a wheel scroll waiting to snap
     /// (scrolling.vs).
     var elementScroll: [int64: draw.Point] = [:]
+    /// The top layer, in order, with which of its elements are modal
+    /// dialogs and which open popovers; dialogs' return values
+    /// (dialogs.vs).
+    var topLayer: [int64] = []
+    var modal = Set<int64>()
+    var popovers = Set<int64>()
+    var dialogReturnValues: [int64: string] = [:]
     var scrollAnimation: ScrollAnimation? = nil
     var pendingSnap: (node: int64, at: float64)? = nil
     var caretVisible = true
@@ -305,6 +312,13 @@ public final class Page {
         frames = [:]
         target = nil
         elementScroll = [:]
+        topLayer = []
+        modal = []
+        popovers = []
+        dialogReturnValues = [:]
+        builder.TopLayer = []
+        context.Modal = []
+        context.PopoverOpen = []
         scrollAnimation = nil
         pendingSnap = nil
         userEdited = []

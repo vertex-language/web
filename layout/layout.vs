@@ -77,6 +77,11 @@ public final class Layout {
             guard let h = cbHeight else { return nil }
             base = h
         }
+        // A calc() with a percentage in it needs the height as much.
+        if case .calc(_, let p) = length, p != 0 {
+            guard let h = cbHeight else { return nil }
+            base = h
+        }
         guard let v = length.Resolve(base) else { return nil }
         if box.Style.BoxSizing == .borderBox { return v }
         return v + box.Padding.Vertical + box.Border.Vertical
@@ -621,7 +626,7 @@ public final class Layout {
             } else {
                 if let w = widthFromStyle(child, s.Width, cbWidth: cbWidth) {
                     child.Width = clampWidth(child, w, cbWidth: cbWidth)
-                } else if let l = left, let r = right {
+                } else if let l = left, let r = right, !isSizingKeyword(s.Width) {
                     child.Width = clampWidth(child, cbWidth - l - r - child.Margin.Horizontal, cbWidth: cbWidth)
                 } else {
                     let widths = intrinsicWidths(child)
@@ -635,18 +640,30 @@ public final class Layout {
                 child.DefiniteInnerHeight = nil
                 if let given = heightFromStyle(child, s.Height, cbHeight: cbHeight) {
                     child.DefiniteInnerHeight = given - child.Padding.Vertical - child.Border.Vertical
-                } else if let t = top, let b = bottom {
+                } else if let t = top, let b = bottom, !isSizingKeyword(s.Height) {
                     child.DefiniteInnerHeight = cbHeight - t - b - child.Margin.Vertical - child.Padding.Vertical - child.Border.Vertical
                 }
                 let contentHeight = layoutContent(child, flow: Flow(positioned: child, floats: FloatContext(), x: 0, y: 0))
                 var h = contentHeight + child.Padding.Vertical + child.Border.Vertical
                 if let given = heightFromStyle(child, s.Height, cbHeight: cbHeight) {
                     h = given
-                } else if let t = top, let b = bottom {
+                } else if let t = top, let b = bottom, !isSizingKeyword(s.Height) {
                     h = cbHeight - t - b - child.Margin.Vertical
                 }
                 child.Height = clampHeight(child, h, cbHeight: cbHeight)
                 child.ContentHeight = contentHeight
+            }
+            // Both insets and auto margins: the margins share what is
+            // left, which centers the box (CSS 2 10.3.7 and 10.6.4).
+            if let l = left, let r = right, s.MarginLeft.IsAuto && s.MarginRight.IsAuto {
+                let free = cbWidth - l - r - child.Width
+                child.Margin.Left = free > 0 ? free / 2 : 0
+                child.Margin.Right = free > 0 ? free / 2 : 0
+            }
+            if let t = top, let b = bottom, s.MarginTop.IsAuto && s.MarginBottom.IsAuto {
+                let free = cbHeight - t - b - child.Height
+                child.Margin.Top = free > 0 ? free / 2 : 0
+                child.Margin.Bottom = free > 0 ? free / 2 : 0
             }
             if let l = left {
                 child.X = padX + l + child.Margin.Left
@@ -730,5 +747,14 @@ public func ReadsAttribute(_ name: string) -> bool {
         return true
     default:
         return false
+    }
+}
+
+/// Whether a width or height is min-content, max-content or fit-content:
+/// sized by the content even where both insets are given.
+func isSizingKeyword(_ l: css.Length) -> bool {
+    switch l {
+    case .minContent, .maxContent, .fitContent: return true
+    default: return false
     }
 }

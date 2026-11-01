@@ -27,6 +27,9 @@ public final class BoxTreeBuilder {
     public var byNode: [int64: Box] = [:]
     /// Whether the tree has a nested document's box (ReplacedKind.frame).
     public var HasFrames = false
+    /// The elements in the top layer -- modal dialogs, open popovers --
+    /// in the order they went there: each gets a ::backdrop box.
+    public var TopLayer: [int64] = []
     /// Each text node's place in document order, for ordering selections.
     public var textOrder: [int64: int] = [:]
     var textCount = 0
@@ -57,6 +60,16 @@ public final class BoxTreeBuilder {
         let box = Box(kind: .block, style: style, node: root)
         byNode[root.Id] = box
         buildChildren(of: root, into: box, parentStyle: style)
+        // ::backdrop: a fixed box under each top-layer element, painted
+        // over the rest of the page.
+        for id in TopLayer {
+            guard let el = byNode[id], let node = el.Node else { continue }
+            guard let bs = resolver.ResolvePseudo(node, "backdrop", parent: el.Style, context: context) else { continue }
+            if bs.Display == .none { continue }
+            let backdrop = Box(kind: .block, style: bs, node: nil)
+            backdrop.IsAnonymous = true
+            box.AppendChild(backdrop)
+        }
         return box
     }
 
