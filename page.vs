@@ -247,6 +247,10 @@ public final class Page {
     var selectionFocus: dom.TextPosition? = nil
     var selecting = false
     var cursor: Cursor = Cursor.default
+    /// Where the pointer is over the page, for the cursor: what the
+    /// handlers of a move changed (a viewport source's cursor, a class)
+    /// shows on that move, not the next.
+    var cursorPoint: draw.Point? = nil
     /// Where the pointer is, or nil when it is not over the page.
     var pointer: draw.Point? = nil
     /// The modifier keys held, as the last input said: what mouse and
@@ -691,7 +695,13 @@ public final class Page {
     }
 
     /// The pointer shape for where the pointer is.
-    public func DesiredCursor() -> Cursor { return cursor }
+    public func DesiredCursor() -> Cursor {
+        if let p = cursorPoint {
+            update()
+            cursor = cursorFor(hitAt(p))
+        }
+        return cursor
+    }
 
     // MARK: - Callbacks
 

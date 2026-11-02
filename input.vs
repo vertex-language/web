@@ -312,12 +312,14 @@ extension Page {
         if !isInside(p) {
             setHovered(nil)
             cursor = Cursor.default
+            cursorPoint = nil
             return .ignored
         }
         update()
         let hit = hitAt(p)
         setHovered(hit?.Node)
         cursor = cursorFor(hit)
+        cursorPoint = p
         return .handled
     }
 
