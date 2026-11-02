@@ -643,6 +643,8 @@ func identityFilter(like f: draw.Filter) -> draw.Filter {
     case .saturate: return .saturate(1)
     case .sepia: return .sepia(0)
     case .dropShadow(_, _, _, let c): return .dropShadow(0, 0, 0, c.Faded(0))
+    case .matrix(_): return .matrix([1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0])
+    case .offset(_, _): return .offset(0, 0)
     }
 }
 

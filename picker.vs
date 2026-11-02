@@ -22,6 +22,8 @@ enum PickerKind {
     case months
     case times
     case colors
+    /// A <datalist>'s options for the field being typed in.
+    case suggestions
 }
 
 final class Picker {
@@ -171,6 +173,142 @@ extension Page {
         }
     }
 
+    // MARK: - <datalist>
+
+    /// The options a field's list suggests for what it holds now: those whose
+    /// value holds it, whatever the case.
+    func suggestionsOf(node: html.Node) -> [(value: string, label: string)] {
+        guard let id = node.GetAttribute("list"), let list = Document?.Tree.ElementById(id) else { return [] }
+        let typed = lower(valueOf(node))
+        var out: [(value: string, label: string)] = []
+        for o in dom.Descendants(list, tag: "option") {
+            if o.HasAttribute("disabled") { continue }
+            let value = o.GetAttribute("value") ?? dom.CollapseSpace(o.InnerText())
+            let label = o.GetAttribute("label") ?? value
+            if typed.isEmpty || lower(value).contains(typed) || lower(label).contains(typed) {
+                if value != valueOf(node) { out.append((value: value, label: label)) }
+            }
+        }
+        return out
+    }
+
+    /// After typing or a press: shows, refreshes or closes the suggestions.
+    func updateSuggestions(input: Input) {
+        if case .keyDown(let k) = input, k.Code == "ArrowDown" || k.Code == "ArrowUp" || k.Code == "Enter" || k.Code == "Escape" || k.Code == "Tab" {
+            if picker == nil && k.Code == "ArrowDown", let f = focused, f.HasAttribute("list") { suggestionsDismissed = false } else { return }
+        }
+        if case .text(_) = input { suggestionsDismissed = false }
+        if case .pointerDown(_) = input { suggestionsDismissed = false }
+        guard let f = focused, f.TagName == "input", f.HasAttribute("list"), !suggestionsDismissed else {
+            if let k = picker, k.kind == .suggestions { closePicker() }
+            return
+        }
+        if picker != nil && picker?.kind != .suggestions { return }
+        let rows = suggestionsOf(f)
+        if rows.isEmpty {
+            if picker != nil { closePicker() }
+            return
+        }
+        if picker == nil { picker = Picker(node: f, kind: .suggestions) }
+        layoutPicker()
+    }
+
+    func pointOnPicker(p: draw.Point) -> bool {
+        guard let k = picker else { return false }
+        return k.frame.Contains(p.X + scroll.X, p.Y + scroll.Y)
+    }
+
+    // MARK: - List boxes
+
+    func clickListBox(select: html.Node, at p: draw.Point, modifiers: Modifiers) {
+        if select.HasAttribute("disabled") { return }
+        Focus(select)
+        guard let b = builder.byNode[select.Id], let doc = Document else { return }
+        let options = dom.Descendants(select, tag: "option")
+        let at = layout.PagePosition(b)
+        let y = p.Y + scroll.Y - at.y - b.ContentY
+        let i = (listTop[select.Id] ?? 0) + int(y / layout.ListBoxRowHeight(b.Style))
+        if i < 0 || i >= options.count || options[i].HasAttribute("disabled") { return }
+        let many = select.HasAttribute("multiple")
+        if many && modifiers.Shift, let from = listAnchor[select.Id] {
+            var k = 0
+            while k < options.count {
+                let inside = k >= (from < i ? from : i) && k <= (from < i ? i : from)
+                if inside && !options[k].HasAttribute("disabled") { doc.SetAttribute(options[k], "selected", "") } else { doc.RemoveAttribute(options[k], "selected") }
+                k += 1
+            }
+        } else if many && (modifiers.Meta || modifiers.Control) {
+            if options[i].HasAttribute("selected") { doc.RemoveAttribute(options[i], "selected") } else { doc.SetAttribute(options[i], "selected", "") }
+            listAnchor[select.Id] = i
+        } else {
+            for o in options { doc.RemoveAttribute(o, "selected") }
+            doc.SetAttribute(options[i], "selected", "")
+            listAnchor[select.Id] = i
+        }
+        needsStyle = true
+        _ = dispatch(dom.Event("input"), to: select)
+        _ = dispatch(dom.Event("change"), to: select)
+    }
+
+    func scrollListBox(select: html.Node, by rows: int) {
+        let total = dom.Descendants(select, tag: "option").count
+        let most = total - layout.ListBoxRows(select)
+        var top = (listTop[select.Id] ?? 0) + rows
+        if top > most { top = most }
+        if top < 0 { top = 0 }
+        listTop[select.Id] = top
+        needsPaint = true
+        needsRepaint = true
+    }
+
+    func listBoxKey(select: html.Node, k: Key) -> EventResult {
+        guard let doc = Document else { return .ignored }
+        if k.Code == "Tab" {
+            moveFocus(backwards: k.Shift)
+            return .handled
+        }
+        let options = dom.Descendants(select, tag: "option")
+        if options.isEmpty { return .ignored }
+        var current = listAnchor[select.Id] ?? -1
+        if current < 0 {
+            var i = 0
+            while i < options.count && current < 0 {
+                if options[i].HasAttribute("selected") { current = i }
+                i += 1
+            }
+        }
+        var next = current
+        switch k.Code {
+        case "ArrowDown": next = current + 1 < options.count ? current + 1 : current
+        case "ArrowUp": next = current > 0 ? current - 1 : 0
+        case "Home": next = 0
+        case "End": next = options.count - 1
+        case "Space":
+            if select.HasAttribute("multiple") && current >= 0 {
+                if options[current].HasAttribute("selected") { doc.RemoveAttribute(options[current], "selected") } else { doc.SetAttribute(options[current], "selected", "") }
+                needsStyle = true
+                _ = dispatch(dom.Event("change"), to: select)
+            }
+            return .handled
+        default:
+            return .ignored
+        }
+        if next == current || next < 0 { return .handled }
+        for o in options { doc.RemoveAttribute(o, "selected") }
+        doc.SetAttribute(options[next], "selected", "")
+        listAnchor[select.Id] = next
+        // Keep it in view.
+        let rows = layout.ListBoxRows(select)
+        var top = listTop[select.Id] ?? 0
+        if next < top { top = next }
+        if next >= top + rows { top = next - rows + 1 }
+        listTop[select.Id] = top
+        needsStyle = true
+        _ = dispatch(dom.Event("input"), to: select)
+        _ = dispatch(dom.Event("change"), to: select)
+        return .handled
+    }
+
     // MARK: - Opening
 
     func openSelectPanel(select: html.Node) {
@@ -251,6 +389,21 @@ extension Page {
                 add(draw.Rect(0, float32(row) * panelRow, w, panelRow), (o.HasAttribute("selected") ? "✓ " : "   ") + cascadeTrim(o.InnerText()),
                     fill: lit ? accent : nil, color: off ? draw.Color(160, 160, 160) : (lit ? draw.Color.white : draw.Color(30, 30, 30)), center: false,
                     action: off ? nil : { [p] in self.pickOption(p, o) })
+                row += 1
+            }
+        case .suggestions:
+            w = at.Width
+            let rowsHere = suggestionsOf(p.node)
+            let shown = rowsHere.count < panelMaxRows ? rowsHere.count : panelMaxRows
+            h = float32(shown) * panelRow
+            var row = 0
+            while row < shown {
+                let i = row + p.first
+                if i >= rowsHere.count { break }
+                let lit = i == p.highlight
+                let value = rowsHere[i].value
+                add(draw.Rect(0, float32(row) * panelRow, w, panelRow), rowsHere[i].label, fill: lit ? accent : nil,
+                    color: lit ? draw.Color.white : draw.Color(30, 30, 30), center: false, action: { self.pickValue(p, value) })
                 row += 1
             }
         case .times:
@@ -397,7 +550,7 @@ extension Page {
     }
 
     func pickerMoved(to p: draw.Point) {
-        guard let k = picker, k.kind == .options || k.kind == .times else { return }
+        guard let k = picker, k.kind == .options || k.kind == .times || k.kind == .suggestions else { return }
         let y = p.Y + scroll.Y - k.frame.Y
         if !k.frame.Contains(p.X + scroll.X, p.Y + scroll.Y) { return }
         let row = k.first + int(y / panelRow)
@@ -438,7 +591,28 @@ extension Page {
         guard let p = picker else { return false }
         if k.Code == "Escape" || k.Code == "Tab" {
             closePicker()
+            suggestionsDismissed = k.Code == "Escape"
             return k.Code == "Escape"
+        }
+        if p.kind == .suggestions {
+            let rows = suggestionsOf(p.node)
+            switch k.Code {
+            case "ArrowDown": if p.highlight + 1 < rows.count { p.highlight += 1 }
+            case "ArrowUp": if p.highlight > -1 { p.highlight -= 1 }
+            case "Enter":
+                if p.highlight < 0 || p.highlight >= rows.count {
+                    closePicker()
+                    return false
+                }
+                pickValue(p, rows[p.highlight].value)
+                return true
+            default:
+                return false
+            }
+            if p.highlight >= 0 && p.highlight < p.first { p.first = p.highlight }
+            if p.highlight >= p.first + panelMaxRows { p.first = p.highlight - panelMaxRows + 1 }
+            layoutPicker()
+            return true
         }
         if p.kind != .options && p.kind != .times { return true }
         let options = p.kind == .options ? dom.Descendants(p.node, tag: "option") : []

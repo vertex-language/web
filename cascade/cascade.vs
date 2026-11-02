@@ -175,6 +175,10 @@ public final class RuleSet {
                 inStarting = false
             case "counter-style":
                 DefineCounterStyle(at)
+            case "page":
+                // Only a sheet in general: :first, :left and the rest aren't kept.
+                if !at.Params.isEmpty { continue }
+                PageRule = pageRuleOf(at)
             case "font-feature-values":
                 for kind in at.AtRules {
                     for d in kind.Declarations {
@@ -531,8 +535,14 @@ func mediaClauseMatches(clause: string, width: float32, height: float32, dark: b
         switch word {
         case "and", "only": break
         case "not": negate = true
-        case "screen", "all": if negate { result = false; negate = false }
-        case "print", "speech", "aural", "braille", "tv", "projection", "handheld":
+        case "all": if negate { result = false; negate = false }
+        case "screen":
+            if MediaIsPrint != negate { result = false }
+            negate = false
+        case "print":
+            if MediaIsPrint == negate { result = false }
+            negate = false
+        case "speech", "aural", "braille", "tv", "projection", "handheld":
             if negate { negate = false } else { result = false }
         default: break
         }
@@ -1428,6 +1438,8 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
         s.BackdropFilters = filtersOf(v, s, ctx)
     case .clipPath:
         s.ClipPath = nil
+        s.ClipURL = ""
+        if case .url(let u) = v { s.ClipURL = u }
         if case .clipShape(let shape) = v {
             var args: [css.Length] = []
             for a in shape.Args {
@@ -1564,6 +1576,10 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
         s.Preserve3D = keywordOf(v) == "preserve-3d"
     case .filter:
         s.Filters = filtersOf(v, s, ctx)
+        s.FilterURL = ""
+        if case .filters(let list) = v {
+            for f in list where f.Name == "url" { s.FilterURL = f.Url }
+        }
     case .overflowX: if let k = keywordOf(v) { s.OverflowX = overflowOf(k) }
     case .overflowY: if let k = keywordOf(v) { s.OverflowY = overflowOf(k) }
     case .boxShadow:
@@ -2001,6 +2017,83 @@ func filtersOf(v: css.Value, s: ComputedStyle, ctx: ApplyContext) -> [draw.Filte
     return out
 }
 
+/// @page's size and margins.
+func pageRuleOf(at: css.AtRule) -> PageDescriptor {
+    var out = PageDescriptor()
+    func pixelsOf(t: css.Token) -> float32? {
+        if t.Kind == .number && t.NumberVal == 0 { return 0 }
+        if t.Kind != .dimension { return nil }
+        switch css.lower(t.Unit) {
+        case "px": return t.NumberVal
+        case "in": return t.NumberVal * 96
+        case "cm": return t.NumberVal * 96 / 2.54
+        case "mm": return t.NumberVal * 96 / 25.4
+        case "pt": return t.NumberVal * 96 / 72
+        case "pc": return t.NumberVal * 16
+        default: return nil
+        }
+    }
+    for d in at.Declarations {
+        switch d.Property {
+        case "size":
+            var lengths: [float32] = []
+            var landscape = false
+            for t in d.Tokens {
+                if let p = pixelsOf(t) { lengths.append(p) }
+                if t.Kind == .ident {
+                    switch css.lower(t.Value) {
+                    case "landscape": landscape = true
+                    case "a5":
+                        out.Width = 559
+                        out.Height = 794
+                    case "a4":
+                        out.Width = 794
+                        out.Height = 1123
+                    case "a3":
+                        out.Width = 1123
+                        out.Height = 1587
+                    case "letter":
+                        out.Width = 816
+                        out.Height = 1056
+                    case "legal":
+                        out.Width = 816
+                        out.Height = 1344
+                    case "ledger":
+                        out.Width = 1056
+                        out.Height = 1632
+                    default: break
+                    }
+                }
+            }
+            if lengths.count >= 1 {
+                out.Width = lengths[0]
+                out.Height = lengths.count > 1 ? lengths[1] : lengths[0]
+            }
+            if landscape {
+                let w = out.Width > 0 ? out.Width : 816
+                let h = out.Height > 0 ? out.Height : 1056
+                out.Width = w > h ? w : h
+                out.Height = w > h ? h : w
+            }
+        case "margin":
+            var m: [float32] = []
+            for t in d.Tokens {
+                if let p = pixelsOf(t) { m.append(p) }
+            }
+            switch m.count {
+            case 1: out.Margins = [m[0], m[0], m[0], m[0]]
+            case 2: out.Margins = [m[0], m[1], m[0], m[1]]
+            case 3: out.Margins = [m[0], m[1], m[2], m[1]]
+            case 4: out.Margins = m
+            default: break
+            }
+        default:
+            break
+        }
+    }
+    return out
+}
+
 /// What anchor() on a property sets: a use for layout, and in the meantime
 /// its fallback, or nothing.
 func applyAnchor(prop: css.Prop, f: css.AnchorFunction, s: ComputedStyle, ctx: ApplyContext) {
@@ -2412,9 +2505,13 @@ func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
             }
         }
     case .opacity: b.Opacity = a.Opacity
-    case .filter: b.Filters = a.Filters
+    case .filter:
+        b.Filters = a.Filters
+        b.FilterURL = a.FilterURL
     case .backdropFilter: b.BackdropFilters = a.BackdropFilters
-    case .clipPath: b.ClipPath = a.ClipPath
+    case .clipPath:
+        b.ClipPath = a.ClipPath
+        b.ClipURL = a.ClipURL
     case .maskImage: b.MaskGradient = a.MaskGradient; b.MaskURL = a.MaskURL
     case .maskRepeat:
         b.MaskLayer.RepeatX = a.MaskLayer.RepeatX

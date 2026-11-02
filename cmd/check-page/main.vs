@@ -1655,6 +1655,114 @@ func testCompositing() {
     let midHeight = lo.BoundsOf(grower)!.Height
     check(midHeight > 10 && midHeight < 30, "interpolate-size: allow-keywords transitions to auto (got \(midHeight))")
 
+    // An animated image moves on with time.
+    let ga = web.Page()
+    ga.SetViewportSize(draw.Size(40, 40))
+    ga.LoadHTML("<style>body { margin: 0 } img { display: block; width: 40px; height: 40px }</style><img src='data:image/gif;base64,R0lGODdhBAAEAKIAAAAAAAAA//8AAP///wAAAAAAAAAAAAAAACH5BAUUAAQALAAAAAAEAAQAAAMEKLrckgAh+QQFFAAEACwAAAAABAAEAAADBBi63JEAOw=='>")
+    var gap = [uint8](repeating: 0, count: 40 * 40 * 4)
+    ga.Draw(into: &gap, width: 40, height: 40, scale: 1)
+    check(pixelAt(gap, 40, 20, 20).R > 200 && pixelAt(gap, 40, 20, 20).B < 60, "an animated image starts on its first frame (got \(pixelAt(gap, 40, 20, 20)))")
+    check(ga.NeedsAnimation(), "and asks for frames")
+    _ = ga.Advance(time: 5)
+    _ = ga.Advance(time: 5.3)
+    ga.Draw(into: &gap, width: 40, height: 40, scale: 1)
+    check(pixelAt(gap, 40, 20, 20).B > 200 && pixelAt(gap, 40, 20, 20).R < 60, "its next frame shows when it's due (got \(pixelAt(gap, 40, 20, 20)))")
+    _ = ga.Advance(time: 5.5)
+    ga.Draw(into: &gap, width: 40, height: 40, scale: 1)
+    check(pixelAt(gap, 40, 20, 20).R > 200, "and it goes round (got \(pixelAt(gap, 40, 20, 20)))")
+
+    // Printing.
+    let pr = web.Page()
+    pr.SetViewportSize(draw.Size(300, 200))
+    pr.LoadHTML("""
+    <style>@page { size: 200px 100px; margin: 10px } body { margin: 0 } div { height: 60px } .r { background: rgb(255,0,0) } .g { background: rgb(0,255,0) } .b { background: rgb(0,0,255); break-before: page }
+    .only { height: 20px } @media print { .only { background: rgb(255,255,0) } .scr { display: none } } @media screen { .only { background: black } }</style>
+    <div class=r></div><div class=g></div><div class=b></div><div class="only"></div><div class=scr></div>
+    """)
+    let sheets = pr.Print(scale: 1)
+    check(sheets.count == 3, "a page cuts into sheets where it may (got \(sheets.count))")
+    if sheets.count == 3 {
+        func sheetAt(n: int, x: int, y: int) -> draw.Color {
+            let i = (y * int(sheets[n].Width) + x) * 4
+            return draw.Color(sheets[n].Pixels[i], sheets[n].Pixels[i + 1], sheets[n].Pixels[i + 2])
+        }
+        check(sheets[0].Width == 200 && sheets[0].Height == 100, "@page sets its size (got \(sheets[0].Width) x \(sheets[0].Height))")
+        check(sheetAt(0, 50, 30) == draw.Color(255, 0, 0) && sheetAt(0, 5, 5) == draw.Color.white, "@page's margin is left clear (got \(sheetAt(0, 5, 5)))")
+        check(sheetAt(1, 50, 30) == draw.Color(0, 255, 0), "a box that won't fit goes to the next sheet, whole (got \(sheetAt(1, 50, 30)))")
+        check(sheetAt(2, 50, 30) == draw.Color(0, 0, 255), "break-before: page starts one (got \(sheetAt(2, 50, 30)))")
+        check(sheetAt(2, 50, 75) == draw.Color(255, 255, 0), "@media print's rules hold (got \(sheetAt(2, 50, 75)))")
+    }
+    let afterPrint = pr.BoundsOf(pr.QuerySelector(".scr")!)
+    check(afterPrint != nil && pr.BoundsOf(pr.QuerySelector(".only")!)!.Width == 300, "and afterwards the page is as it was on screen")
+    let pdf = pr.PrintPDF(scale: 1)
+    check(pdf.count > 1000 && string(decoding: pdf[0..<5], as: UTF8.self) == "%PDF-", "PrintPDF writes a PDF (\(pdf.count) bytes)")
+
+    // List boxes and suggestions.
+    let lb = web.Page()
+    lb.SetViewportSize(draw.Size(300, 300))
+    lb.LoadHTML("""
+    <style>body { margin: 0; font-size: 14px; background: white } select { display: block; width: 120px; padding: 0; border: 0 } input { display: block; width: 120px; height: 24px; margin-top: 10px; padding: 0; border: 0 }</style>
+    <form id=fm><select id=l name=l multiple size=3><option>a</option><option selected>b</option><option>c</option><option>d</option></select></form>
+    <input id=q list=dl><datalist id=dl><option value="Apple"><option value="Banana"><option value="Apricot"></datalist>
+    """)
+    guard let lbx = lb.QuerySelector("#l"), let qf = lb.QuerySelector("#q") else { return }
+    let lbb = lb.BoundsOf(lbx)!
+    let rowH = lbb.Height / 3
+    check(rowH > 10 && rowH < 30, "size sets a list box's rows (got \(lbb.Height))")
+    func pickRow(n: float32, mods: web.Modifiers? = nil) {
+        var e = web.Pointer(draw.Point(lbb.X + 5, lbb.Y + rowH * n + rowH / 2))
+        if let m = mods { e.Modifiers = m }
+        _ = lb.Handle(.pointerDown(e))
+        _ = lb.Handle(.pointerUp(e))
+    }
+    func chosen() -> [string] {
+        var out: [string] = []
+        for o in dom.Descendants(lb.QuerySelector("#l")!, tag: "option") where o.HasAttribute("selected") { out.append(o.InnerText()) }
+        return out
+    }
+    pickRow(0)
+    check(chosen() == ["a"], "a click chooses one (got \(chosen()))")
+    var cmd = web.Modifiers()
+    cmd.Meta = true
+    pickRow(2, mods: cmd)
+    check(chosen() == ["a", "c"], "Command adds one, and the form submits each (got \(chosen()))")
+    var sh = web.Modifiers()
+    sh.Shift = true
+    pickRow(1, mods: sh)
+    _ = lb.Handle(.keyDown(web.Key(Key: "ArrowDown", Code: "ArrowDown")))
+    check(chosen().count == 1, "keys move a single choice (got \(chosen()))")
+    lb.Focus(qf)
+    _ = lb.Handle(.text("ap"))
+    var lbp = [uint8](repeating: 0, count: 300 * 300 * 4)
+    lb.Draw(into: &lbp, width: 300, height: 300, scale: 1)
+    check(lb.PressPanelCell(text: "Banana") == false, "a <datalist> suggests what matches, not the rest")
+    check(lb.PressPanelCell(text: "Apricot"), "and a suggestion can be taken")
+    check(lb.ValueOf(qf) == "Apricot", "which fills the field (got \(lb.ValueOf(qf)))")
+
+    // url() clip paths and filters on HTML, shape() curves, animated images.
+    let ue = web.Page()
+    ue.SetViewportSize(draw.Size(300, 100))
+    ue.LoadHTML("""
+    <style>body { margin: 0; background: white } div { position: absolute; top: 0; width: 40px; height: 40px; background: rgb(255,0,0) }</style>
+    <svg width=0 height=0 style="position:absolute"><clipPath id=c><rect width=20 height=40 /></clipPath><clipPath id=cb clipPathUnits=objectBoundingBox><rect width=.5 height=1 /></clipPath><mask id=m><rect width=20 height=40 fill=white /></mask><filter id=f><feColorMatrix type=matrix values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  1 0 0 0 0"/></filter></svg>
+    <div style="left: 0; clip-path: url(#c)"></div>
+    <div style="left: 50px; clip-path: url(#cb)"></div>
+    <div style="left: 100px; mask: url(#m)"></div>
+    <div style="left: 150px; filter: url(#f); background: rgb(255,0,255)"></div>
+    <div style="left: 200px; clip-path: shape(from 0 20px, arc to 40px 20px of 20px cw, close)"></div>
+    <div style="left: 250px; clip-path: url(#missing)"></div>
+    """)
+    var uep = [uint8](repeating: 0, count: 300 * 100 * 4)
+    ue.Draw(into: &uep, width: 300, height: 100, scale: 1)
+    func uec(x: int32, y: int32) -> draw.Color { return pixelAt(uep, 300, x, y) }
+    let ueRed = draw.Color(255, 0, 0)
+    check(uec(10, 20) == ueRed && uec(30, 20) == draw.Color.white, "clip-path: url() on an element (got \(uec(10, 20)) \(uec(30, 20)))")
+    check(uec(60, 20) == ueRed && uec(80, 20) == draw.Color.white, "in objectBoundingBox units (got \(uec(60, 20)) \(uec(80, 20)))")
+    check(uec(110, 20) == ueRed && uec(130, 20) == draw.Color.white, "mask: url() on an element (got \(uec(110, 20)) \(uec(130, 20)))")
+    check(uec(170, 20).B > 200 && uec(170, 20).R < 60, "filter: url() on an element (got \(uec(170, 20)))")
+    check(uec(220, 5) == ueRed && uec(220, 35) == draw.Color.white && uec(202, 2) == draw.Color.white, "shape()'s arc is an arc (got \(uec(220, 5)) \(uec(220, 35)) \(uec(202, 2)))")
+    check(uec(270, 20) == ueRed, "a url() that names nothing doesn't clip (got \(uec(270, 20)))")
+
     // Anchor positioning.
     let an = web.Page()
     an.SetViewportSize(draw.Size(400, 300))

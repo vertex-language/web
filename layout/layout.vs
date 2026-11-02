@@ -1064,7 +1064,7 @@ public final class Layout {
 /// code.
 public func ReadsAttribute(name: string) -> bool {
     switch name {
-    case "src", "colspan", "rowspan", "start", "type", "value", "selected", "placeholder", "multiple", "poster", "data", "lang":
+    case "src", "colspan", "rowspan", "start", "type", "value", "selected", "placeholder", "multiple", "poster", "data", "lang", "size", "id":
         return true
     default:
         return false

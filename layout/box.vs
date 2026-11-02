@@ -44,6 +44,8 @@ public enum ReplacedKind: Equatable {
     /// A nested document: <iframe>, or an <object> or <embed> of HTML.
     /// The page lays it out and paints it in the content box.
     case frame
+    /// <select multiple>, or with size: rows of options.
+    case listBox
     /// <audio controls>: a bar of controls.
     case audio
     /// <video>: its newest frame or its poster, under controls if it asks.
@@ -113,6 +115,9 @@ public final class Box {
     public var FirstLineStyle: cascade.ComputedStyle? = nil
     /// An <input type=file>'s ::file-selector-button, where rules give one.
     public var FileButtonStyle: cascade.ComputedStyle? = nil
+    /// What clip-path or mask: url(#id) names in the document, and which.
+    public var EffectContent: svg.Drawing? = nil
+    public var EffectIsMask: bool = false
     /// A subgrid's parent's tracks over its span, and gaps.
     public var ParentColumnTracks: [float32]? = nil
     public var ParentRowTracks: [float32]? = nil

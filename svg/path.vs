@@ -198,6 +198,23 @@ func numbers(s: string) -> [float32] {
 
 let pi = float32(math.Pi)
 
+/// An arc onto a path, as cubics.
+public func AppendArc(path: inout draw.Path, fromX: float32, fromY: float32, rx: float32, ry: float32, angle: float32, large: bool, sweep: bool, toX: float32, toY: float32) {
+    var ops: [uint8] = []
+    var coords: [float32] = []
+    arcTo(fromX, fromY, rx, ry, angle, large, sweep, toX, toY, &ops, &coords)
+    var k = 0
+    for op in ops {
+        if op == opLine {
+            path.LineTo(coords[k], coords[k + 1])
+            k += 2
+        } else if op == opCubic {
+            path.CubicTo(coords[k], coords[k + 1], coords[k + 2], coords[k + 3], coords[k + 4], coords[k + 5])
+            k += 6
+        }
+    }
+}
+
 /// An elliptical arc from (x1, y1) to (x2, y2) as cubics, a quarter turn
 /// at most each (SVG 2 appendix B.2.4, endpoint to center).
 func arcTo(x1: float32, y1: float32, rxIn: float32, ryIn: float32, angle: float32, large: bool, sweep: bool,

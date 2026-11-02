@@ -102,6 +102,9 @@ public final class ComputedStyle {
     public var ScrollTimelineName: string = ""
     public var ViewTimelineName: string = ""
     public var ViewTransitionName: string = ""
+    /// clip-path: url(#id), and filter: url(#id).
+    public var ClipURL: string = ""
+    public var FilterURL: string = ""
     /// shape-outside as a clip shape, and shape-margin in pixels.
     public var ShapeOutside: ClipPath? = nil
     public var ShapeMargin: float32 = 0
@@ -603,7 +606,7 @@ extension ComputedStyle {
     /// Whether the box is painted apart and put back through a clip,
     /// a mask, a blend mode or a backdrop: it paints as a whole.
     public var HasCompositing: bool {
-        return ClipPath != nil || MaskGradient != nil || !MaskURL.isEmpty || BlendMode != .normal || Isolated || !BackdropFilters.isEmpty
+        return ClipPath != nil || !ClipURL.isEmpty || MaskGradient != nil || !MaskURL.isEmpty || BlendMode != .normal || Isolated || !BackdropFilters.isEmpty
     }
 
     /// filter: blur()'s radius, in CSS pixels; 0 for none.

@@ -239,6 +239,31 @@ public final class BoxTreeBuilder {
         run = []
     }
 
+    /// clip-path, mask and filter by url(#id): what they name in the document.
+    func resolveURLEffects(box: Box, style: cascade.ComputedStyle, in node: html.Node) {
+        func named(url: string) -> html.Node? {
+            guard url.hasPrefix("#") else { return nil }
+            var top: html.Node = node
+            while let up = top.Parent { top = up }
+            func find(n: html.Node, id: string) -> html.Node? {
+                if n.Kind == html.NodeKind.element && n.GetAttribute("id") == id { return n }
+                for c in n.Children {
+                    if let f = find(c, id: id) { return f }
+                }
+                return nil
+            }
+            return find(top, id: string(url.dropFirst()))
+        }
+        if !style.ClipURL.isEmpty, let t = named(style.ClipURL) { box.EffectContent = svg.ContentOf(t) }
+        if style.MaskURL.hasPrefix("#") {
+            if let t = named(style.MaskURL) {
+                box.EffectContent = svg.ContentOf(t)
+                box.EffectIsMask = true
+            }
+        }
+        if !style.FilterURL.isEmpty, let t = named(style.FilterURL) { style.Filters += svg.FiltersOf(t) }
+    }
+
     /// Puts what a box holds in an anonymous box of its own, which layout
     /// sets as if horizontal and painting turns.
     func turnVertical(box: Box) {
@@ -342,6 +367,7 @@ public final class BoxTreeBuilder {
                 let starts = style.IsVertical && (!parentStyle.IsVertical || node.TagName == "html")
                 if style.IsVertical && !starts { style.SwapAxesForVertical() }
                 if let box = makeBox(child, style: style, parentStyle: parentStyle, listIndex: &listIndex) {
+                    resolveURLEffects(box, style, in: child)
                     if starts { turnVertical(box) } else if box.Kind == .replaced && style.AxesSwapped {
                         let w = box.IntrinsicWidth
                         box.IntrinsicWidth = box.IntrinsicHeight
@@ -359,6 +385,9 @@ public final class BoxTreeBuilder {
     func makeBox(node: html.Node, style: cascade.ComputedStyle, parentStyle: cascade.ComputedStyle, listIndex: inout int) -> Box? {
         // A base-select is what its picker hangs from.
         if node.TagName == "select" && style.Appearance == "base-select" && style.Position == .static { style.Position = .relative }
+        // The height the user agent's sheet gives a select is for one that
+        // draws itself: this one is as tall as what it holds.
+        if node.TagName == "select" && style.Appearance == "base-select" && style.Height == .px(24) { style.Height = .auto }
         let tag = node.TagName
         var box: Box
         switch tag {
@@ -433,6 +462,17 @@ public final class BoxTreeBuilder {
                 box.IntrinsicWidth = widest + 4
                 box.IntrinsicHeight = style.LineHeightPx * float32(lines.count > 0 ? lines.count : 1)
             }
+        case "select" where style.Appearance != "base-select" && isListBox(node):
+            // A list of its rows, each its own line.
+            box = Box(kind: .replaced, style: style, node: node)
+            box.Replaced = .listBox
+            var widest: float32 = 40
+            for o in dom.Descendants(node, tag: "option") {
+                let w = style.Face.Measure(dom.CollapseSpace(o.InnerText()))
+                if w > widest { widest = w }
+            }
+            box.IntrinsicWidth = widest + 20
+            box.IntrinsicHeight = float32(ListBoxRows(node)) * ListBoxRowHeight(style)
         case "select" where style.Appearance != "base-select":
             box = Box(kind: .replaced, style: style, node: node)
             box.Replaced = .select
@@ -892,4 +932,21 @@ func isPunctuation(b: uint8) -> bool {
     case 33, 34, 35, 37, 38, 39, 40, 41, 42, 44, 45, 46, 47, 58, 59, 63, 64, 91, 92, 93, 95, 123, 125: return true
     default: return false
     }
+}
+
+/// Whether a select shows as a list: multiple, or more than one row asked for.
+public func isListBox(node: html.Node) -> bool {
+    if node.HasAttribute("multiple") { return true }
+    if let v = node.GetAttribute("size"), let n = int(v), n > 1 { return true }
+    return false
+}
+
+/// How many rows a list box shows.
+public func ListBoxRows(node: html.Node) -> int {
+    if let v = node.GetAttribute("size"), let n = int(v), n > 0 { return n }
+    return 4
+}
+
+public func ListBoxRowHeight(style: cascade.ComputedStyle) -> float32 {
+    return style.Face.LineHeight + 2
 }

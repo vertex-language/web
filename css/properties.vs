@@ -335,6 +335,7 @@ public struct AnchorFunction {
 /// drop-shadow's offsets and blur, with its Color (nil for currentColor).
 public struct FilterFunction {
     public var Name: string
+    public var Url: string = ""
     public var Amount: float32 = 1
     public var Lengths: [Value] = []
     public var Color: draw.Color? = nil
@@ -1863,7 +1864,11 @@ func parseFilters(tokens: [Token]) -> Value? {
     var i = 0
     while i < tokens.count {
         let t = tokens[i]
+        // What a url() names is found when the boxes are made.
         if t.Kind == .url {
+            var f = FilterFunction(Name: "url")
+            f.Url = t.Value
+            out.append(f)
             i += 1
             continue
         }
@@ -2219,6 +2224,7 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
         return parseScaleProperty(tokens)
     case .clipPath:
         if kw == "none" { return Value.none }
+        if t.Kind == .url { return .url(t.Value) }
         // A basic shape and a geometry box, in either order, or a box
         // alone (its border radius kept).
         var shape: ClipShape? = nil
@@ -2864,12 +2870,44 @@ func parseClipShape(name: string, tokens: [Token]) -> ClipShape? {
             i += 1
             func letter(l: string) -> string { return relative ? l.lowercased() : l }
             switch command {
-            case "move", "line", "smooth", "arc":
+            case "move", "line":
                 guard let x = length(), let y = length() else { return nil }
                 shape.Words.append(letter(command == "move" ? "M" : "L"))
                 shape.Args += [x, y]
-                // The rest of an arc or smooth curve: drawn straight.
-                while i < tokens.count && tokens[i].Kind != .comma { i += 1 }
+            case "smooth":
+                guard let x = length(), let y = length() else { return nil }
+                if word() == "with" {
+                    i += 1
+                    guard let c2x = length(), let c2y = length() else { return nil }
+                    shape.Words.append(letter("S"))
+                    shape.Args += [c2x, c2y, x, y]
+                } else {
+                    shape.Words.append(letter("T"))
+                    shape.Args += [x, y]
+                }
+            case "arc":
+                // arc to x y of rx [ry], and how it goes round, in any order.
+                guard let x = length(), let y = length(), word() == "of" else { return nil }
+                i += 1
+                guard let rx = length() else { return nil }
+                var ry = rx
+                if i < tokens.count && tokens[i].Kind != .comma && tokens[i].Kind != .ident, let r2 = length() { ry = r2 }
+                var large = false
+                var clockwise = false
+                var degrees: float32 = 0
+                while i < tokens.count && tokens[i].Kind != .comma {
+                    switch word() {
+                    case "large": large = true
+                    case "cw": clockwise = true
+                    case "rotate":
+                        i += 1
+                        if i < tokens.count, tokens[i].Kind == .dimension { degrees = tokens[i].NumberVal }
+                    default: break
+                    }
+                    i += 1
+                }
+                shape.Words.append(letter("A") + ":\(large ? 1 : 0):\(clockwise ? 1 : 0):\(degrees)")
+                shape.Args += [rx, ry, x, y]
             case "hline", "vline":
                 guard let v = length() else { return nil }
                 shape.Words.append(letter(command == "hline" ? "H" : "V"))

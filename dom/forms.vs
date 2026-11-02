@@ -140,7 +140,14 @@ public func FormData(form: html.Node, submitter: html.Node?, value: (html.Node) 
         } else if tag == "textarea" {
             fields.append(FormField(Name: name, Value: value(c)))
         } else if tag == "select" {
-            fields.append(FormField(Name: name, Value: SelectedValue(c)))
+            if c.HasAttribute("multiple") {
+                // A field for each chosen, and none where nothing is.
+                for o in Descendants(c, tag: "option") where o.HasAttribute("selected") {
+                    fields.append(FormField(Name: name, Value: o.GetAttribute("value") ?? trimSpaces(o.InnerText())))
+                }
+            } else {
+                fields.append(FormField(Name: name, Value: SelectedValue(c)))
+            }
         } else if tag == "button" {
             if let s = submitter, s.Id == c.Id { fields.append(FormField(Name: name, Value: c.GetAttribute("value") ?? "")) }
         }

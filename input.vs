@@ -129,6 +129,11 @@ extension Page {
         }
         let before = scroll
         let r = handleInput(input)
+        // A field with a list suggests from it as it changes.
+        switch input {
+        case .text(_), .keyDown(_), .pointerDown(_): updateSuggestions(input)
+        default: break
+        }
         // The page scrolled -- by the wheel, a key, a jump to a fragment:
         // scroll at its root element.
         if scroll.X != before.X || scroll.Y != before.Y {
@@ -165,12 +170,21 @@ extension Page {
             modifiers = e.Modifiers
             if !isInside(e.Position) { return .ignored }
             update()
-            if picker != nil {
-                pickerPressed(at: e.Position)
-                return .handled
+            if let k = picker {
+                // Suggestions don't stop the page: only what's on them is theirs.
+                if k.kind == .suggestions && !pointOnPicker(e.Position) {
+                    closePicker()
+                } else {
+                    pickerPressed(at: e.Position)
+                    return .handled
+                }
             }
             if e.Button == .primary && startResize(at: e.Position) { return .handled }
             let target = hitAt(e.Position)?.Node
+            if let t = target, t.TagName == "select", layout.isListBox(t), builder.byNode[t.Id]?.Replaced == .listBox {
+                clickListBox(t, at: e.Position, modifiers: e.Modifiers)
+                return .handled
+            }
             if !context.PickerOpen.isEmpty { dismissBasePickers(target: target) }
             if !topLayer.isEmpty && lightDismiss(target) { return .handled }
             dragging = e.Button == .primary ? draggableAncestor(target).map { DragState(source: $0, start: e.Position) } : nil
@@ -809,6 +823,10 @@ extension Page {
 
     func wheel(delta: draw.Point, precise: bool) -> EventResult {
         update()
+        if let p = pointer, let t = hitAt(p)?.Node, t.TagName == "select", builder.byNode[t.Id]?.Replaced == .listBox {
+            scrollListBox(t, by: delta.Y < 0 ? 1 : -1)
+            return .handled
+        }
         if picker != nil {
             pickerWheel(dy: -delta.Y)
             return .handled
@@ -961,6 +979,7 @@ extension Page {
     /// Home and End go to the ends; a letter jumps to the next option
     /// starting with it.
     func selectKey(f: html.Node, k: Key) -> EventResult {
+        if builder.byNode[f.Id]?.Replaced == .listBox { return listBoxKey(f, k) }
         // Space and Enter open it, as a click does.
         if k.Code == "Space" || k.Code == "Enter" {
             if isBaseSelect(f) {

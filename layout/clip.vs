@@ -189,9 +189,39 @@ public func ClipRegionOf(box: Box, x: float32, y: float32, shape: cascade.ClipPa
             k += 2
             return rel ? (cx + px, cy + py) : (ref.X + px, ref.Y + py)
         }
-        for word in cp.Words {
+        // The last curve's second control point, for what smooths after it.
+        var lastControl: (float32, float32)? = nil
+        for whole in cp.Words {
+            let parts = whole.split(separator: ":").map { string($0) }
+            let word = parts[0]
             let rel = word.lowercased() == word && word != "Z"
+            let was = lastControl
+            lastControl = nil
             switch word.uppercased() {
+            case "S":
+                let c2 = point(rel)
+                let q = point(rel)
+                let c1 = was.map { (2 * cx - $0.0, 2 * cy - $0.1) } ?? (cx, cy)
+                p.CubicTo(c1.0, c1.1, c2.0, c2.1, q.0, q.1)
+                lastControl = c2
+                cx = q.0
+                cy = q.1
+            case "T":
+                let q = point(rel)
+                let c1 = was.map { (2 * cx - $0.0, 2 * cy - $0.1) } ?? (cx, cy)
+                p.QuadTo(c1.0, c1.1, q.0, q.1)
+                lastControl = c1
+                cx = q.0
+                cy = q.1
+            case "A":
+                let rx = at(k, w)
+                let ry = at(k + 1, h)
+                k += 2
+                let q = point(rel)
+                svg.AppendArc(&p, fromX: cx, fromY: cy, rx: rx, ry: ry, angle: parts.count > 3 ? float32(parts[3]) ?? 0 : 0,
+                              large: parts.count > 1 && parts[1] == "1", sweep: parts.count > 2 && parts[2] == "1", toX: q.0, toY: q.1)
+                cx = q.0
+                cy = q.1
             case "M":
                 let q = point(rel)
                 p.MoveTo(q.0, q.1)
@@ -215,12 +245,14 @@ public func ClipRegionOf(box: Box, x: float32, y: float32, shape: cascade.ClipPa
                 let c2 = point(rel)
                 let q = point(rel)
                 p.CubicTo(c1.0, c1.1, c2.0, c2.1, q.0, q.1)
+                lastControl = c2
                 cx = q.0
                 cy = q.1
             case "Q":
                 let c1 = point(rel)
                 let q = point(rel)
                 p.QuadTo(c1.0, c1.1, q.0, q.1)
+                lastControl = c1
                 cx = q.0
                 cy = q.1
             default:

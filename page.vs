@@ -286,6 +286,17 @@ public final class Page {
     var media: [int64: MediaState] = [:]
     var mediaFrames: [int64: draw.Image] = [:]
     var snapFrom: draw.Point? = nil
+    /// Laying out for paper: no scroll bar on the sheets.
+    var printing = false
+    /// A list box's first row showing, by select.
+    var listTop: [int64: int] = [:]
+    var listAnchor: [int64: int] = [:]
+    /// Escape put a field's suggestions away until it's typed in again.
+    var suggestionsDismissed = false
+    /// The images with frames of their own, and which each shows.
+    var animatedImages: [string: format.AnimatedImage] = [:]
+    var animatedStart: float64 = -1
+    var shownFrame: [string: int] = [:]
     /// The page's size when timelines were last styled.
     var timelineSizedFor = draw.Point(0, 0)
     var previousBoxes: [int64: layout.Box] = [:]
@@ -372,6 +383,10 @@ public final class Page {
 
     func load(doc: html.Document) {
         layoutTold = [:]
+        listTop = [:]
+        animatedImages = [:]
+        animatedStart = -1
+        cascade.PageRule = nil
         picker = nil
         context.PickerOpen = Set<int64>()
         builder.PickersOpen = context.PickerOpen
@@ -600,6 +615,29 @@ public final class Page {
         }
     }
 
+    /// Moves animated images on. Answers whether one changed.
+    func advanceAnimatedImages(time: float64) -> Bool {
+        if animatedImages.isEmpty { return false }
+        if animatedStart < 0 { animatedStart = time }
+        var changed = false
+        for (src, a) in animatedImages {
+            let t = time - animatedStart
+            let frame = a.FrameIndex(at: t)
+            if frame == shownFrame[src] { continue }
+            shownFrame[src] = frame
+            let img = drawable(a.Frames[frame])
+            images[src] = img
+            // What has it as its picture shows the new one.
+            for (_, b) in builder.byNode where b.Replaced == .image && b.Node?.GetAttribute("src") == src { b.Image = img }
+            changed = true
+        }
+        if changed {
+            needsPaint = true
+            needsRepaint = true
+        }
+        return changed
+    }
+
     /// The page's title, from <title>.
     public var Title: string { return title }
 
@@ -758,7 +796,7 @@ public final class Page {
         if animator.Active || !animator.events.isEmpty { return true }
         if bubbleNode != nil { return true }
         if scrollAnimation != nil || pendingSnap != nil { return true }
-        if mediaPlaying || overscroll != 0 || oldPicture != nil { return true }
+        if mediaPlaying || overscroll != 0 || oldPicture != nil || !animatedImages.isEmpty { return true }
         // Only what someone is listening for is worth a frame.
         if let doc = Document, doc.HasEventListeners {
             if !pendingImageEvents.isEmpty { return true }
@@ -795,6 +833,7 @@ public final class Page {
         dispatchLayoutEvents()
         if easeOverscroll(time) { repaint = true }
         if advanceTransition(time: time) { repaint = true }
+        if advanceAnimatedImages(time) { repaint = true }
         if advanceMedia() { repaint = true }
         if advanceScroll(time) { repaint = true }
         for (_, frame) in frames where frame.page.NeedsAnimation() {
@@ -996,6 +1035,7 @@ public final class Page {
                 }
                 state.Images = images
                 state.MediaFrames = mediaFrames
+                state.ListTops = listTop
                 if let k = picker {
                     state.PanelFrame = k.frame
                     state.PanelCells = k.cells
@@ -1105,7 +1145,7 @@ public final class Page {
         drawnScale = scale
         let fade = oldPicture != nil
         let bg = Configuration.BackgroundColor
-        let showBar = contentHeight > size.Height
+        let showBar = contentHeight > size.Height && !printing
         let barHeight = size.Height * size.Height / (contentHeight > 0 ? contentHeight : 1)
         let barY = size.Height > barHeight ? (size.Height - barHeight) * (sy / (contentHeight - size.Height)) : 0
         let viewWidth = size.Width
@@ -1548,6 +1588,7 @@ extension Page {
                 vectors[src] = doc
             } else if let decoded = format.Decode(bytes) {
                 images[src] = drawable(decoded)
+                if let moving = format.DecodeAnimated(bytes) { animatedImages[src] = moving }
             }
         } else if Configuration.DefersImages {
             pendingImages.append(src)
@@ -1556,6 +1597,7 @@ extension Page {
                 vectors[src] = doc
             } else if let decoded = decodeImage(bytes) {
                 images[src] = decoded
+                if let moving = format.DecodeAnimated(bytes) { animatedImages[src] = moving }
             }
         }
     }

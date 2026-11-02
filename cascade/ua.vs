@@ -106,6 +106,8 @@ input { width: 150px; }
 ::placeholder { color: #757575; }
 textarea { width: 200px; height: 60px; white-space: pre-wrap; resize: both; }
 select { background-color: #ffffff; border: 1px solid #767676; border-radius: 4px; padding: 2px 24px 2px 6px; height: 24px; cursor: default; }
+select[multiple], select[size] { height: auto; padding: 1px; }
+select[size="1"]:not([multiple]), select[size="0"]:not([multiple]) { height: 24px; padding: 2px 24px 2px 6px; }
 button, input[type=submit], input[type=button], input[type=reset] {
   background-color: #efefef; border: 1px solid #767676; border-radius: 4px; padding: 3px 10px; cursor: default;
   text-align: center; width: auto; height: auto; white-space: nowrap;

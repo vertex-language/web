@@ -480,3 +480,17 @@ func fontAlternatesSpec(words: string) -> string {
     }
     return out.joined(separator: ",")
 }
+
+/// Whether the page is being laid out for paper: @media print holds, and
+/// @media screen doesn't.
+public var MediaIsPrint = false
+
+/// A sheet's size and margins (top, right, bottom, left) as @page gives them;
+/// 0 and empty where it says nothing.
+public struct PageDescriptor {
+    public var Width: float32 = 0
+    public var Height: float32 = 0
+    public var Margins: [float32] = []
+}
+
+public var PageRule: PageDescriptor? = nil

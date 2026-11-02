@@ -473,6 +473,8 @@ public struct State {
     public var MediaFrames: [int64: draw.Image] = [:]
     public var MediaBars: [int64: MediaProgress] = [:]
     public var DragImage: DragImage? = nil
+    /// Each list box's first row showing.
+    public var ListTops: [int64: int] = [:]
     /// An open panel's frame and cells, over everything.
     public var PanelFrame: draw.Rect? = nil
     public var PanelCells: [PanelCell] = []
@@ -518,6 +520,7 @@ public func Build(root: layout.Box, state: State, viewportWidth: float32, viewpo
     b.mediaFrames = state.MediaFrames
     b.mediaBars = state.MediaBars
     b.dragImage = state.DragImage
+    b.listTops = state.ListTops
     b.panelFrame = state.PanelFrame
     b.panelCells = state.PanelCells
     b.highlights = state.Highlights
@@ -557,6 +560,7 @@ final class DisplayListBuilder {
     var uprightBox: layout.Box? = nil
     var mediaBars: [int64: MediaProgress] = [:]
     var dragImage: DragImage? = nil
+    var listTops: [int64: int] = [:]
     var panelFrame: draw.Rect? = nil
     var panelCells: [PanelCell] = []
     var highlights: [Highlight] = []
@@ -859,7 +863,19 @@ final class DisplayListBuilder {
             layer.BackfaceHidden = s.BackfaceHidden
             if s.ClipPath != nil { layer.Shape = layout.ClipRegionOf(box, x: x, y: y) }
             layer.MaskRect = maskArea(box: layer.Rect, border: box.Border, padding: box.Padding, word: s.MaskOrigin)
-            if s.MaskGradient != nil || !s.MaskURL.isEmpty {
+            if let content = box.EffectContent {
+                // clip-path or mask: url(#id), over the box.
+                layer.MaskVector = content
+                layer.MaskVectorWidth = box.Width
+                layer.MaskLuminance = box.EffectIsMask
+                layer.X = x
+                layer.Y = y
+                layer.TileWidth = box.Width
+                layer.TileHeight = box.Height
+            } else if !s.ClipURL.isEmpty || s.MaskURL.hasPrefix("#") {
+                // Names nothing: per the spec a clip with no element doesn't
+                // clip, and a mask with none doesn't mask.
+            } else if s.MaskGradient != nil || !s.MaskURL.isEmpty {
                 maskTiles(&layer, s)
                 if s.MaskClip != "no-clip" {
                     layer.MaskClip = maskArea(box: layer.Rect, border: box.Border, padding: box.Padding, word: s.MaskClip)
@@ -2027,6 +2043,27 @@ final class DisplayListBuilder {
                     items.append(.text(x + (box.Width - mark.Width) / 2, y + box.Height * 0.8, mark, color(draw.Color.white), 0))
                 }
             }
+        case .listBox:
+            // Its rows, the chosen ones lit, from where it has scrolled to.
+            guard let node = box.Node else { break }
+            let options = dom.Descendants(node, tag: "option")
+            let rowH = layout.ListBoxRowHeight(s)
+            let top = listTops[node.Id] ?? 0
+            items.append(.clip(inner))
+            var i = top
+            var rowY = inner.Y
+            while i < options.count && rowY < inner.Bottom {
+                let o = options[i]
+                let off = o.HasAttribute("disabled")
+                if o.HasAttribute("selected") {
+                    items.append(.fill(draw.Rect(inner.X, rowY, inner.Width, rowH), color(s.AccentColor ?? css.SystemAccent), draw.Radii.zero))
+                }
+                let c = off ? draw.Color(160, 160, 160) : (o.HasAttribute("selected") ? draw.Color.white : s.Color)
+                items.append(.text(inner.X + 4, rowY + 1 + face.Ascent, face.Shape(dom.CollapseSpace(o.InnerText())), color(c), 0))
+                rowY += rowH
+                i += 1
+            }
+            items.append(PaintItem.unclip)
         case .select:
             let run = face.Shape(box.Text)
             let ty = inner.Y + (inner.Height - face.LineHeight) / 2 + face.Ascent
@@ -2633,7 +2670,7 @@ public func SelectedPart(f: layout.Fragment, node: html.Node, range: (start: dom
 /// with the code.
 public func ReadsAttribute(name: string) -> bool {
     switch name {
-    case "controls", "alt", "max", "min", "step", "placeholder", "value", "checked", "data-viewport":
+    case "controls", "disabled", "selected", "alt", "max", "min", "step", "placeholder", "value", "checked", "data-viewport":
         return true
     default:
         return false

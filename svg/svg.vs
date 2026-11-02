@@ -6,9 +6,9 @@
 // by attribute or style (colors, none, currentColor, linear and radial
 // gradients), fill-rule, fill-opacity and opacity; strokes (stroke,
 // stroke-width, stroke-linecap, stroke-linejoin, stroke-miterlimit,
-// stroke-opacity) of those and <line>; clip-path and mask by url(); <text>
-// and <tspan>; and the viewBox with preserveAspectRatio. Dashes, filters,
-// patterns and text on a path aren't drawn yet.
+// stroke-opacity, dashes) of those and <line>; markers; patterns; clip-path,
+// mask and a run of filter primitives by url(); <text> and <tspan>; and the
+// viewBox with preserveAspectRatio. Text on a path isn't drawn yet.
 package svg
 
 import (
@@ -90,6 +90,8 @@ struct Shape {
     /// stroke-dasharray and stroke-dashoffset, in user units.
     var dashes: [float32] = []
     var dashOffset: float32 = 0
+    /// filter: url(), in user units.
+    var filters: [draw.Filter] = []
     /// A <text> run instead of an outline.
     var text: TextRun? = nil
 }
@@ -143,15 +145,21 @@ public final class Drawing {
     func drawShapes(on canvas: draw.Canvas, view: Matrix, currentColor: draw.Color, fill: draw.Color?, fillNone: bool, solid: bool) {
         for s in shapes {
             let m = view.Times(s.matrix)
-            if s.clips.isEmpty && s.masks.isEmpty {
+            if s.clips.isEmpty && s.masks.isEmpty && s.filters.isEmpty {
                 drawShape(s, m, on: canvas, currentColor: currentColor, fill: fill, fillNone: fillNone, solid: solid)
                 continue
             }
-            // Apart, then cut, then put back.
-            let area = reach(s, m).Intersect(canvas.Clip)
+            // Apart, then filtered and cut, then put back.
+            var spread: float32 = 0
+            let unit = math.Sqrt(math.Abs(m.A * m.D - m.B * m.C))
+            for f in s.filters { spread += f.Scaled(unit).Reach }
+            var area = reach(s, m)
+            if spread > 0 { area = draw.IRect(area.X - int32(spread) - 1, area.Y - int32(spread) - 1, area.Width + 2 * int32(spread) + 2, area.Height + 2 * int32(spread) + 2) }
+            area = area.Intersect(canvas.Clip)
             if area.IsEmpty { continue }
             let layer = draw.Layer(area)
             drawShape(s, m, on: layer.Canvas, currentColor: currentColor, fill: fill, fillNone: fillNone, solid: solid)
+            if !s.filters.isEmpty { layer.Apply(s.filters.map { $0.Scaled(unit) }) }
             let box = boundingBox(s)
             for c in s.clips {
                 let alpha = draw.Layer(area)
@@ -280,6 +288,162 @@ public func ParseDocument(bytes: [uint8]) -> Document? {
     return Document(drawing: parse(root), width: size.width, height: size.height)
 }
 
+/// What a clipPath or mask draws, from its <svg>, in its own units: over the
+/// box's unit square where it says objectBoundingBox.
+public func ContentOf(target: html.Node) -> Drawing? {
+    guard let id = target.GetAttribute("id") else { return nil }
+    var top = target
+    var cur = target.Parent
+    while let n = cur {
+        if n.TagName == "svg" { top = n }
+        cur = n.Parent
+    }
+    let root = fromHTML(top)
+    var ids: [string: element] = [:]
+    collectIds(root, &ids)
+    guard let e = ids[id], let d = contentOf(e, ids) else { return nil }
+    let out = Drawing(viewBox: d.boundingBoxUnits ? draw.Rect(0, 0, 1, 1) : nil, stretch: d.boundingBoxUnits)
+    out.shapes = d.shapes
+    return out
+}
+
+/// What an SVG <filter> does, as CSS's filters, its primitives in order.
+public func FiltersOf(target: html.Node) -> [draw.Filter] {
+    return filtersIn(fromHTML(target))
+}
+
+func filtersIn(e: element) -> [draw.Filter] {
+    var out: [draw.Filter] = []
+    func number(n: element, name: string) -> float32 {
+        return coordinate(n.GetAttribute(name)) ?? 0
+    }
+    for c in e.Children {
+        switch c.TagName {
+        case "fegaussianblur":
+            let v = (c.GetAttribute("stddeviation") ?? "0").split(whereSeparator: { $0 == " " || $0 == "," }).first.map { string($0) } ?? "0"
+            out.append(.blur(coordinate(v) ?? 0))
+        case "feoffset":
+            out.append(.offset(number(c, name: "dx"), number(c, name: "dy")))
+        case "fedropshadow":
+            var color = draw.Color(0, 0, 0)
+            if let flood = c.GetAttribute("flood-color"), let parsed = css.ParseColor(trim(flood)) { color = parsed }
+            if let o = coordinate(c.GetAttribute("flood-opacity")) { color = color.Faded(o) }
+            let v = (c.GetAttribute("stddeviation") ?? "0").split(whereSeparator: { $0 == " " || $0 == "," }).first.map { string($0) } ?? "0"
+            out.append(.dropShadow(c.GetAttribute("dx") != nil ? number(c, name: "dx") : 2, c.GetAttribute("dy") != nil ? number(c, name: "dy") : 2, coordinate(v) ?? 2, color))
+        case "fecolormatrix":
+            let kind = css.lower(c.GetAttribute("type") ?? "matrix")
+            var values: [float32] = []
+            for part in (c.GetAttribute("values") ?? "").split(whereSeparator: { $0 == " " || $0 == "," || $0 == "\n" }) {
+                values.append(coordinate(string(part)) ?? 0)
+            }
+            switch kind {
+            case "saturate": out.append(.saturate(values.first ?? 1))
+            case "huerotate": out.append(.hueRotate(values.first ?? 0))
+            case "luminancetoalpha":
+                out.append(.matrix([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.2125, 0.7154, 0.0721, 0, 0]))
+            default:
+                if values.count == 20 { out.append(.matrix(values)) }
+            }
+        default:
+            break
+        }
+    }
+    return out
+}
+
+/// Where a path's corners are, in its own units, and which way it goes there.
+func pathVertices(ops: [uint8], coords: [float32]) -> [(x: float32, y: float32, angle: float32)] {
+    var points: [(x: float32, y: float32, inX: float32, inY: float32, outX: float32, outY: float32)] = []
+    var k = 0
+    var px: float32 = 0
+    var py: float32 = 0
+    for op in ops {
+        switch op {
+        case opMove:
+            px = coords[k]
+            py = coords[k + 1]
+            points.append((x: px, y: py, inX: 0, inY: 0, outX: 0, outY: 0))
+            k += 2
+        case opLine:
+            let x = coords[k]
+            let y = coords[k + 1]
+            if !points.isEmpty {
+                points[points.count - 1].outX = x - px
+                points[points.count - 1].outY = y - py
+            }
+            points.append((x: x, y: y, inX: x - px, inY: y - py, outX: 0, outY: 0))
+            px = x
+            py = y
+            k += 2
+        case opCubic:
+            let x = coords[k + 4]
+            let y = coords[k + 5]
+            if !points.isEmpty {
+                points[points.count - 1].outX = coords[k] - px
+                points[points.count - 1].outY = coords[k + 1] - py
+            }
+            points.append((x: x, y: y, inX: x - coords[k + 2], inY: y - coords[k + 3], outX: 0, outY: 0))
+            px = x
+            py = y
+            k += 6
+        default:
+            break
+        }
+    }
+    var out: [(x: float32, y: float32, angle: float32)] = []
+    for p in points {
+        // Between the way in and the way out, where it has both.
+        let lenIn = math.Sqrt(p.inX * p.inX + p.inY * p.inY)
+        let lenOut = math.Sqrt(p.outX * p.outX + p.outY * p.outY)
+        var dx: float32 = 0
+        var dy: float32 = 0
+        if lenIn > 0 {
+            dx += p.inX / lenIn
+            dy += p.inY / lenIn
+        }
+        if lenOut > 0 {
+            dx += p.outX / lenOut
+            dy += p.outY / lenOut
+        }
+        out.append((x: p.x, y: p.y, angle: dx == 0 && dy == 0 ? 0 : math.Atan2(dy, dx)))
+    }
+    return out
+}
+
+/// Puts a <marker>'s content at a place on a path.
+func placeMarker(m: element, at v: (x: float32, y: float32, angle: float32), reversed: bool, strokeWidth: float32, base: Matrix, d: Drawing, ids: [string: element]) {
+    if nesting >= deepestNesting { return }
+    let orient = css.lower(m.GetAttribute("orient") ?? "0")
+    var angle: float32 = 0
+    if orient == "auto" {
+        angle = v.angle
+    } else if orient == "auto-start-reverse" {
+        angle = reversed ? v.angle + float32(math.Pi) : v.angle
+    } else {
+        angle = (coordinate(orient) ?? 0) * float32(math.Pi) / 180
+    }
+    let units = css.lower(m.GetAttribute("markerunits") ?? "strokewidth")
+    let k = units == "userspaceonuse" ? 1 : strokeWidth
+    let width = coordinate(m.GetAttribute("markerwidth")) ?? 3
+    let height = coordinate(m.GetAttribute("markerheight")) ?? 3
+    // The viewBox onto the marker's box.
+    var fit = Matrix.identity
+    if let vb = viewBoxOf(m), vb.Width > 0, vb.Height > 0 {
+        let s = width / vb.Width < height / vb.Height ? width / vb.Width : height / vb.Height
+        fit = Matrix(s, 0, 0, s, -vb.X * s, -vb.Y * s)
+    }
+    let ref = fit.Apply(coordinate(m.GetAttribute("refx")) ?? 0, coordinate(m.GetAttribute("refy")) ?? 0)
+    let c = math.Cos(angle)
+    let s = math.Sin(angle)
+    var placed = base.Times(Matrix(1, 0, 0, 1, v.x, v.y)).Times(Matrix(c, s, -s, c, 0, 0)).Times(Matrix(k, 0, 0, k, 0, 0))
+    placed = placed.Times(Matrix(1, 0, 0, 1, -ref.x, -ref.y)).Times(fit)
+    var ctx = contentContext()
+    ctx.matrix = placed
+    nesting += 1
+    walk(m, ctx, d, ids)
+    nesting -= 1
+}
+
 /// What an <svg> element draws.
 public func Parse(root: html.Node) -> Drawing {
     return parse(fromHTML(root))
@@ -348,6 +512,10 @@ struct Context {
     var strokeFirst: bool = false
     var dashes: [float32] = []
     var dashOffset: float32 = 0
+    var filters: [draw.Filter] = []
+    var markerStart = ""
+    var markerMid = ""
+    var markerEnd = ""
     var spec = font.Spec(families: ["sans-serif"], size: 16)
     var anchor: string = "start"
 
@@ -358,7 +526,7 @@ struct Context {
         if let t = n.GetAttribute("transform") { c.matrix = matrix.Times(parseTransform(t)) }
         var props: [(string, string)] = []
         for name in ["fill", "fill-rule", "fill-opacity", "opacity", "stroke", "stroke-width", "stroke-linecap",
-                     "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "clip-path", "mask", "clip-rule", "paint-order", "stroke-dasharray", "stroke-dashoffset",
+                     "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "clip-path", "mask", "clip-rule", "paint-order", "stroke-dasharray", "stroke-dashoffset", "filter", "marker-start", "marker-mid", "marker-end", "marker",
                      "font-family", "font-size", "font-weight", "font-style", "text-anchor"] {
             if let v = n.GetAttribute(name) { props.append((name, v)) }
         }
@@ -383,6 +551,15 @@ struct Context {
                 }
             case "fill-rule":
                 c.rule = v == "evenodd" ? .evenOdd : .nonZero
+            case "filter":
+                if let t = referenced(v, ids), t.TagName == "filter" { c.filters += filtersIn(t) }
+            case "marker-start": c.markerStart = v == "none" ? "" : v
+            case "marker-mid": c.markerMid = v == "none" ? "" : v
+            case "marker-end": c.markerEnd = v == "none" ? "" : v
+            case "marker":
+                c.markerStart = v == "none" ? "" : v
+                c.markerMid = c.markerStart
+                c.markerEnd = c.markerStart
             case "stroke-dasharray":
                 c.dashes = []
                 if v != "none" {
@@ -498,7 +675,20 @@ func walk(n: element, ctx: Context, d: Drawing, ids: [string: element]) {
             d.shapes.append(Shape(ops: ops, coords: coords, matrix: inner.matrix, fill: fill, rule: inner.rule,
                                   opacity: inner.opacity, fillInherited: inner.fillInherited && c.TagName != "line",
                                   stroke: inner.stroke, strokeStyle: inner.strokeStyle, strokeOpacity: inner.strokeOpacity,
-                                  clips: inner.clips, masks: inner.masks, clipRule: inner.clipRule, strokeFirst: inner.strokeFirst, dashes: inner.dashes, dashOffset: inner.dashOffset))
+                                  clips: inner.clips, masks: inner.masks, clipRule: inner.clipRule, strokeFirst: inner.strokeFirst, dashes: inner.dashes, dashOffset: inner.dashOffset,
+                                  filters: inner.filters))
+            // Markers, at its ends and corners.
+            if !inner.markerStart.isEmpty || !inner.markerMid.isEmpty || !inner.markerEnd.isEmpty {
+                let vertices = pathVertices(ops, coords)
+                var i = 0
+                while i < vertices.count {
+                    let name = i == 0 ? inner.markerStart : (i == vertices.count - 1 ? inner.markerEnd : inner.markerMid)
+                    if !name.isEmpty, let m = referenced(name, ids), m.TagName == "marker" {
+                        placeMarker(m, at: vertices[i], reversed: i == 0, strokeWidth: inner.strokeStyle.Width, base: inner.matrix, d: d, ids: ids)
+                    }
+                    i += 1
+                }
+            }
         }
     }
 }
