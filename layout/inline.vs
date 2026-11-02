@@ -37,6 +37,9 @@ struct Item {
     var decorationColor: draw.Color
     /// The bidi embedding level: odd is right to left.
     var level: uint8 = 0
+    /// A piece of a word after a soft hyphen: the line may break before
+    /// it, and the piece before then shows a hyphen.
+    var softBreakBefore: bool = false
 
     init(kind: ItemKind, box: Box, owner: Box) {
         self.kind = kind
@@ -317,7 +320,7 @@ extension Layout {
                 lineWidth += item.width
                 if !item.owner.Style.WhiteSpace.Collapses { lineHasContent = true }
             case .word, .atomic:
-                let canBreak = breakOpportunity || item.kind == .atomic
+                let canBreak = breakOpportunity || item.kind == .atomic || item.softBreakBefore
                 breakOpportunity = item.kind == .atomic
                 // An empty line squeezed by floats that cannot hold the
                 // word moves down to where the floats end.
@@ -383,7 +386,29 @@ extension Layout {
                         lineItems.removeLast()
                         if let idx = lastIndex(open, of: last.box) { open.remove(at: idx) }
                     }
+                    // Breaking at a soft hyphen, the piece before shows
+                    // it; where the hyphen doesn't fit, the break moves
+                    // back a piece.
+                    var moved: [Item] = []
+                    if item.softBreakBefore && carried.isEmpty {
+                        while let last = lineItems.last, last.kind == .word, last.softBreakBefore, lineItems.count > 1,
+                              lineWidth - last.width + hyphenated(last).width > available() + 0.01 {
+                            moved.insert(last, at: 0)
+                            lineWidth -= last.width
+                            lineItems.removeLast()
+                        }
+                        if let last = lineItems.last, last.kind == .word {
+                            let h = hyphenated(last)
+                            lineWidth += h.width - last.width
+                            lineItems[lineItems.count - 1] = h
+                        }
+                    }
                     finishLine(forced: false)
+                    for m in moved {
+                        lineItems.append(m)
+                        lineWidth += m.width
+                        lineHasContent = true
+                    }
                     for c in carried {
                         lineItems.append(c)
                         lineWidth += c.width
@@ -653,6 +678,18 @@ extension Layout {
         }
     }
 
+    /// A word piece that ends in a soft hyphen, ending a line: the
+    /// hyphen shows. Its text stays as the source has it.
+    func hyphenated(_ item: Item) -> Item {
+        let b = [uint8](item.text.utf8)
+        if b.count < 2 || b[b.count - 2] != 0xC2 || b[b.count - 1] != 0xAD { return item }
+        var out = item
+        let style = item.owner.Style
+        out.run = style.Face.Shape(stringOf(b, 0, b.count - 2) + "-")
+        out.width = out.run.Width + style.LetterSpacing * float32(out.run.Count)
+        return out
+    }
+
     /// Splits a text box into words and spaces as its white-space says.
     func textItems(_ box: Box, owner: Box, decoration: cascade.TextDecoration, decorationColor: draw.Color,
                    into items: inout [Item], pendingSpace: inout Bool) {
@@ -724,17 +761,34 @@ extension Layout {
             }
             var j = i
             while j < n && !isSpaceByte(bytes[j]) { j += 1 }
-            let word = stringOf(bytes, i, j)
-            var item = Item(kind: .word, box: box, owner: owner)
-            item.text = word
-            item.run = face.Shape(word)
-            item.width = item.run.Width + style.LetterSpacing * float32(item.run.Count)
-            item.offset = i
-            item.length = j - i
-            item.breakable = wraps
-            item.decoration = decoration
-            item.decorationColor = decorationColor
-            items.append(item)
+            // A word with soft hyphens (U+00AD) is a piece per syllable,
+            // each holding the hyphen after it, which doesn't show.
+            func piece(_ start: int, _ end: int) {
+                let text = stringOf(bytes, start, end)
+                var item = Item(kind: .word, box: box, owner: owner)
+                item.text = text
+                item.run = face.Shape(text)
+                item.width = item.run.Width + style.LetterSpacing * float32(item.run.Count)
+                item.offset = start
+                item.length = end - start
+                item.breakable = wraps
+                item.decoration = decoration
+                item.decorationColor = decorationColor
+                item.softBreakBefore = start > i
+                items.append(item)
+            }
+            var start = i
+            var k = i
+            while k + 2 < j {
+                if !style.HyphensNone && bytes[k] == 0xC2 && bytes[k + 1] == 0xAD {
+                    piece(start, k + 2)
+                    start = k + 2
+                    k += 2
+                    continue
+                }
+                k += 1
+            }
+            piece(start, j)
             pendingSpace = false
             i = j
         }
@@ -974,17 +1028,23 @@ extension Layout {
         var dx: float32 = 0
         let free = contentWidth - used
         let rtl = box.LinesRightToLeft
+        // The last line, and a line a forced break ends, aligns by
+        // text-align-last; where that is auto, a justified paragraph's
+        // starts at the start.
+        var align = strutStyle.TextAlign
+        if isLast {
+            if let last = strutStyle.TextAlignLast { align = last } else if align == .justify { align = .start }
+        }
         if free > 0 {
-            switch strutStyle.TextAlign {
+            switch align {
             case .center: dx = free / 2
             case .right: dx = free
             case .end: dx = rtl ? 0 : free
             case .start: dx = rtl ? free : 0
             case .justify:
-                // Every line but the last spreads its free room over its
-                // spaces; the fragments and spans after each one move on.
-                // The last starts at the start.
-                if !isLast { justify(&fragments, &spans, free: free) } else if rtl { dx = free }
+                // The line spreads its free room over its spaces; the
+                // fragments and spans after each one move on.
+                justify(&fragments, &spans, free: free)
             default: dx = 0
             }
         }

@@ -309,6 +309,12 @@ public final class ComputedStyle {
     /// caption-side: bottom puts a table's captions under its rows.
     /// Inherited.
     public var CaptionBelow = false
+    /// text-align-last: how the last line, and a line before a forced
+    /// break, aligns; nil is auto (text-align, start for justify).
+    /// Inherited.
+    public var TextAlignLast: TextAlign? = nil
+    /// hyphens: none: a soft hyphen is no place to break. Inherited.
+    public var HyphensNone = false
     /// list-style-image's URL, empty for none. Inherited.
     public var ListStyleImage: string = ""
     /// empty-cells: hide leaves a cell with nothing in it undrawn, in
@@ -354,6 +360,8 @@ public final class ComputedStyle {
         TabSize = parent.TabSize
         Quotes = parent.Quotes
         CaptionBelow = parent.CaptionBelow
+        TextAlignLast = parent.TextAlignLast
+        HyphensNone = parent.HyphensNone
         ListStyleImage = parent.ListStyleImage
         HideEmptyCells = parent.HideEmptyCells
         TextShadows = parent.TextShadows

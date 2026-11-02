@@ -31,12 +31,11 @@ let unappliedNames: [string] = [
     "font-variant", "font-stretch", "font-feature-settings", "src",
     "unicode-range",
     "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
-    "hyphens",
     "writing-mode",
     "speak", "font-display",
     "text-size-adjust", "-webkit-text-size-adjust",
     "-webkit-tap-highlight-color",
-    "font-kerning", "text-align-last", "text-justify",
+    "font-kerning", "text-justify",
     "font-variant-numeric", "font-variant-ligatures", "font-optical-sizing",
 ]
 

@@ -357,6 +357,39 @@ func testPseudoElements() {
     check(l.rect("c")!.Height == 35 && l.rect("after")!.Y == l.rect("c")!.Y + 35, "a clearing ::after block contains the float (got \(l.rect("c")!.Height))")
 }
 
+func testTextAlignLast() {
+    print("text-align-last")
+    guard let l = layoutOf("<body style='margin:0;font:10px Helvetica'><p id=r style='margin:0;width:200px;text-align-last:right'>one</p><p id=j style='margin:0;width:200px;text-align:justify;text-align-last:justify'>a b</p><p id=c style='margin:0;width:60px;text-align:justify;text-align-last:center'>aaa bbb ccc ddd e</p><p id=d style='margin:0;width:200px;text-align:center'>x<br>y</p></body>") else { check(false, "layout"); return }
+    func frags(_ id: string, _ line: int) -> [layout.Fragment] {
+        let b = l.box(id)!
+        return line < b.Lines.count ? b.Lines[line].Fragments : []
+    }
+    let r = frags("r", 0)
+    check(r.count == 1 && near(r[0].X + r[0].Width, 200), "text-align-last: right aligns a one-line paragraph (got \(r[0].X) \(r[0].Width))")
+    let j = frags("j", 0)
+    let jl = j[j.count - 1]
+    check(j[0].X == 0 && near(jl.X + jl.Width, 200), "text-align-last: justify spreads the last line (got \(jl.X + jl.Width))")
+    let c = l.box("c")!
+    let last = c.Lines[c.Lines.count - 1].Fragments
+    let first = c.Lines[0].Fragments
+    check(c.Lines.count > 1 && last[0].X > 5 && first[0].X == 0, "a justified paragraph's last line takes text-align-last: center (got \(last[0].X))")
+    check(frags("d", 0)[0].X > 90, "auto keeps text-align for the line before a <br> (got \(frags("d", 0)[0].X))")
+}
+
+func testHyphens() {
+    print("hyphens")
+    guard let l = layoutOf("<body style='margin:0;font:20px Helvetica'><p id=s style='margin:0;width:120px'>super&shy;cali&shy;fragi&shy;listic</p><p id=n style='margin:0;width:120px;hyphens:none'>super&shy;cali&shy;fragi&shy;listic</p><p id=w style='margin:0;width:400px'>super&shy;cali</p></body>") else { check(false, "layout"); return }
+    let s = l.box("s")!
+    var widest: float32 = 0
+    for line in s.Lines { for f in line.Fragments where f.X + f.Width > widest { widest = f.X + f.Width } }
+    let first = s.Lines[0].Fragments[0]
+    check(s.Lines.count >= 2 && widest <= 120.5, "a word breaks at its soft hyphens to fit (got \(s.Lines.count) lines, \(widest) wide)")
+    check(first.Width > first.Owner.Style.Face.Measure("supercali") + 1, "the piece before the break shows a hyphen (got \(first.Width))")
+    check(l.box("n")!.Lines.count == 1, "hyphens: none keeps the word whole (got \(l.box("n")!.Lines.count) lines)")
+    let w = l.box("w")!.Lines[0].Fragments
+    check(w.count == 1 && near(w[0].Width, w[0].Owner.Style.Face.Measure("supercali")), "an unbroken soft hyphen doesn't show (got \(w[0].Width))")
+}
+
 func testCaptionSide() {
     print("caption-side")
     guard let l = layoutOf("<body style='margin:0'><table id=t style='border-spacing:0'><caption id=top style='height:10px'></caption><caption id=bot style='caption-side:bottom;height:15px'></caption><tr><td id=c style='height:20px;padding:0'></td></tr></table></body>") else { check(false, "layout"); return }
@@ -708,6 +741,8 @@ func main() -> int32 {
     testPseudoElements()
     testCounters()
     testCaptionSide()
+    testTextAlignLast()
+    testHyphens()
     testGrid()
     testPositioning()
     testColumns()

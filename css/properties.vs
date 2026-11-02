@@ -150,6 +150,8 @@ public enum Prop: int32 {
     case counterSet
     case quotes
     case captionSide
+    case textAlignLast
+    case hyphens
     case emptyCells
     case fill
     case transform
@@ -400,7 +402,7 @@ let propNames: [string: Prop] = [
     "list-style-position": .listStylePosition, "cursor": .cursor, "pointer-events": .pointerEvents, "user-select": .userSelect, "-webkit-user-select": .userSelect, "visibility": .visibility, "scrollbar-width": .scrollbarWidth,
     "border-collapse": .borderCollapse, "border-spacing": .borderSpacing, "tab-size": .tabSize,
     "content": .content, "counter-reset": .counterReset, "counter-increment": .counterIncrement,
-    "counter-set": .counterSet, "quotes": .quotes, "caption-side": .captionSide, "empty-cells": .emptyCells, "fill": .fill,
+    "counter-set": .counterSet, "quotes": .quotes, "caption-side": .captionSide, "text-align-last": .textAlignLast, "hyphens": .hyphens, "-webkit-hyphens": .hyphens, "empty-cells": .emptyCells, "fill": .fill,
 ]
 
 /// Parses a declaration from a stylesheet into the longhands it sets.
@@ -767,13 +769,12 @@ func longhands(_ d: Declaration) -> [Longhand] {
          "transform-style", "transform-box",
          "font-variant", "font-stretch", "font-feature-settings", "src", "unicode-range",
          "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
-         "hyphens",
          "writing-mode",
          "speak",
          "font-display",
          "text-size-adjust", "-webkit-text-size-adjust", "-webkit-tap-highlight-color",
          "font-kerning",
-         "text-align-last", "text-justify", "font-variant-numeric", "font-variant-ligatures",
+         "text-justify", "font-variant-numeric", "font-variant-ligatures",
          "font-optical-sizing",
          "unused-placeholder-property":
         break
@@ -2268,6 +2269,15 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
             k += 1
         }
         return parts.isEmpty ? nil : .families(parts)
+    case .hyphens:
+        if kw == "none" || kw == "manual" || kw == "auto" { return .keyword(kw) }
+        return nil
+    case .textAlignLast:
+        switch kw {
+        case "auto", "start", "end", "left", "right", "center", "justify": return .keyword(kw)
+        case "match-parent": return .keyword("start")
+        default: return nil
+        }
     case .captionSide:
         switch kw {
         case "top", "block-start": return .keyword("top")

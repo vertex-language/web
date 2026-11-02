@@ -142,6 +142,9 @@ func testHTML() {
         return
     }
     same(intro.InnerText(), "Here is an <example> of HTML & CSS parsing.", "entities &lt;, &gt;, &amp; decoded correctly in text")
+    same(html.Unescape("a&mdash;b&hellip; &rsquo;&eacute;&nbsp;&shy;&euro;"), "a\u{2014}b\u{2026} \u{2019}\u{E9}\u{A0}\u{AD}\u{20AC}", "named references beyond the basic five")
+    same(html.Unescape("&#8217;&#x1F600;&#150;&#0;&#xD800;"), "\u{2019}\u{1F600}\u{2013}\u{FFFD}\u{FFFD}", "numeric references to any character, C1 as windows-1252, invalid as U+FFFD")
+    same(html.Unescape("&bogus; &#xZZ; &"), "&bogus; &#xZZ; &", "unknown references stay as written")
 
     // Raw text elements (<style>)
     let styles = doc.ElementsByTagName("style")
