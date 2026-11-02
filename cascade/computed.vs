@@ -86,6 +86,11 @@ public final class ComputedStyle {
     public var TextBoxTrim: string = "none"
     public var TextBoxEdge: string = "text"
     public var InitialLetter: float32 = 0
+    /// writing-mode and text-orientation; whether the box's physical sizes
+    /// have been swapped into the axes its vertical text is laid out in.
+    public var WritingMode: string = "horizontal-tb"
+    public var TextOrientation: string = "mixed"
+    public var AxesSwapped: bool = false
     /// overflow-anchor: none: the box isn't what a scroll keeps its place by.
     public var NoScrollAnchor: bool = false
     /// perspective, in CSS pixels (0 for none), and where the viewer is
@@ -370,6 +375,8 @@ public final class ComputedStyle {
         WordBreak = parent.WordBreak
         ListStyleType = parent.ListStyleType
         ImageRendering = parent.ImageRendering
+        WritingMode = parent.WritingMode
+        TextOrientation = parent.TextOrientation
         ListStylePosition = parent.ListStylePosition
         Cursor = parent.Cursor
         PointerEvents = parent.PointerEvents
@@ -539,6 +546,38 @@ extension ComputedStyle {
 
     public var HasTransform: bool {
         return !Transform.isEmpty || !Translate.isEmpty || !Rotate.isEmpty || !Scale.isEmpty
+    }
+
+    /// Whether its lines run down the page.
+    public var IsVertical: bool { return WritingMode != "horizontal-tb" }
+
+    /// A vertical box is laid out as if horizontal and then turned, so
+    /// what the page wrote physically goes on the side that turns to it.
+    public func SwapAxesForVertical() {
+        if AxesSwapped { return }
+        AxesSwapped = true
+        let w = Width
+        Width = Height
+        Height = w
+        let minW = MinWidth
+        MinWidth = MinHeight
+        MinHeight = minW
+        let maxW = MaxWidth
+        MaxWidth = MaxHeight
+        MaxHeight = maxW
+        // Turned a quarter clockwise, the top ends up at the right; the other
+        // way for sideways-lr, whose top ends up at the left.
+        if WritingMode == "sideways-lr" {
+            let mt = MarginTop; MarginTop = MarginLeft; MarginLeft = MarginBottom; MarginBottom = MarginRight; MarginRight = mt
+            let pt = PaddingTop; PaddingTop = PaddingLeft; PaddingLeft = PaddingBottom; PaddingBottom = PaddingRight; PaddingRight = pt
+            let bt = BorderTopWidth; BorderTopWidth = BorderLeftWidth; BorderLeftWidth = BorderBottomWidth; BorderBottomWidth = BorderRightWidth; BorderRightWidth = bt
+            let t = Top; Top = Left; Left = Bottom; Bottom = Right; Right = t
+        } else {
+            let mt = MarginTop; MarginTop = MarginRight; MarginRight = MarginBottom; MarginBottom = MarginLeft; MarginLeft = mt
+            let pt = PaddingTop; PaddingTop = PaddingRight; PaddingRight = PaddingBottom; PaddingBottom = PaddingLeft; PaddingLeft = pt
+            let bt = BorderTopWidth; BorderTopWidth = BorderRightWidth; BorderRightWidth = BorderBottomWidth; BorderBottomWidth = BorderLeftWidth; BorderLeftWidth = bt
+            let t = Top; Top = Right; Right = Bottom; Bottom = Left; Left = t
+        }
     }
 
     /// Whether any of the box's transforms reaches out of the plane.

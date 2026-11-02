@@ -3,6 +3,7 @@ package paint
 import (
     "image/draw"
     "math"
+    "text/bidi"
     "text/font"
     "web/cascade"
     "web/css"
@@ -86,6 +87,23 @@ public enum PaintKind: Equatable {
     case path
 }
 
+/// One cell of an open panel, on the page: a select's row, a calendar's day.
+public struct PanelCell {
+    public var rect: draw.Rect
+    public var text: string
+    public var fill: draw.Color?
+    public var color: draw.Color
+    public var centered: bool
+
+    public init(rect: draw.Rect, text: string, fill: draw.Color?, color: draw.Color, centered: bool) {
+        self.rect = rect
+        self.text = text
+        self.fill = fill
+        self.color = color
+        self.centered = centered
+    }
+}
+
 /// What a drag shows: its source, faint, moved with the pointer.
 public struct DragImage {
     public var box: layout.Box
@@ -113,6 +131,29 @@ public struct Highlight {
         self.color = color
         self.inherited = inherited
     }
+}
+
+/// Whether text holds right-to-left letters: its first character shows at
+/// its right.
+public func RunsRightToLeft(text: string) -> bool {
+    var cps: [uint32] = []
+    for u in text.unicodeScalars { cps.append(u.value) }
+    return bidi.HasRightToLeft(cps)
+}
+
+/// Where a line of a text control starts: at the left of its content box,
+/// or the right where the control runs right to left.
+public func FieldLineStart(line: string, left: float32, right: float32, rtl: bool, face: font.Face) -> float32 {
+    return rtl ? right - 1 - face.Measure(line) : left + 1
+}
+
+/// Where an offset in a line of a text control shows: measured from the
+/// line's right where its text runs right to left.
+public func FieldX(bytes: [uint8], from: int, to: int, at: int, left: float32, right: float32, rtl: bool, face: font.Face) -> float32 {
+    let line = stringOf(bytes, from, to)
+    let start = FieldLineStart(line, left: left, right: right, rtl: rtl, face: face)
+    let along = face.Measure(stringOf(bytes, from, at))
+    return RunsRightToLeft(line) ? start + face.Measure(line) - along : start + along
 }
 
 /// Where a media element has got to, for its controls.
@@ -150,6 +191,14 @@ func clockOf(seconds: float64) -> string {
     return "\(t / 60):\(s < 10 ? "0" : "")\(s)"
 }
 
+/// Whether a character stands upright in vertical text, as CJK does; a
+/// bracket among them turns with the line, to open along it.
+func standsUpright(c: uint32) -> bool {
+    if (c >= 0x3008 && c <= 0x3011) || (c >= 0x3014 && c <= 0x301B) || c == 0xFF08 || c == 0xFF09 || c == 0xFF3B || c == 0xFF3D { return false }
+    return (c >= 0x1100 && c <= 0x11FF) || (c >= 0x2E80 && c <= 0xA4CF) || (c >= 0xAC00 && c <= 0xD7AF) || (c >= 0xF900 && c <= 0xFAFF)
+        || (c >= 0xFE30 && c <= 0xFE4F) || (c >= 0xFF00 && c <= 0xFFEF) || (c >= 0x1F300 && c <= 0x1FAFF) || (c >= 0x20000 && c <= 0x3FFFF)
+}
+
 /// A layer in a 3D context, waiting to be drawn in depth order.
 struct Plane {
     var layer: draw.Layer
@@ -177,6 +226,10 @@ public struct PaintItem {
     public var Image: draw.Image?
     /// image-rendering: pixelated or crisp-edges.
     public var Pixelated: bool = false
+    /// Text that stands upright in a line turned to run down the page:
+    /// turned back about the middle of its TileWidth, TileHeight over its
+    /// baseline.
+    public var Upright: bool = false
     public var Opacity: float32
     /// An image's tile size and whether it repeats each way; the rect is
     /// the area it covers.
@@ -353,6 +406,9 @@ public struct State {
     public var MediaFrames: [int64: draw.Image] = [:]
     public var MediaBars: [int64: MediaProgress] = [:]
     public var DragImage: DragImage? = nil
+    /// An open panel's frame and cells, over everything.
+    public var PanelFrame: draw.Rect? = nil
+    public var PanelCells: [PanelCell] = []
     public var Highlights: [Highlight] = []
     public var Vectors: [string: svg.Document] = [:]
     /// The selection, if any, and each text node's place in the document.
@@ -395,6 +451,8 @@ public func Build(root: layout.Box, state: State, viewportWidth: float32, viewpo
     b.mediaFrames = state.MediaFrames
     b.mediaBars = state.MediaBars
     b.dragImage = state.DragImage
+    b.panelFrame = state.PanelFrame
+    b.panelCells = state.PanelCells
     b.highlights = state.Highlights
     b.bubble = state.Bubble
     b.vectors = state.Vectors
@@ -428,8 +486,12 @@ final class DisplayListBuilder {
     var mediaFrames: [int64: draw.Image] = [:]
     /// The matrix of the preserve-3d box whose children are being painted.
     var context3D: draw.Matrix4? = nil
+    /// The image being painted turned back upright.
+    var uprightBox: layout.Box? = nil
     var mediaBars: [int64: MediaProgress] = [:]
     var dragImage: DragImage? = nil
+    var panelFrame: draw.Rect? = nil
+    var panelCells: [PanelCell] = []
     var highlights: [Highlight] = []
     /// The page's SVG images by URL, for masks.
     var vectors: [string: svg.Document] = [:]
@@ -476,6 +538,22 @@ final class DisplayListBuilder {
             paintBox(d.box, x: at.x - d.box.X - d.box.OffsetX, y: at.y - d.box.Y - d.box.OffsetY, skipBackground: 0)
             opacity = saved
             items.append(PaintItem(.untranslate))
+        }
+        if let f = panelFrame {
+            // A soft edge round a white card, and its cells on it.
+            items.append(.fill(draw.Rect(f.X - 1, f.Y, f.Width + 2, f.Height + 3), draw.Color(0, 0, 0, 40), draw.Radii(all: 6)))
+            items.append(.fill(f, draw.Color.white, draw.Radii(all: 5)))
+            let edge = draw.Color(190, 190, 190)
+            items.append(.border(f, draw.Edges(all: 1), [edge, edge, edge, edge], draw.Radii(all: 5)))
+            let face = font.Load(font.Spec(families: ["system-ui"], size: 13, weight: 400))
+            for c in panelCells {
+                // A swatch fills its cell; a lit row or day has soft corners.
+                if let fill = c.fill { items.append(.fill(c.rect, fill, c.text.isEmpty ? draw.Radii.zero : draw.Radii(all: 3))) }
+                if c.text.isEmpty { continue }
+                let run = face.Shape(c.text)
+                let tx = c.centered ? c.rect.X + (c.rect.Width - run.Width) / 2 : c.rect.X + 6
+                items.append(.text(tx, c.rect.Y + (c.rect.Height - face.LineHeight) / 2 + face.Ascent, run, c.color, 0))
+            }
         }
         if let b = bubble { paintBubble(b.rect, b.text) }
         return items
@@ -587,7 +665,76 @@ final class DisplayListBuilder {
     /// and borders of it and its in-flow block descendants, then its
     /// floats, then its inline content and replaced content, then the
     /// boxes positioned against it.
+    /// An image in vertical text stays upright: it is painted with its own
+    /// sizes back, turned the other way about its middle.
+    func paintUprightReplaced(box: layout.Box, x parentX: float32, y parentY: float32, skipBackground: Int) {
+        let w = box.Width
+        let h = box.Height
+        let cx = parentX + box.X + box.OffsetX + w / 2
+        let cy = parentY + box.Y + box.OffsetY + h / 2
+        let turn: float32 = box.Style.WritingMode == "sideways-lr" ? 1.5707964 : -1.5707964
+        var layer = PaintItem(.layer)
+        layer.Rect = draw.Rect(cx - h / 2, cy - w / 2, h, w)
+        layer.Transform = draw.Affine.translate(cx, cy).Concat(draw.Affine.rotate(turn)).Concat(draw.Affine.translate(-cx, -cy))
+        items.append(layer)
+        let savedX = box.X
+        let savedY = box.Y
+        box.Width = h
+        box.Height = w
+        box.X = cx - h / 2 - parentX - box.OffsetX
+        box.Y = cy - w / 2 - parentY - box.OffsetY
+        uprightBox = box
+        paintBox(box, x: parentX, y: parentY, skipBackground: skipBackground)
+        uprightBox = nil
+        box.X = savedX
+        box.Y = savedY
+        box.Width = w
+        box.Height = h
+        items.append(PaintItem(.unlayer))
+    }
+
+    /// A vertical run, glyph by glyph where it matters: what stands upright
+    /// in vertical text turned back, the rest left to turn with the line.
+    func appendVerticalText(f: layout.Fragment, x: float32, baseline: float32, c: draw.Color, spacing: float32) {
+        let style = f.Owner.Style
+        var cps: [uint32] = []
+        for u in f.Text.unicodeScalars { cps.append(u.value) }
+        if style.TextOrientation == "sideways" || style.WritingMode.hasPrefix("sideways") || cps.count != f.Run.Glyphs.count {
+            items.append(.text(x, baseline, f.Run, c, spacing))
+            return
+        }
+        let face = style.Face
+        var pen = x
+        var i = 0
+        while i < cps.count {
+            var run = font.Run()
+            let upright = style.TextOrientation == "upright" || standsUpright(cps[i])
+            let start = pen
+            var j = i
+            while j < cps.count && (upright ? j == i : !(style.TextOrientation == "upright" || standsUpright(cps[j]))) {
+                run.Glyphs.append(f.Run.Glyphs[j])
+                run.Faces.append(f.Run.Faces[j])
+                run.Advances.append(f.Run.Advances[j])
+                run.Width += f.Run.Advances[j] + spacing
+                pen += f.Run.Advances[j] + spacing
+                j += 1
+            }
+            var item = PaintItem.text(start, baseline, run, c, spacing)
+            if upright {
+                item.Upright = true
+                item.TileWidth = run.Width
+                item.TileHeight = (face.Ascent - face.Descent) / 2
+            }
+            items.append(item)
+            i = j
+        }
+    }
+
     func paintBox(box: layout.Box, x parentX: float32, y parentY: float32, skipBackground: Int) {
+        if box.Kind == .replaced && box.Style.AxesSwapped && uprightBox?.Id != box.Id {
+            paintUprightReplaced(box, x: parentX, y: parentY, skipBackground: skipBackground)
+            return
+        }
         let s = box.Style
         if s.Visibility != .visible && !hasVisibleDescendant(box) { return }
         // Nothing of a fully transparent box or its content shows.
@@ -596,9 +743,10 @@ final class DisplayListBuilder {
         let y = parentY + box.Y + box.OffsetY
         let savedOpacity = opacity
         if s.Opacity < 1 { opacity = opacity * s.Opacity }
-        let transform = s.HasTransform
+        var transform = s.HasTransform
             ? draw.Affine.translate(x, y).Concat(s.TransformMatrix(width: box.Width, height: box.Height)).Concat(draw.Affine.translate(-x, -y))
             : draw.Affine.identity
+        if box.QuarterTurn != 0 { transform = transform.Concat(layout.QuarterMatrix(box, x: x, y: y)) }
         // A plane in 3D: its matrix, on top of its context's.
         var matrix3D = layout.ThreeDMatrix(box, x: x, y: y)
         let joins = matrix3D != nil && (box.Parent?.Style.UsedPreserve3D ?? false)
@@ -686,7 +834,8 @@ final class DisplayListBuilder {
                 // scrollbar-width: thin, and scrollbar-color's thumb and
                 // track.
                 let barWidth: float32 = s.ScrollbarThin ? 3 : 5
-                let barX = x + box.Width - box.Border.Right - barWidth - 3
+                // Right to left, the bar is on the left.
+                let barX = s.Direction == .rtl ? x + box.Border.Left + 3 : x + box.Width - box.Border.Right - barWidth - 3
                 if let track = s.ScrollbarTrack, track.A > 0 {
                     items.append(.fill(draw.Rect(barX, trackTop, barWidth, trackHeight), color(track), draw.Radii(all: barWidth / 2)))
                 }
@@ -751,7 +900,14 @@ final class DisplayListBuilder {
         let sx = x - box.ScrollX
         let sy = y - box.ScrollY
         if box.Kind == .replaced {
-            if phase == .inlineContent && visible { paintReplaced(box, x: x, y: y) }
+            if phase == .inlineContent && visible {
+                // Upright in vertical text; there, painted as a whole.
+                if s.AxesSwapped && uprightBox?.Id != box.Id {
+                    paintUprightReplaced(box, x: parentX, y: parentY, skipBackground: skipBackground)
+                } else {
+                    paintReplaced(box, x: x, y: y)
+                }
+            }
             return
         }
         if !box.Lines.isEmpty {
@@ -777,7 +933,7 @@ final class DisplayListBuilder {
                 if phase == .floats { paintBox(child, x: sx, y: sy, skipBackground: skipBackground) }
                 continue
             }
-            if child.Style.IsPositioned || child.Style.HasTransform || child.Style.Perspective > 0 || child.Style.Preserve3D {
+            if child.Style.IsPositioned || child.Style.HasTransform || child.Style.Perspective > 0 || child.Style.Preserve3D || child.QuarterTurn != 0 {
                 // A relative or sticky box paints as a whole, with what
                 // is positioned against it, among the stacking context's
                 // positioned boxes.
@@ -1414,7 +1570,11 @@ final class DisplayListBuilder {
                         items.append(.text(x + f.X + sh.X, y + f.Y + f.Ascent + sh.Y, f.Run, color(sh.Color), f.Owner.Style.LetterSpacing))
                         if sh.Blur > 0 { items.append(PaintItem(.unlayer)) }
                     }
-                    items.append(.text(x + f.X, y + f.Y + f.Ascent, f.Run, textColor, f.Owner.Style.LetterSpacing))
+                    if f.Owner.Style.IsVertical {
+                        appendVerticalText(f, x: x + f.X, baseline: y + f.Y + f.Ascent, c: textColor, spacing: f.Owner.Style.LetterSpacing)
+                    } else {
+                        items.append(.text(x + f.X, y + f.Y + f.Ascent, f.Run, textColor, f.Owner.Style.LetterSpacing))
+                    }
                 }
                 if !f.Decoration.IsNone {
                     let face = f.Owner.Style.Face
@@ -1615,6 +1775,9 @@ final class DisplayListBuilder {
             }
             let selected = isFocused && fieldSelectionStart >= 0 && fieldSelectionEnd > fieldSelectionStart
             let highlight = draw.Color(179, 212, 252)
+            // A control right to left starts its lines at the right.
+            let fieldRTL = s.Direction == .rtl
+            if fieldRTL { caretX = inner.Right - 1 }
             if !value.isEmpty {
                 if box.Replaced == .textArea {
                     var lineY = textY
@@ -1631,16 +1794,18 @@ final class DisplayListBuilder {
                                 let from = max(fieldSelectionStart, lineStart)
                                 let to = min(fieldSelectionEnd, i)
                                 if from <= to && (from < to || (fieldSelectionEnd > i && i < bytes.count)) {
-                                    let x0 = textX + face.Measure(stringOf(bytes, lineStart, from))
-                                    var x1 = textX + face.Measure(stringOf(bytes, lineStart, to))
+                                    let a = FieldX(bytes, from: lineStart, to: i, at: from, left: inner.X, right: inner.Right, rtl: fieldRTL, face: face)
+                                    let b = FieldX(bytes, from: lineStart, to: i, at: to, left: inner.X, right: inner.Right, rtl: fieldRTL, face: face)
+                                    let x0 = a < b ? a : b
+                                    var x1 = a < b ? b : a
                                     // A selected line break shows as a sliver.
                                     if fieldSelectionEnd > i && i < bytes.count { x1 += face.SpaceWidth }
                                     items.append(.fill(draw.Rect(x0, lineY - face.Ascent, x1 - x0, face.Ascent + face.Descent), highlight, draw.Radii.zero))
                                 }
                             }
-                            if run.Count > 0 { items.append(.text(textX, lineY, run, color(s.Color), 0)) }
+                            if run.Count > 0 { items.append(.text(FieldLineStart(lineText, left: inner.X, right: inner.Right, rtl: fieldRTL, face: face), lineY, run, color(s.Color), 0)) }
                             if isFocused && caret >= lineStart && caret <= i && !caretPlaced {
-                                caretX = textX + face.Measure(stringOf(bytes, lineStart, caret))
+                                caretX = FieldX(bytes, from: lineStart, to: i, at: caret, left: inner.X, right: inner.Right, rtl: fieldRTL, face: face)
                                 caretPlaced = true
                                 if caretVisible {
                                     items.append(.fill(draw.Rect(caretX, lineY - face.Ascent, 1, face.Ascent + face.Descent), color(s.CaretColor ?? s.Color), draw.Radii.zero))
@@ -1655,21 +1820,25 @@ final class DisplayListBuilder {
                     let run = face.Shape(value)
                     if selected {
                         let bytes = [uint8](value.utf8)
-                        let x0 = textX + face.Measure(stringOf(bytes, 0, min(fieldSelectionStart, bytes.count)))
-                        let x1 = textX + face.Measure(stringOf(bytes, 0, min(fieldSelectionEnd, bytes.count)))
+                        let a = FieldX(bytes, from: 0, to: bytes.count, at: min(fieldSelectionStart, bytes.count), left: inner.X, right: inner.Right, rtl: fieldRTL, face: face)
+                        let b = FieldX(bytes, from: 0, to: bytes.count, at: min(fieldSelectionEnd, bytes.count), left: inner.X, right: inner.Right, rtl: fieldRTL, face: face)
+                        let x0 = a < b ? a : b
+                        let x1 = a < b ? b : a
                         items.append(.fill(draw.Rect(x0, textY - face.Ascent, x1 - x0, face.Ascent + face.Descent), highlight, draw.Radii.zero))
                     }
-                    items.append(.text(textX, textY, run, color(s.Color), 0))
+                    items.append(.text(FieldLineStart(value, left: inner.X, right: inner.Right, rtl: fieldRTL, face: face), textY, run, color(s.Color), 0))
                     if composedFrom >= 0 {
                         let bytes = [uint8](value.utf8)
-                        let x0 = textX + face.Measure(stringOf(bytes, 0, composedFrom))
-                        let x1 = textX + face.Measure(stringOf(bytes, 0, composedTo))
+                        let a = FieldX(bytes, from: 0, to: bytes.count, at: composedFrom, left: inner.X, right: inner.Right, rtl: fieldRTL, face: face)
+                        let b = FieldX(bytes, from: 0, to: bytes.count, at: composedTo, left: inner.X, right: inner.Right, rtl: fieldRTL, face: face)
+                        let x0 = a < b ? a : b
+                        let x1 = a < b ? b : a
                         items.append(.fill(draw.Rect(x0, textY + 2, x1 - x0, 1), color(s.Color), draw.Radii.zero))
                     }
                     if isFocused {
                         let bytes = [uint8](value.utf8)
                         let upto = caret < 0 ? 0 : (caret > bytes.count ? bytes.count : caret)
-                        caretX = textX + face.Measure(stringOf(bytes, 0, upto))
+                        caretX = FieldX(bytes, from: 0, to: bytes.count, at: upto, left: inner.X, right: inner.Right, rtl: fieldRTL, face: face)
                     }
                 }
             } else if let node = box.Node, value.isEmpty, dom.IsDateTimeType(dom.InputType(node)) && !node.HasAttribute("placeholder") {
@@ -1932,7 +2101,17 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
             let run = item.Run
             let c = item.Color
             let letterSpacing = item.LetterSpacing
-            if letterSpacing == 0 {
+            if item.Upright {
+                let cx = (x + item.TileWidth / 2) * scale + dx
+                let cy = (baseline - item.TileHeight) * scale + dy
+                let reach = int32(item.TileWidth * scale * 1.5) + 4
+                let cell = draw.IRect(int32(cx) - reach, int32(cy) - reach, reach * 2, reach * 2)
+                let layer = draw.Layer(cell)
+                font.DrawRun(layer.Canvas, run, x: x * scale + dx, baseline: baseline * scale + dy, scale: scale, color: c)
+                let t = draw.Affine.translate(cx, cy).Concat(draw.Affine.rotate(-1.5707964)).Concat(draw.Affine.translate(-cx, -cy))
+                layer.Composite(onto: canvas, transform: t)
+                layer.Free()
+            } else if letterSpacing == 0 {
                 font.DrawRun(canvas, run, x: x * scale + dx, baseline: baseline * scale + dy, scale: scale, color: c)
             } else {
                 var pen = x * scale + dx

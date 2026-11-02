@@ -1521,6 +1521,315 @@ func testCompositing() {
     check(bigLines[0].Fragments[0].Width <= 200 && bigLines[1].Fragments[0].Width > bigLines[0].Fragments[0].Width / 2,
           "and each line's words are set in its own font (\(bigLines[0].Fragments[0].Width) \(bigLines[1].Fragments[0].Width))")
 
+    // Vertical text.
+    let vt = web.Page()
+    vt.SetViewportSize(draw.Size(400, 300))
+    vt.LoadHTML("""
+    <style>body { margin: 0; background: white; font-size: 20px; line-height: 20px } .v { writing-mode: vertical-rl; height: 100px; position: absolute; top: 0 } span { background: rgb(255,0,0) }
+    .pic { width: 30px; height: 10px; display: block; background: rgb(0,0,255) }</style>
+    <div class=v id=rl style="left: 0"><span>aaa</span><br>bbb</div>
+    <div class=v id=lr style="left: 100px; writing-mode: vertical-lr"><span>aaa</span><br>bbb</div>
+    <div class=v id=sz style="left: 200px; width: 50px; height: 60px; background: rgb(0,255,0)"></div>
+    <div class=v id=kid style="left: 300px"><div class=pic id=pic></div></div>
+    <p id=flow style="position: absolute; top: 200px; left: 0; margin: 0; writing-mode: vertical-rl; height: 80px">ab</p>
+    """)
+    var vtp = [uint8](repeating: 0, count: 400 * 300 * 4)
+    vt.Draw(into: &vtp, width: 400, height: 300, scale: 1)
+    func vtc(x: int32, y: int32) -> draw.Color { return pixelAt(vtp, 400, x, y) }
+    let vrl = vt.BoundsOf(vt.QuerySelector("#rl")!)!
+    check(vrl.Width == 40 && vrl.Height == 100, "a vertical box is as wide as its lines stack, and its height is what they run along (got \(vrl.Width) x \(vrl.Height))")
+    // The span with the first line is red: which side it lands on says
+    // which way the lines go.
+    func redIn(x0: int32, x1: int32) -> int {
+        var n = 0
+        var cx = x0
+        while cx < x1 {
+            var cy: int32 = 0
+            while cy < 60 {
+                if vtc(cx, cy) == draw.Color(255, 0, 0) { n += 1 }
+                cy += 1
+            }
+            cx += 1
+        }
+        return n
+    }
+    check(redIn(20, 40) > 3 * redIn(0, 20), "vertical-rl: the first line is at the right (\(redIn(20, 40)) \(redIn(0, 20)))")
+    check(redIn(100, 120) > 3 * redIn(120, 140), "vertical-lr: the first line is at the left (\(redIn(100, 120)) \(redIn(120, 140)))")
+    let vsz = vt.BoundsOf(vt.QuerySelector("#sz")!)!
+    check(vsz.Width == 50 && vsz.Height == 60, "its own width and height are physical (got \(vsz.Width) x \(vsz.Height))")
+    check(vtc(245, 55) == draw.Color(0, 255, 0), "and its background fills them")
+    // A child with a physical width and height shows those, however it is laid out.
+    check(vtc(301, 5) != draw.Color.white || vtc(325, 5) != draw.Color.white, "a child's physical size shows (got \(vtc(301, 5)) \(vtc(325, 5)))")
+    var bluePixels = 0
+    var vbx: int32 = 296
+    while vbx < 400 {
+        var vby: int32 = 0
+        while vby < 120 {
+            if vtc(vbx, vby) == draw.Color(0, 0, 255) { bluePixels += 1 }
+            vby += 1
+        }
+        vbx += 1
+    }
+    check(bluePixels == 300, "a block inside keeps its physical 30 by 10 (\(bluePixels) pixels)")
+    let hitV = vt.ElementAt(draw.Point(30, 2))
+    check(hitV?.TagName == "span", "a click finds what's drawn there (got \(hitV?.TagName ?? "nothing"))")
+
+    // CJK wraps between its characters, not before a closing mark.
+    let cj = web.Page()
+    cj.SetViewportSize(draw.Size(400, 300))
+    cj.LoadHTML("<style>body { margin: 0; font-size: 20px; line-height: 1 } p { margin: 0; width: 100px }</style><p id=a>\u{65E5}\u{672C}\u{8A9E}\u{65E5}\u{672C}\u{8A9E}\u{65E5}\u{672C}\u{8A9E}\u{65E5}\u{672C}\u{8A9E}</p><p id=b style='width: 40px'>\u{65E5}\u{672C}\u{3002}\u{65E5}</p><p id=c style='white-space: nowrap'>\u{65E5}\u{672C}\u{8A9E}\u{65E5}\u{672C}\u{8A9E}\u{65E5}\u{672C}\u{8A9E}</p>")
+    let cjA = cj.BoxFor(cj.QuerySelector("#a")!)!
+    check(cjA.Lines.count == 3, "ideographs wrap anywhere (got \(cjA.Lines.count) lines)")
+    let cjB = cj.BoxFor(cj.QuerySelector("#b")!)!
+    if cjB.Lines.count > 1, let opener = cjB.Lines[1].Fragments.first {
+        check(!opener.Text.hasPrefix("\u{3002}"), "a full stop doesn't start a line (\(opener.Text))")
+    } else {
+        check(false, "those lines wrap (\(cjB.Lines.count))")
+    }
+    check(cj.BoxFor(cj.QuerySelector("#c")!)!.Lines.count == 1, "nowrap keeps them on one line")
+    let keep = web.Page()
+    keep.SetViewportSize(draw.Size(400, 300))
+    keep.LoadHTML("<style>body { margin: 0; font-size: 20px; line-height: 1 } p { margin: 0; width: 100px; word-break: keep-all }</style><p id=k>\u{65E5}\u{672C}\u{8A9E}\u{65E5}\u{672C}\u{8A9E}\u{65E5}\u{672C}\u{8A9E}</p>")
+    check(keep.BoxFor(keep.QuerySelector("#k")!)!.Lines.count == 1, "word-break: keep-all doesn't break them")
+
+    // The accessibility tree.
+    let ax = web.Page()
+    ax.SetViewportSize(draw.Size(400, 400))
+    ax.LoadHTML("""
+    <title>Shop</title><style>body { margin: 0 } .gone { display: none }</style>
+    <nav aria-label="Main"><a href="/x">Home</a></nav>
+    <div><div><h2>Basket</h2></div></div>
+    <p>Some words</p>
+    <img src=a.png alt="A cat" width=10 height=10>
+    <label for=q>Search for</label><input id=q value="socks">
+    <label><input id=c type=checkbox checked> Gift wrap</label>
+    <button id=b onclick="">Buy now</button><button disabled>Off</button>
+    <select id=s aria-label="Size"><option>S</option><option selected>M</option></select>
+    <div class=gone><button>Hidden</button></div><div aria-hidden=true><button>Also hidden</button></div>
+    <input type=password id=pw value="secret">
+    """)
+    guard let tree = ax.AccessibilityTree() else { check(false, "a page has an accessibility tree"); return }
+    func axFind(role: string, name: string) -> web.AccessibleNode? {
+        func walk(n: web.AccessibleNode) -> web.AccessibleNode? {
+            if n.Role == role && n.Name == name { return n }
+            for c in n.Children {
+                if let f = walk(c) { return f }
+            }
+            return nil
+        }
+        return walk(tree)
+    }
+    check(tree.Role == "document" && tree.Name == "Shop", "the root is the document, named by its title (got \(tree.Role) \(tree.Name))")
+    check(axFind("navigation", "Main") != nil && axFind("link", "Home") != nil, "a landmark and a link inside it")
+    let heading = axFind("heading", "Basket")
+    check(heading != nil && heading?.Level == 2, "a heading has its level, and the divs round it aren't in the tree")
+    check(axFind("text", "Some words") != nil, "text is there")
+    check(axFind("img", "A cat") != nil, "an image is named by its alt")
+    let field = axFind("textbox", "Search for")
+    check(field?.Value == "socks", "a field is named by its label, and has its value (got \(field?.Value ?? "none"))")
+    let box = axFind("checkbox", "Gift wrap")
+    check(box?.Checked == true, "a checkbox named by the label that holds it, and checked")
+    check(axFind("button", "Buy now") != nil && axFind("button", "Off")?.Disabled == true, "buttons, and one disabled")
+    check(axFind("combobox", "Size")?.Value == "M", "a select says what's chosen")
+    check(axFind("button", "Hidden") == nil && axFind("button", "Also hidden") == nil, "display: none and aria-hidden aren't there")
+    var pwValue = "unset"
+    func walkPw(n: web.AccessibleNode) {
+        if n.Id == ax.QuerySelector("#pw")!.Id { pwValue = n.Value }
+        for c in n.Children { walkPw(c) }
+    }
+    walkPw(tree)
+    check(pwValue == "", "a password's value isn't told (got \(pwValue))")
+    var pressed = 0
+    if let buy = ax.QuerySelector("#b") { _ = ax.Document?.AddEventListener(buy, "click", handler: { e in pressed += 1 }) }
+    if let buy = axFind("button", "Buy now") { ax.AccessibilityPress(buy.Id) }
+    check(pressed == 1, "pressing it clicks the button (got \(pressed))")
+    if let f = field {
+        ax.AccessibilityFocus(f.Id)
+        ax.AccessibilitySetValue(f.Id, value: "hats")
+    }
+    check(ax.FocusedElement?.GetAttribute("id") == "q" && ax.ValueOf(ax.QuerySelector("#q")!) == "hats", "focus and a value can be set")
+    check(ax.AccessibilityTree()?.Role == "document", "and the tree can be asked again")
+
+    // Right-to-left fields, and a bar on the left.
+    let rt = web.Page()
+    rt.SetViewportSize(draw.Size(300, 200))
+    rt.LoadHTML("""
+    <style>body { margin: 0; background: white } input { display: block; width: 200px; height: 30px; font-size: 20px; padding: 0; border: 0; caret-color: rgb(255,0,0) } textarea { display: block; width: 200px; height: 30px; padding: 0; border: 0 }
+    #sc { direction: rtl; overflow: auto; width: 100px; height: 50px } #sc div { height: 200px }</style>
+    <input id=ar dir=rtl value="\u{5D0}\u{5D1}\u{5D2}"><input id=en dir=rtl value="abc"><div id=sc><div></div></div>
+    """)
+    guard let ar = rt.QuerySelector("#ar"), let en = rt.QuerySelector("#en") else { return }
+    func caretColumn() -> int32 {
+        var buf = [uint8](repeating: 0, count: 300 * 200 * 4)
+        rt.Draw(into: &buf, width: 300, height: 200, scale: 1)
+        var x: int32 = 0
+        let fy: int32 = int32(rt.BoundsOf(rt.FocusedElement ?? ar)!.Y + 15)
+        while x < 300 {
+            if pixelAt(buf, 300, x, fy) == draw.Color(255, 0, 0) { return x }
+            x += 1
+        }
+        return -1
+    }
+    rt.Focus(ar)
+    _ = rt.Handle(.keyDown(web.Key(Key: "Home", Code: "Home")))
+    _ = rt.Advance(time: 0)
+    let atStart = caretColumn()
+    check(atStart > 190, "right-to-left text's start is at the field's right (got \(atStart))")
+    _ = rt.Handle(.keyDown(web.Key(Key: "ArrowLeft", Code: "ArrowLeft")))
+    _ = rt.Advance(time: 0)
+    let moved = caretColumn()
+    check(moved >= 0 && moved < atStart, "the left arrow moves the caret left, on through the text (got \(moved) from \(atStart))")
+    let b0 = rt.BoundsOf(ar)!
+    _ = rt.Handle(.pointerMoved(draw.Point(b0.X + 198, b0.Y + 15)))
+    _ = rt.Handle(.pointerDown(web.Pointer(draw.Point(b0.X + 198, b0.Y + 15))))
+    _ = rt.Handle(.pointerUp(web.Pointer(draw.Point(b0.X + 198, b0.Y + 15))))
+    _ = rt.Advance(time: 0)
+    check(caretColumn() == atStart, "a click at the field's right is its text's start (got \(caretColumn()))")
+    rt.Focus(en)
+    _ = rt.Handle(.keyDown(web.Key(Key: "End", Code: "End")))
+    _ = rt.Advance(time: 0)
+    check(caretColumn() > 190, "left-to-right text in such a field ends at its right (got \(caretColumn()))")
+    var rtb = [uint8](repeating: 0, count: 300 * 200 * 4)
+    rt.Draw(into: &rtb, width: 300, height: 200, scale: 1)
+    let sb = rt.BoundsOf(rt.QuerySelector("#sc")!)!
+    check(pixelAt(rtb, 300, int32(sb.X) + 5, int32(sb.Y) + 5) != draw.Color.white && pixelAt(rtb, 300, int32(sb.X) + 95, int32(sb.Y) + 5) == draw.Color.white,
+          "a right-to-left scroller's bar is on its left")
+    let rl = web.Page()
+    rl.SetViewportSize(draw.Size(300, 300))
+    rl.LoadHTML("""
+    <style>body { margin: 0; font-size: 20px; line-height: 1 } #hold { position: relative; direction: rtl; width: 200px; height: 40px } #abs { position: absolute; width: 30px; height: 10px }
+    table { border-collapse: collapse; direction: rtl } td { border: 2px solid black; width: 20px; height: 20px; padding: 0 }</style>
+    <div id=hold><div id=abs></div></div>
+    <table><tr><td id=first></td><td id=second></td></tr></table>
+    """)
+    func rlBox(id: string) -> layout.Box { return rl.BoxFor(rl.QuerySelector("#" + id)!)! }
+    check(rlBox("abs").X == rlBox("hold").Width - 30, "an absolute box with no insets starts at the right (got \(rlBox("abs").X))")
+    check(rlBox("first").Border.Right == 2 && rlBox("first").Border.Left == 2, "the first cell at the right draws both sides (got \(rlBox("first").Border.Right) \(rlBox("first").Border.Left))")
+    check(rlBox("second").Border.Right == 0 && rlBox("second").Border.Left == 2, "the next shares its edge there (got \(rlBox("second").Border.Right) \(rlBox("second").Border.Left))")
+    // An element split by reordering draws a span per piece.
+    let sp = web.Page()
+    sp.SetViewportSize(draw.Size(400, 40))
+    sp.LoadHTML("<style>body { margin: 0; font-size: 20px; line-height: 1 } b { font-weight: normal }</style><p style='margin: 0'>start \u{5D0}<b id=m>\u{5D1} word more \u{5D2}</b>\u{5D3} end</p>")
+    if let pb = sp.BoxFor(sp.QuerySelector("p")!) , let line = pb.Lines.first {
+        var count = 0
+        for span in line.Spans { if span.Box.Node?.GetAttribute("id") == "m" { count += 1 } }
+        check(count >= 2, "an inline element split by reordering has a span for each piece (got \(count))")
+    }
+
+    // A select's list, a calendar, and a palette, in the page.
+    let pk = web.Page()
+    pk.SetViewportSize(draw.Size(300, 400))
+    pk.LoadHTML("""
+    <style>body { margin: 0; background: white } select { display: block; width: 100px; height: 24px } input { display: block; width: 120px; height: 24px; margin-top: 4px }</style>
+    <select id=s><option>One</option><option disabled>Two</option><option>Three</option></select>
+    <input id=d type=date value="2026-02-10"><input id=c type=color value="#000000"><input id=t type=time><input id=m type=month value="2026-03"><input id=w type=week>
+    """)
+    guard let pSel = pk.QuerySelector("#s"), let pDate = pk.QuerySelector("#d"), let pColor = pk.QuerySelector("#c"), let pTime = pk.QuerySelector("#t"), let pMonth = pk.QuerySelector("#m"), let pWeek = pk.QuerySelector("#w"), let pkDoc = pk.Document else { return }
+    var changes = 0
+    _ = pkDoc.AddEventListener(pSel, "change", handler: { e in changes += 1 })
+    func clickAt(x: float32, y: float32) {
+        _ = pk.Handle(.pointerMoved(draw.Point(x, y)))
+        _ = pk.Handle(.pointerDown(web.Pointer(draw.Point(x, y))))
+        _ = pk.Handle(.pointerUp(web.Pointer(draw.Point(x, y))))
+    }
+    func clickOn(n: html.Node) {
+        let b = pk.BoundsOf(n)!
+        clickAt(b.X + 5, b.Y + 5)
+    }
+    var pkp = [uint8](repeating: 0, count: 300 * 400 * 4)
+    clickOn(pSel)
+    pk.Draw(into: &pkp, width: 300, height: 400, scale: 1)
+    let selBox = pk.BoundsOf(pSel)!
+    let rowY = selBox.Y + selBox.Height + 2
+    check(pixelAt(pkp, 300, 90, int32(rowY) + 12) != draw.Color.white, "clicking a select opens its list, the chosen row lit (got \(pixelAt(pkp, 300, 90, int32(rowY) + 12)))")
+    clickAt(20, rowY + 24 + 12)
+    check(dom.SelectedValue(pSel) == "One" && changes == 0, "a disabled option can't be chosen (got \(dom.SelectedValue(pSel)))")
+    clickAt(20, rowY + 48 + 12)
+    check(dom.SelectedValue(pSel) == "Three" && changes == 1, "a row chooses its option, and change fires (got \(dom.SelectedValue(pSel)), \(changes))")
+    clickOn(pSel)
+    clickAt(250, 390)
+    clickOn(pSel)
+    _ = pk.Handle(.keyDown(web.Key(Key: "Escape", Code: "Escape")))
+    check(dom.SelectedValue(pSel) == "Three", "a press outside and Escape close it, choosing nothing")
+    _ = pk.Handle(.keyDown(web.Key(Key: "Enter", Code: "Enter")))
+    _ = pk.Handle(.keyDown(web.Key(Key: "ArrowUp", Code: "ArrowUp")))
+    _ = pk.Handle(.keyDown(web.Key(Key: "ArrowUp", Code: "ArrowUp")))
+    _ = pk.Handle(.keyDown(web.Key(Key: "Enter", Code: "Enter")))
+    check(dom.SelectedValue(pSel) == "One", "keys open it, move and choose (got \(dom.SelectedValue(pSel)))")
+    // February 2026: the first is a Sunday; the 18th is a Wednesday, row 2.
+    clickOn(pDate)
+    let dBox = pk.BoundsOf(pDate)!
+    let calY = dBox.Y + dBox.Height + 2
+    clickAt(dBox.X + 3 * 30 + 15, calY + 48 + 2 * 30 + 15)
+    check(pk.ValueOf(pDate) == "2026-02-18", "a calendar's day sets a date (got \(pk.ValueOf(pDate)))")
+    clickOn(pDate)
+    clickAt(dBox.X + 210 - 12, calY + 12)
+    clickAt(dBox.X + 15, calY + 48 + 15)
+    check(pk.ValueOf(pDate) == "2026-03-01", "its arrow goes to the next month, whose first is a Sunday (got \(pk.ValueOf(pDate)))")
+    clickOn(pColor)
+    let cBox = pk.BoundsOf(pColor)!
+    clickAt(cBox.X + 8 * 24 - 12, cBox.Y + cBox.Height + 2 + 5 * 24 + 12)
+    check(pk.ValueOf(pColor) == "#000000", "a palette's darkest gray is black (got \(pk.ValueOf(pColor)))")
+    clickOn(pColor)
+    clickAt(cBox.X + 12, cBox.Y + cBox.Height + 2 + 2 * 24 + 12)
+    check(pk.ValueOf(pColor) != "#000000" && pk.ValueOf(pColor).hasPrefix("#"), "and a swatch sets a color (got \(pk.ValueOf(pColor)))")
+    clickOn(pTime)
+    _ = pk.Handle(.keyDown(web.Key(Key: "ArrowDown", Code: "ArrowDown")))
+    _ = pk.Handle(.keyDown(web.Key(Key: "Enter", Code: "Enter")))
+    check(pk.ValueOf(pTime) == "09:30", "a list of times (got \(pk.ValueOf(pTime)))")
+    clickOn(pMonth)
+    pk.PressPanelCell(text: "Apr")
+    check(pk.ValueOf(pMonth) == "2026-04", "a month's grid (got \(pk.ValueOf(pMonth)))")
+    clickOn(pWeek)
+    pk.PressPanelCell(text: "15")
+    check(pk.ValueOf(pWeek).hasPrefix("20") && pk.ValueOf(pWeek).contains("-W"), "a day in a week field is its week (got \(pk.ValueOf(pWeek)))")
+
+    // appearance: base-select.
+    let bs = web.Page()
+    bs.SetViewportSize(draw.Size(300, 200))
+    bs.LoadHTML("""
+    <style>body { margin: 0; background: white } select, ::picker(select) { appearance: base-select } select { width: 150px } option { height: 30px } option b { color: rgb(255,0,0) } ::picker(select) { background-color: rgb(0,0,255) } select:open { outline: 2px solid rgb(0,255,0) }</style>
+    <select id=s><button id=btn><selectedcontent></selectedcontent></button><option id=a><b>Rich</b> one</option><option id=c>Plain two</option></select>
+    <p id=after>after</p>
+    """)
+    guard let bsel = bs.QuerySelector("#s"), let bbtn = bs.QuerySelector("#btn"), let boptC = bs.QuerySelector("#c") else { return }
+    _ = bs.BoundsOf(bsel)
+    let bsBox = bs.BoxFor(bsel)!
+    check(bsBox.Replaced == .none, "a base-select lays out its own content (got \(bsBox.Replaced))")
+    check(bs.BoxFor(boptC) == nil, "closed, its options have no boxes")
+    let afterY = bs.BoundsOf(bs.QuerySelector("#after")!)!.Y
+    let bbtnAt = bs.BoundsOf(bbtn)!
+    _ = bs.Handle(.pointerDown(web.Pointer(draw.Point(bbtnAt.X + 4, bbtnAt.Y + 4))))
+    _ = bs.Handle(.pointerUp(web.Pointer(draw.Point(bbtnAt.X + 4, bbtnAt.Y + 4))))
+    guard let open = bs.BoundsOf(boptC) else { check(false, "clicking its button opens the picker"); return }
+    check(open.Height == 30, "open, its options are laid out as their rules say (got \(open.Height))")
+    let closedAt = bs.BoundsOf(bsel)!
+    check(open.Y >= closedAt.Y + closedAt.Height && open.X >= closedAt.X && open.X < closedAt.X + 10 && open.Width <= closedAt.Width,
+          "the picker hangs under the select, as wide as it (option at \(open.X),\(open.Y) width \(open.Width); select \(closedAt.X),\(closedAt.Y) \(closedAt.Width)x\(closedAt.Height))")
+    check(bs.BoundsOf(bs.QuerySelector("#after")!)!.Y == afterY, "and the picker pushes nothing down")
+    var bsp = [uint8](repeating: 0, count: 300 * 200 * 4)
+    bs.Draw(into: &bsp, width: 300, height: 200, scale: 1)
+    var picked = false
+    var redText = false
+    var py: int32 = 0
+    while py < 200 {
+        var px: int32 = 0
+        while px < 300 {
+            let c = pixelAt(bsp, 300, px, py)
+            if c == draw.Color(0, 0, 255) { picked = true }
+            if c.R > 200 && c.G < 60 && c.B < 60 { redText = true }
+            px += 1
+        }
+        py += 1
+    }
+    check(picked, "::picker(select) styles the picker")
+    check(redText, "and an option's rich content shows")
+    _ = bs.Handle(.pointerDown(web.Pointer(draw.Point(open.X + 4, open.Y + 4))))
+    _ = bs.Handle(.pointerUp(web.Pointer(draw.Point(open.X + 4, open.Y + 4))))
+    check(dom.SelectedValue(bsel) == "Plain two", "clicking an option chooses it (got \(dom.SelectedValue(bsel)))")
+    check(bs.BoxFor(boptC) == nil, "and closes")
+    check(bbtn.InnerText().isEmpty && bs.BoundsOf(bbtn)!.Width > 20, "<selectedcontent> shows the choice")
+
     // Scroll anchoring, and a page that stretches at its end.
     let ah = web.Page()
     ah.SetViewportSize(draw.Size(100, 100))

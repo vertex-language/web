@@ -627,13 +627,14 @@ extension Layout {
             reordered.append(f)
         }
         fragments = reordered
-        // Each span now runs over what of its element is on the line,
-        // its padding and border at the sides its ends are on.
-        var s = 0
-        while s < spans.count {
-            let b = spans[s].Box
-            var lo: float32 = 1e9
-            var hi: float32 = -1e9
+        // Each span now runs over what of its element is on the line, one
+        // piece for each run of it that stayed together, its padding and
+        // border at the sides its ends are on.
+        var split: [Span] = []
+        for sp in spans {
+            let b = sp.Box
+            var pieces: [(lo: float32, hi: float32)] = []
+            var open = false
             for f in fragments {
                 var owner: Box? = f.Kind == .atomic ? f.Box : f.Owner
                 var inside = false
@@ -642,20 +643,38 @@ extension Layout {
                     owner = o.Parent
                 }
                 if inside {
-                    if f.X < lo { lo = f.X }
-                    if f.X + f.Width > hi { hi = f.X + f.Width }
+                    if open {
+                        pieces[pieces.count - 1].hi = f.X + f.Width
+                    } else {
+                        pieces.append((lo: f.X, hi: f.X + f.Width))
+                        open = true
+                    }
+                } else {
+                    open = false
                 }
             }
-            if hi >= lo {
-                let leftEnd = rtl ? spans[s].IsLast : spans[s].IsFirst
-                let rightEnd = rtl ? spans[s].IsFirst : spans[s].IsLast
-                let left = leftEnd ? b.Padding.Left + b.Border.Left : 0
-                let right = rightEnd ? b.Padding.Right + b.Border.Right : 0
-                spans[s].X = lo - left
-                spans[s].Width = hi - lo + left + right
+            if pieces.isEmpty {
+                split.append(sp)
+                continue
             }
-            s += 1
+            let leftEnd = rtl ? sp.IsLast : sp.IsFirst
+            let rightEnd = rtl ? sp.IsFirst : sp.IsLast
+            var k = 0
+            while k < pieces.count {
+                var piece = sp
+                let first = k == 0
+                let last = k == pieces.count - 1
+                let left = first && leftEnd ? b.Padding.Left + b.Border.Left : 0
+                let right = last && rightEnd ? b.Padding.Right + b.Border.Right : 0
+                piece.X = pieces[k].lo - left
+                piece.Width = pieces[k].hi - pieces[k].lo + left + right
+                piece.IsFirst = sp.IsFirst && first
+                piece.IsLast = sp.IsLast && last
+                split.append(piece)
+                k += 1
+            }
         }
+        spans = split
         return x + after + (rtl ? indent : 0)
     }
 
@@ -824,18 +843,41 @@ extension Layout {
                 item.softBreakBefore = start > i
                 items.append(item)
             }
+            // CJK breaks between its characters: each is a piece, but for
+            // what may not start or end a line.
+            func cjkPieces(from: int, to: int) {
+                var at = from
+                var cut = from
+                var prev: uint32 = 0
+                while at < to {
+                    let d = decodeUTF8(bytes, at)
+                    if at > from && (isCJK(prev) || isCJK(d.scalar)) && !noLineStart(d.scalar) && !noLineEnd(prev) {
+                        piece(cut, at)
+                        cut = at
+                    }
+                    prev = d.scalar
+                    at += d.length
+                }
+                piece(cut, to)
+            }
             var start = i
             var k = i
+            var wide = false
+            var w = i
+            while w < j {
+                if bytes[w] >= 0xE1 && style.WordBreak != .keepAll { wide = true }
+                w += 1
+            }
             while k + 2 < j {
                 if !style.HyphensNone && bytes[k] == 0xC2 && bytes[k + 1] == 0xAD {
-                    piece(start, k + 2)
+                    if wide && wraps { cjkPieces(start, k + 2) } else { piece(start, k + 2) }
                     start = k + 2
                     k += 2
                     continue
                 }
                 k += 1
             }
-            piece(start, j)
+            if wide && wraps { cjkPieces(start, j) } else { piece(start, j) }
             pendingSpace = false
             i = j
         }
@@ -1321,6 +1363,46 @@ func inFirstLineFont(item: Item, block: Box, style: cascade.ComputedStyle) -> It
         out.width = style.Face.SpaceWidth + style.WordSpacing + style.LetterSpacing
     }
     return out
+}
+
+/// The character at a place in UTF-8, and how many bytes it takes.
+func decodeUTF8(b: [uint8], at: int) -> (scalar: uint32, length: int) {
+    let c = uint32(b[at])
+    func cont(i: int) -> uint32 { return at + i < b.count ? uint32(b[at + i]) & 0x3F : 0 }
+    if c < 0x80 { return (scalar: c, length: 1) }
+    if c < 0xE0 { return (scalar: (c & 0x1F) << 6 | cont(1), length: 2) }
+    if c < 0xF0 { return (scalar: (c & 0x0F) << 12 | cont(1) << 6 | cont(2), length: 3) }
+    return (scalar: (c & 0x07) << 18 | cont(1) << 12 | cont(2) << 6 | cont(3), length: 4)
+}
+
+/// Ideographs, kana and full-width forms: a line may break either side.
+func isCJK(c: uint32) -> bool {
+    return (c >= 0x2E80 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF) || (c >= 0xFE30 && c <= 0xFE4F)
+        || (c >= 0xFF00 && c <= 0xFFEF) || (c >= 0x20000 && c <= 0x3FFFF)
+}
+
+/// What may not start a line: closing marks, small kana, and the rest of
+/// what CSS's line-break calls strict.
+func noLineStart(c: uint32) -> bool {
+    switch c {
+    case 0x3001, 0x3002, 0xFF0C, 0xFF0E, 0x30FB, 0xFF1A, 0xFF1B, 0xFF01, 0xFF1F, 0x30FC, 0x3005,
+         0xFF09, 0xFF3D, 0xFF5D, 0x3015, 0x3009, 0x300B, 0x300D, 0x300F, 0x3011, 0x3017, 0x3019, 0x301B,
+         0x3041, 0x3043, 0x3045, 0x3047, 0x3049, 0x3063, 0x3083, 0x3085, 0x3087, 0x308E,
+         0x30A1, 0x30A3, 0x30A5, 0x30A7, 0x30A9, 0x30C3, 0x30E3, 0x30E5, 0x30E7, 0x30EE:
+        return true
+    default:
+        return false
+    }
+}
+
+/// What may not end a line: opening marks.
+func noLineEnd(c: uint32) -> bool {
+    switch c {
+    case 0xFF08, 0xFF3B, 0xFF5B, 0x3014, 0x3008, 0x300A, 0x300C, 0x300E, 0x3010, 0x3016, 0x3018, 0x301A:
+        return true
+    default:
+        return false
+    }
 }
 
 func splitWord(item: Item, fitting width: float32) -> (head: Item, tail: Item) {

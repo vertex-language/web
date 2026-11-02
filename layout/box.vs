@@ -113,6 +113,12 @@ public final class Box {
     public var FirstLineStyle: cascade.ComputedStyle? = nil
     /// An <input type=file>'s ::file-selector-button, where rules give one.
     public var FileButtonStyle: cascade.ComputedStyle? = nil
+    /// A box that turns to vertical: the anonymous box its content is laid
+    /// out in, as if horizontal. That box's turn: 1 a quarter clockwise,
+    /// -1 anticlockwise, and how long it is across its lines.
+    public var VerticalContent: Box? = nil
+    public var QuarterTurn: int = 0
+    public var BlockAxisSize: float32 = 0
     /// Where a text box's text starts in its node's, in bytes: not 0 for
     /// what follows a ::first-letter.
     public var TextStart: int = 0

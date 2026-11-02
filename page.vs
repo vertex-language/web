@@ -286,6 +286,8 @@ public final class Page {
     var media: [int64: MediaState] = [:]
     var mediaFrames: [int64: draw.Image] = [:]
     var snapFrom: draw.Point? = nil
+    /// The panel open over the page, if any.
+    var picker: Picker? = nil
     /// Whether a precise scroll past the page's end stretches it, and how
     /// far it is stretched now, in CSS pixels; when it last eased back.
     public var Bounces: bool = false
@@ -352,6 +354,9 @@ public final class Page {
 
     func load(doc: html.Document) {
         layoutTold = [:]
+        picker = nil
+        context.PickerOpen = Set<int64>()
+        builder.PickersOpen = context.PickerOpen
         highlights = [:]
         frames = [:]
         files = [:]
@@ -949,6 +954,10 @@ public final class Page {
                 }
                 state.Images = images
                 state.MediaFrames = mediaFrames
+                if let k = picker {
+                    state.PanelFrame = k.frame
+                    state.PanelCells = k.cells
+                }
                 if let d = dragging, d.started, let b = builder.byNode[d.source.Id] {
                     state.DragImage = paint.DragImage(box: b, dx: d.at.X - d.start.X, dy: d.at.Y - d.start.Y)
                 }
@@ -1079,6 +1088,14 @@ public final class Page {
 
     func hitAt(p: draw.Point) -> layout.Hit? {
         guard let r = root else { return nil }
+        // An open picker paints over everything, so it is asked first.
+        for id in context.PickerOpen {
+            guard let b = builder.byNode[id] else { continue }
+            let at = layout.PagePosition(b)
+            for picker in b.Positioned {
+                if let h = layout.HitTest(picker, p.X + scroll.X, p.Y + scroll.Y, originX: at.x - b.ScrollX, originY: at.y - b.ScrollY) { return h }
+            }
+        }
         return layout.HitTest(r, p.X + scroll.X, p.Y + scroll.Y, originX: 0, originY: 0)
     }
 

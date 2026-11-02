@@ -844,6 +844,17 @@ public final class StyleResolver {
         return style
     }
 
+    /// The style a vertical box's content is laid out in: its display and
+    /// what goes with it, none of its box's own edges.
+    public func VerticalContentStyle(of s: ComputedStyle) -> ComputedStyle {
+        let out = ComputedStyle(inheriting: s)
+        for p in [css.Prop.display, .flexDirection, .flexWrap, .justifyContent, .alignItems, .alignContent, .rowGap, .columnGap,
+                  .gridTemplateColumns, .gridTemplateRows, .textAlign] {
+            copyProperty(p, from: s, to: out)
+        }
+        return out
+    }
+
     /// What a transition starts from when an element first shows, where
     /// @starting-style rules match it: its style with their declarations
     /// over it. Nil where none do.
@@ -1455,6 +1466,8 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
     case .textBoxEdge: if let k = keywordOf(v) { s.TextBoxEdge = k }
     case .initialLetter: if case .number(let n) = v { s.InitialLetter = n }
     case .overflowAnchor: s.NoScrollAnchor = keywordOf(v) == "none"
+    case .writingMode: if let k = keywordOf(v) { s.WritingMode = k }
+    case .textOrientation: if let k = keywordOf(v) { s.TextOrientation = k }
     case .perspective:
         if case .none = v { s.Perspective = 0 } else if let d = pixels(v, s, ctx) { s.Perspective = math.Max(d, 0) }
     case .perspectiveOrigin:
@@ -2293,6 +2306,8 @@ func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .textBoxEdge: b.TextBoxEdge = a.TextBoxEdge
     case .initialLetter: b.InitialLetter = a.InitialLetter
     case .overflowAnchor: b.NoScrollAnchor = a.NoScrollAnchor
+    case .writingMode: b.WritingMode = a.WritingMode
+    case .textOrientation: b.TextOrientation = a.TextOrientation
     case .perspective: b.Perspective = a.Perspective
     case .perspectiveOrigin:
         b.PerspectiveOriginX = a.PerspectiveOriginX

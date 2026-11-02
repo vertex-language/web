@@ -20,6 +20,8 @@ public final class BoxTreeBuilder {
     public var Images: [string: draw.Image] = [:]
     /// A playing <video>'s picture size, by node id.
     public var MediaSizes: [int64: draw.Size] = [:]
+    /// The base-select elements whose pickers are open.
+    public var PickersOpen = Set<int64>()
     /// The images that are SVG files, by the src that names them: drawn
     /// as vectors, sharp at any size.
     public var Vectors: [string: svg.Document] = [:]
@@ -205,7 +207,84 @@ public final class BoxTreeBuilder {
         run = []
     }
 
+    /// Puts what a box holds in an anonymous box of its own, which layout
+    /// sets as if horizontal and painting turns.
+    func turnVertical(box: Box) {
+        if box.Kind != .block && box.Kind != .inlineBlock { return }
+        let inner = Box(kind: .block, style: resolver.VerticalContentStyle(of: box.Style), node: nil)
+        inner.IsAnonymous = true
+        inner.QuarterTurn = box.Style.WritingMode == "sideways-lr" ? -1 : 1
+        let held = box.Children
+        box.Children = []
+        for c in held { inner.AppendChild(c) }
+        box.AppendChild(inner)
+        box.VerticalContent = inner
+    }
+
+    /// A base-select's boxes: its button, or the chosen option's content
+    /// where it has none, and its icon; and, open, everything else in its
+    /// picker.
+    func appendBaseSelect(node: html.Node, parentStyle: cascade.ComputedStyle, into out: inout [Box]) {
+        var button: html.Node? = nil
+        for c in node.Children where c.Kind == html.NodeKind.element && c.TagName == "button" {
+            button = c
+            break
+        }
+        var listIndex = 0
+        if let b = button {
+            let style = resolver.Resolve(b, parent: parentStyle, context: context)
+            if style.Display != .none, let box = makeBox(b, style: style, parentStyle: parentStyle, listIndex: &listIndex) { out.append(box) }
+        } else if let chosen = selectedOption(node) {
+            appendChildBoxes(of: chosen, parentStyle: parentStyle, into: &out)
+            if let icon = pseudoElement(node, "picker-icon", parentStyle) { out.append(icon) }
+        }
+        if !PickersOpen.contains(node.Id) { return }
+        guard let ps = resolver.ResolvePseudo(node, "picker(select)", parent: parentStyle, context: context) else { return }
+        let picker = Box(kind: .block, style: ps, node: nil)
+        picker.IsAnonymous = true
+        var inside: [Box] = []
+        for c in node.Children {
+            if c.Kind != html.NodeKind.element || c.Id == button?.Id { continue }
+            let style = resolver.Resolve(c, parent: ps, context: context)
+            if style.Display == .none { continue }
+            if let box = makeBox(c, style: style, parentStyle: ps, listIndex: &listIndex) { inside.append(box) }
+        }
+        place(inside, into: picker)
+        out.append(picker)
+    }
+
+    /// The option a select has chosen: the one marked, or its first.
+    func selectedOption(select: html.Node) -> html.Node? {
+        var first: html.Node? = nil
+        var found: html.Node? = nil
+        func walk(n: html.Node) {
+            for c in n.Children where c.Kind == html.NodeKind.element {
+                if c.TagName == "option" {
+                    if first == nil { first = c }
+                    if found == nil && c.HasAttribute("selected") { found = c }
+                } else {
+                    walk(c)
+                }
+            }
+        }
+        walk(select)
+        return found ?? first
+    }
+
     func appendChildBoxes(of node: html.Node, parentStyle: cascade.ComputedStyle, into out: inout [Box]) {
+        if node.TagName == "select" && parentStyle.Appearance == "base-select" {
+            appendBaseSelect(node, parentStyle: parentStyle, into: &out)
+            return
+        }
+        // <selectedcontent> shows what its select has chosen.
+        if node.TagName == "selectedcontent" {
+            var up = node.Parent
+            while let n = up, n.TagName != "select" { up = n.Parent }
+            if let sel = up, let chosen = selectedOption(sel) {
+                appendChildBoxes(of: chosen, parentStyle: parentStyle, into: &out)
+            }
+            return
+        }
         var listIndex = 0
         for child in node.Children {
             switch child.Kind {
@@ -226,7 +305,16 @@ public final class BoxTreeBuilder {
                     leaveCounters()
                     continue
                 }
+                // Where text turns vertical is where the turn starts. A root
+                // that says so hands it to what's in it.
+                let starts = style.IsVertical && (!parentStyle.IsVertical || node.TagName == "html")
+                if style.IsVertical && !starts { style.SwapAxesForVertical() }
                 if let box = makeBox(child, style: style, parentStyle: parentStyle, listIndex: &listIndex) {
+                    if starts { turnVertical(box) } else if box.Kind == .replaced && style.AxesSwapped {
+                        let w = box.IntrinsicWidth
+                        box.IntrinsicWidth = box.IntrinsicHeight
+                        box.IntrinsicHeight = w
+                    }
                     out.append(box)
                 }
             default:
@@ -237,6 +325,8 @@ public final class BoxTreeBuilder {
 
     /// The box for an element, with its children's boxes under it.
     func makeBox(node: html.Node, style: cascade.ComputedStyle, parentStyle: cascade.ComputedStyle, listIndex: inout int) -> Box? {
+        // A base-select is what its picker hangs from.
+        if node.TagName == "select" && style.Appearance == "base-select" && style.Position == .static { style.Position = .relative }
         let tag = node.TagName
         var box: Box
         switch tag {
@@ -311,7 +401,7 @@ public final class BoxTreeBuilder {
                 box.IntrinsicWidth = widest + 4
                 box.IntrinsicHeight = style.LineHeightPx * float32(lines.count > 0 ? lines.count : 1)
             }
-        case "select":
+        case "select" where style.Appearance != "base-select":
             box = Box(kind: .replaced, style: style, node: node)
             box.Replaced = .select
             box.Text = selectedOptionText(node)

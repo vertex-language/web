@@ -37,6 +37,8 @@ public final class MatchContext {
     public var PopoverOpen = Set<int64>()
     /// The media elements playing, by node id.
     public var Playing = Set<int64>()
+    /// The base-select elements whose pickers are open, by node id.
+    public var PickerOpen = Set<int64>()
     // Each element's 1-based place among its parent's element children,
     // and each parent's count of them, filled in a parent at a time: the
     // nth-child family asks for every element on a page.
@@ -302,6 +304,7 @@ func matchPseudo(p: Pseudo, node: html.Node, ctx: MatchContext) -> bool {
         return isIndeterminate(node)
     case "open":
         let t = node.TagName
+        if t == "select" { return ctx.PickerOpen.contains(node.Id) }
         return (t == "details" || t == "dialog") && node.HasAttribute("open")
     case "paused":
         return (node.TagName == "video" || node.TagName == "audio") && !ctx.Playing.contains(node.Id)

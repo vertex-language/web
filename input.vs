@@ -164,8 +164,13 @@ extension Page {
             modifiers = e.Modifiers
             if !isInside(e.Position) { return .ignored }
             update()
+            if picker != nil {
+                pickerPressed(at: e.Position)
+                return .handled
+            }
             if e.Button == .primary && startResize(at: e.Position) { return .handled }
             let target = hitAt(e.Position)?.Node
+            if !context.PickerOpen.isEmpty { dismissBasePickers(target: target) }
             if !topLayer.isEmpty && lightDismiss(target) { return .handled }
             dragging = e.Button == .primary ? draggableAncestor(target).map { DragState(source: $0, start: e.Position) } : nil
             let button: int32 = e.Button == .primary ? 0 : (e.Button == .middle ? 1 : 2)
@@ -266,6 +271,10 @@ extension Page {
 
     func pointerMoved(p: draw.Point) -> EventResult {
         pointer = p
+        if picker != nil {
+            pickerMoved(to: p)
+            return .handled
+        }
         if dragging != nil && dragMoved(p) { return .handled }
         if resizing != nil {
             resize(to: p)
@@ -584,7 +593,9 @@ extension Page {
                 if type == "color" || type == "file" {
                     if control.HasAttribute("disabled") { return .handled }
                     Focus(control)
-                    if type == "color", let cb = onPickColor { cb(control, valueOf(control)) }
+                    if type == "color" {
+                        if let cb = onPickColor { cb(control, valueOf(control)) } else { openColorPanel(control) }
+                    }
                     if type == "file", let cb = onPickFiles { cb(control, control.HasAttribute("multiple"), control.GetAttribute("accept") ?? "") }
                     return .handled
                 }
@@ -604,6 +615,10 @@ extension Page {
                     Focus(control)
                     clickInField(control, at: p, clicks: clicks)
                     cb(control, type, valueOf(control))
+                } else if dom.IsDateTimeType(type) && !control.HasAttribute("disabled") {
+                    Focus(control)
+                    clickInField(control, at: p, clicks: clicks)
+                    openDatePanel(control, type: type)
                     return .handled
                 }
                 if !control.HasAttribute("disabled") {
@@ -619,7 +634,21 @@ extension Page {
                 }
                 return .handled
             }
-            if tag == "button" || tag == "select" {
+            if tag == "select" {
+                if isBaseSelect(control) {
+                    clickBaseSelect(control, target: node)
+                } else {
+                    Focus(control)
+                    openSelectPanel(control)
+                }
+                return .handled
+            }
+            if tag == "button" {
+                // A button in a base-select opens its picker.
+                if let sel = dom.Ancestor(control, "select"), isBaseSelect(sel) {
+                    clickBaseSelect(sel, target: node)
+                    return .handled
+                }
                 Focus(control)
                 return .handled
             }
@@ -779,6 +808,10 @@ extension Page {
 
     func wheel(delta: draw.Point, precise: bool) -> EventResult {
         update()
+        if picker != nil {
+            pickerWheel(dy: -delta.Y)
+            return .handled
+        }
         let step: float32 = precise ? 1 : 40
         let dy = -delta.Y * step
         let dx = -delta.X * step
@@ -844,6 +877,7 @@ extension Page {
                      to: focused ?? Document?.Tree.ElementsByTagName("body").first) {
             return .handled
         }
+        if picker != nil && pickerKey(k) { return .handled }
         // A key that makes a character, and Enter, goes on to keypress.
         if !k.Control && !k.Meta && (k.Key.count == 1 || k.Key == "Enter") {
             if !dispatch(dom.KeyboardEvent("keypress", Key: k.Key, Code: k.Code, Shift: k.Shift, Control: k.Control, Alt: k.Alt, Meta: k.Meta),
@@ -926,6 +960,19 @@ extension Page {
     /// Home and End go to the ends; a letter jumps to the next option
     /// starting with it.
     func selectKey(f: html.Node, k: Key) -> EventResult {
+        // Space and Enter open it, as a click does.
+        if k.Code == "Space" || k.Code == "Enter" {
+            if isBaseSelect(f) {
+                setBasePicker(f, open: !context.PickerOpen.contains(f.Id))
+            } else {
+                openSelectPanel(f)
+            }
+            return .handled
+        }
+        if k.Code == "Escape" && context.PickerOpen.contains(f.Id) {
+            setBasePicker(f, open: false)
+            return .handled
+        }
         let options = dom.Descendants(f, tag: "option")
         if options.isEmpty { return .ignored }
         var current = -1
@@ -1022,6 +1069,16 @@ extension Page {
     }
 
     func editKey(f: html.Node, k: Key) -> EventResult {
+        // In right-to-left text the left arrow goes on through it.
+        if (k.Code == "ArrowLeft" || k.Code == "ArrowRight") && paint.RunsRightToLeft(valueOf(f)) {
+            var turned = k
+            turned.Code = k.Code == "ArrowLeft" ? "ArrowRight" : "ArrowLeft"
+            return editField(f, turned)
+        }
+        return editField(f, k)
+    }
+
+    func editField(f: html.Node, k: Key) -> EventResult {
         let value = valueOf(f)
         let bytes = [uint8](value.utf8)
         let editable = !f.HasAttribute("disabled") && !f.HasAttribute("readonly")
@@ -1156,7 +1213,8 @@ extension Page {
     func placeCaret(control: html.Node, at p: draw.Point) {
         guard let box = builder.byNode[control.Id] else { return }
         let pos = layout.PagePosition(box)
-        let px = p.X + scroll.X - (pos.x + box.ContentX + 1)
+        let pageX = p.X + scroll.X
+        let left = pos.x + box.ContentX
         let py = p.Y + scroll.Y - (pos.y + box.ContentY)
         let face = box.Style.Face
         let bytes = [uint8](valueOf(control).utf8)
@@ -1174,8 +1232,8 @@ extension Page {
         var i = lineStart
         while i <= lineEnd {
             if edit.IsCharStart(bytes, i) {
-                let w = face.Measure(stringOf(bytes, lineStart, i))
-                let d = w > px ? w - px : px - w
+                let w = paint.FieldX(bytes, from: lineStart, to: lineEnd, at: i, left: left, right: left + box.InnerWidth, rtl: box.Style.Direction == .rtl, face: face)
+                let d = w > pageX ? w - pageX : pageX - w
                 if d < bestDist {
                     bestDist = d
                     best = i

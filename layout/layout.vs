@@ -224,7 +224,65 @@ public final class Layout {
     }
 
     /// Lays out what a block holds and answers the content height.
+    /// A box whose text runs down the page: its content set as if horizontal
+    /// across the box's height, then told how wide that made the box.
+    /// Answers the box's content height.
+    func layoutVertical(box: Box, inner: Box, flow: Flow) -> float32 {
+        let s = box.Style
+        var across = box.DefiniteInnerHeight
+        if across == nil {
+            // As long as its text wants, up to the viewport.
+            let room = ViewportHeight - box.Padding.Vertical - box.Border.Vertical
+            let wanted = intrinsicWidths(inner).max
+            across = wanted < room ? wanted : (room > 0 ? room : wanted)
+        }
+        let definite: float32? = s.Width.IsAuto ? nil : box.InnerWidth
+        inner.X = box.ContentX
+        inner.Y = box.ContentY
+        var fixedInner = inner.Style.Width
+        fixedInner = .px(across!)
+        inner.Style.Width = fixedInner
+        layoutBlock(inner, cb: ContainingBlock(width: across!, height: definite), flow: flow.root(inner))
+        inner.X = box.ContentX
+        inner.Y = box.ContentY
+        var along = inner.Height
+        if let d = definite { along = d } else if s.Width.IsAuto {
+            box.Width = along + box.Padding.Horizontal + box.Border.Horizontal
+        }
+        inner.BlockAxisSize = along
+        // vertical-lr: the lines go the other way across.
+        if s.WritingMode == "vertical-lr" { mirrorBlockAxis(inner, size: inner.ContentHeight) }
+        return across!
+    }
+
+    /// Stacks what a box holds the other way down it.
+    func mirrorBlockAxis(box: Box, size: float32) {
+        var i = 0
+        while i < box.Lines.count {
+            let oldY = box.Lines[i].Y
+            let moved = box.ContentY + size - (oldY - box.ContentY) - box.Lines[i].Height - oldY
+            box.Lines[i].Y += moved
+            var k = 0
+            while k < box.Lines[i].Fragments.count {
+                box.Lines[i].Fragments[k].Y += moved
+                k += 1
+            }
+            k = 0
+            while k < box.Lines[i].Spans.count {
+                box.Lines[i].Spans[k].Y += moved
+                k += 1
+            }
+            i += 1
+        }
+        for c in box.Children where c.Kind == .block || c.Kind == .inlineBlock {
+            if c.Style.IsOutOfFlow { continue }
+            c.Y = box.ContentY + size - (c.Y - box.ContentY) - c.Height
+            mirrorBlockAxis(c, size: c.ContentHeight)
+        }
+    }
+
     func layoutContent(box: Box, flow: Flow) -> float32 {
+        if let inner = box.VerticalContent { return layoutVertical(box, inner: inner, flow: flow) }
         let contentWidth = box.InnerWidth
         var height: float32 = 0
         if box.Style.Display == .table || box.Style.Display == .inlineTable {
@@ -536,6 +594,17 @@ public final class Layout {
     func intrinsicWidths(box: Box, ignoringWidth: Bool) -> (min: float32, max: float32) {
         let s = box.Style
         let edges = box.Padding.Horizontal + box.Border.Horizontal
+        // Across a vertical box's lines is as wide as they stack.
+        if let inner = box.VerticalContent {
+            let across = intrinsicWidths(inner).max
+            let room = ViewportHeight > 0 ? ViewportHeight : across
+            let measure = Flow(positioned: inner, floats: FloatContext(), x: 0, y: 0)
+            let saved = inner.Style.Width
+            inner.Style.Width = .px(across < room ? across : room)
+            layoutBlock(inner, cb: ContainingBlock(width: across < room ? across : room, height: nil), flow: measure)
+            inner.Style.Width = saved
+            return (min: inner.Height + edges, max: inner.Height + edges)
+        }
         if box.Kind == .replaced {
             return replacedIntrinsicWidths(box, ignoringWidth: ignoringWidth)
         }
@@ -732,6 +801,17 @@ public final class Layout {
                 child.X = padX + l + child.Margin.Left
             } else if let r = right {
                 child.X = padX + cbWidth - r - child.Width - child.Margin.Right
+            } else if s.Direction == .rtl, let flowParent = child.Parent {
+                // Its static place, seen from the right.
+                var from = flowParent.ContentX
+                var cur: Box? = flowParent
+                while let up = cur, up.Id != box.Id {
+                    from += up.X
+                    cur = up.Parent
+                }
+                from -= padX
+                let to = from + flowParent.InnerWidth
+                child.X = padX + from + to - staticX - child.Width - child.Margin.Right
             } else {
                 child.X = padX + staticX + child.Margin.Left
             }

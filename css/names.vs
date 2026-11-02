@@ -30,7 +30,6 @@ let unappliedNames: [string] = [
     "font-variant", "font-stretch", "font-feature-settings", "src",
     "unicode-range",
     "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
-    "writing-mode",
     "speak", "font-display",
     "text-size-adjust", "-webkit-text-size-adjust",
     "-webkit-tap-highlight-color",

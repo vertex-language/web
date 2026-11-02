@@ -242,7 +242,10 @@ extension Layout {
                     // cell draws only its right and bottom, and the
                     // first row and column their top and left.
                     if r > 0 { b.Border.Top = 0 }
-                    if cell.column > 0 { b.Border.Left = 0 }
+                    // Right to left, the first column is at the right.
+                    if cell.column > 0 {
+                        if table.Style.Direction == .rtl { b.Border.Right = 0 } else { b.Border.Left = 0 }
+                    }
                 }
                 layoutFixed(b, width: w, height: nil, cb: ContainingBlock(width: w, height: nil), flow: flow.root(b))
                 if b.Height > rowHeight { rowHeight = b.Height }

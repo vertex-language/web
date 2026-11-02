@@ -23,6 +23,13 @@ public struct Hit {
 /// matrix of the plane whose children are being asked.
 var hitContext: (screen: (x: float32, y: float32), matrix: draw.Matrix4)? = nil
 
+/// How a vertical box's content turns from where layout set it, x and y its
+/// corner, to where it shows: its corner stays at the box's top left.
+public func QuarterMatrix(box: Box, x: float32, y: float32) -> draw.Affine {
+    if box.QuarterTurn < 0 { return draw.Affine(0, -1, 1, 0, x - y, y + box.Width + x) }
+    return draw.Affine(0, 1, -1, 0, x + y + box.BlockAxisSize, y - x)
+}
+
 /// A box's matrix on the page where it needs one in 3D, its parent's
 /// perspective included: nil for a box a 2D transform, or none, will do.
 /// x and y are its border box's corner.
@@ -46,6 +53,12 @@ public func ThreeDMatrix(box: Box, x: float32, y: float32) -> draw.Matrix4? {
 /// The innermost box under a page point. A transformed box is tested
 /// where it paints: the point is taken back through its transform.
 public func HitTest(box: Box, px: float32, py: float32, originX: float32, originY: float32) -> Hit? {
+    if box.QuarterTurn != 0 {
+        let t = QuarterMatrix(box, x: originX + box.X + box.OffsetX, y: originY + box.Y + box.OffsetY)
+        guard let inv = t.Inverted() else { return nil }
+        let p = inv.Apply(px, py)
+        return hitTestBox(box, p.x, p.y, originX: originX, originY: originY)
+    }
     if let local = ThreeDMatrix(box, x: originX + box.X + box.OffsetX, y: originY + box.Y + box.OffsetY) {
         // A plane in a 3D context answers to the point on the screen.
         var screen = (x: px, y: py)

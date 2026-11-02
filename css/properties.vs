@@ -61,6 +61,8 @@ public enum Prop: int32 {
     case mixBlendMode
     case isolation
     case overflowAnchor
+    case writingMode
+    case textOrientation
     case perspective
     case imageRendering
     case overflowClipMargin
@@ -368,7 +370,7 @@ let propNames: [string: Prop] = [
     "mix-blend-mode": .mixBlendMode, "isolation": .isolation,
     "image-rendering": .imageRendering, "overflow-clip-margin": .overflowClipMargin, "field-sizing": .fieldSizing,
     "text-box-trim": .textBoxTrim, "text-box-edge": .textBoxEdge, "initial-letter": .initialLetter,
-    "overflow-anchor": .overflowAnchor,
+    "overflow-anchor": .overflowAnchor, "writing-mode": .writingMode, "text-orientation": .textOrientation,
     "perspective": .perspective, "perspective-origin": .perspectiveOrigin, "backface-visibility": .backfaceVisibility,
     "transform-style": .transformStyle,
     "border-image-source": .borderImageSource, "border-image-slice": .borderImageSlice,
@@ -809,7 +811,6 @@ func longhands(d: Declaration) -> [Longhand] {
     case "transform-box",
          "font-variant", "font-stretch", "font-feature-settings", "src", "unicode-range",
          "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
-         "writing-mode",
          "speak",
          "font-display",
          "text-size-adjust", "-webkit-text-size-adjust", "-webkit-tap-highlight-color",
@@ -2192,6 +2193,19 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
     case .initialLetter:
         if kw == "normal" { return .number(0) }
         return t.Kind == .number && t.NumberVal >= 1 ? .number(t.NumberVal) : nil
+    case .writingMode:
+        switch kw {
+        case "horizontal-tb", "vertical-rl", "vertical-lr", "sideways-rl", "sideways-lr": return .keyword(kw)
+        // SVG's old names.
+        case "lr", "lr-tb", "rl", "rl-tb": return .keyword("horizontal-tb")
+        case "tb", "tb-rl": return .keyword("vertical-rl")
+        default: return nil
+        }
+    case .textOrientation:
+        switch kw {
+        case "mixed", "upright", "sideways": return .keyword(kw)
+        default: return nil
+        }
     case .overflowAnchor:
         return kw == "auto" || kw == "none" ? .keyword(kw) : nil
     case .perspective:
