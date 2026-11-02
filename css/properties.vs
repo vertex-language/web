@@ -71,6 +71,7 @@ public enum Prop: int32 {
     case anchorScope
     case shapeOutside
     case shapeMargin
+    case shapeImageThreshold
     case cornerShape
     case interpolateSize
     case maskOrigin
@@ -99,6 +100,7 @@ public enum Prop: int32 {
     case scrollTimelineName
     case viewTimelineName
     case viewTransitionName
+    case viewTransitionClass
     case writingMode
     case textOrientation
     case perspective
@@ -428,14 +430,14 @@ let propNames: [string: Prop] = [
     "position-try-fallbacks": .positionTry, "position-try": .positionTry,
     "animation-timeline": .animationTimeline, "animation-range": .animationRange,
     "scroll-timeline-name": .scrollTimelineName, "view-timeline-name": .viewTimelineName,
-    "view-transition-name": .viewTransitionName,
+    "view-transition-name": .viewTransitionName, "view-transition-class": .viewTransitionClass,
     "font-feature-settings": .fontFeatureSettings, "font-variation-settings": .fontVariationSettings,
     "font-variant-numeric": .fontVariantNumeric, "font-variant-ligatures": .fontVariantLigatures, "font-variant-caps": .fontVariantCaps,
     "font-variant-east-asian": .fontVariantEastAsian, "font-variant-alternates": .fontVariantAlternates, "font-kerning": .fontKerning,
     "font-stretch": .fontStretch, "text-rendering": .textRendering, "text-justify": .textJustify, "hanging-punctuation": .hangingPunctuation,
     "text-emphasis-style": .textEmphasisStyle, "text-emphasis-color": .textEmphasisColor, "text-emphasis-position": .textEmphasisPosition,
     "-webkit-text-emphasis-style": .textEmphasisStyle, "-webkit-text-emphasis-color": .textEmphasisColor, "-webkit-text-emphasis-position": .textEmphasisPosition,
-    "shape-outside": .shapeOutside, "shape-margin": .shapeMargin, "corner-shape": .cornerShape, "interpolate-size": .interpolateSize,
+    "shape-outside": .shapeOutside, "shape-margin": .shapeMargin, "shape-image-threshold": .shapeImageThreshold, "corner-shape": .cornerShape, "interpolate-size": .interpolateSize,
     "mask-origin": .maskOrigin, "mask-clip": .maskClip, "-webkit-mask-origin": .maskOrigin, "-webkit-mask-clip": .maskClip,
     "-webkit-text-stroke-width": .textStrokeWidth, "-webkit-text-stroke-color": .textStrokeColor, "paint-order": .paintOrder,
     "transform-box": .transformBox, "timeline-scope": .timelineScope, "position-visibility": .positionVisibility, "position-try-order": .positionTryOrder, "anchor-scope": .anchorScope,
@@ -2449,7 +2451,7 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
         case "mixed", "upright", "sideways": return .keyword(kw)
         default: return nil
         }
-    case .anchorName, .positionAnchor, .positionArea, .viewTransitionName, .scrollTimelineName, .viewTimelineName:
+    case .anchorName, .positionAnchor, .positionArea, .viewTransitionName, .viewTransitionClass, .scrollTimelineName, .viewTimelineName:
         // Names keep their case; a comma between them says nothing here.
         var words: [string] = []
         for tok in tokens where tok.Kind == .ident { words.append(tok.Value) }
@@ -2526,6 +2528,10 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
         return parseValue(.clipPath, tokens)
     case .shapeMargin:
         return parseLengthValue(t, allowAuto: false)
+    case .shapeImageThreshold:
+        if t.Kind == .number { return .number(t.NumberVal) }
+        if t.Kind == .percentage { return .number(t.NumberVal / 100) }
+        return nil
     case .cornerShape:
         // Up to four, each a keyword or superellipse(k), as "k" numbers.
         var out: [string] = []

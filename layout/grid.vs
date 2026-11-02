@@ -317,6 +317,7 @@ extension Layout {
         var limits = [float32](repeating: 0, count: columnCount)
         var totalFr: float32 = 0
         var fixed: float32 = 0
+        let lent = subgridContributions(items)
         var c = 0
         while c < columnCount {
             switch columns[c] {
@@ -336,6 +337,10 @@ extension Layout {
                     if w.min + it.box.Margin.Horizontal > least { least = w.min + it.box.Margin.Horizontal }
                     if w.max + it.box.Margin.Horizontal > most { most = w.max + it.box.Margin.Horizontal }
                 }
+                for l in lent where l.column == c {
+                    if l.min > least { least = l.min }
+                    if l.max > most { most = l.max }
+                }
                 widths[c] = least
                 limits[c] = most > least ? most : least
                 fixed += least
@@ -350,6 +355,7 @@ extension Layout {
                         let w = intrinsicWidths(it.box)
                         if w.max + it.box.Margin.Horizontal > need { need = w.max + it.box.Margin.Horizontal }
                     }
+                    for l in lent where l.column == c && l.max > need { need = l.max }
                     if maxPx > 0 && need > maxPx { need = maxPx }
                     widths[c] = need
                     fixed += need
@@ -572,6 +578,36 @@ extension Layout {
         }
         box.ContentWidth = columnX[columnCount]
         return rowY[rowCount]
+    }
+
+    /// What a subgrid's items ask of the parent's columns they're in: each
+    /// one-column item's min- and max-content widths, in the parent's
+    /// column, with the subgrid's own padding and border on its edge columns.
+    /// Its items are placed as it would: at their lines, or in turn.
+    func subgridContributions(items: [GridItem]) -> [(column: int, min: float32, max: float32)] {
+        var out: [(column: int, min: float32, max: float32)] = []
+        for it in items where it.box.Style.SubgridColumns {
+            let sub = it.box
+            let n = it.columnSpan
+            resolveEdges(sub, cbWidth: 0)
+            var next = 0
+            for k in sub.Children {
+                if k.Kind == .text || k.Style.Position == .absolute || k.Style.Position == .fixed { continue }
+                let p = k.Style.GridColumn
+                let span = p.Span > 0 ? int(p.Span) : 1
+                var col = p.Start > 0 ? int(p.Start) - 1 : next
+                if p.Start <= 0 && col + span > n { col = 0 }
+                next = col + span
+                if span != 1 || col >= n { continue }
+                resolveEdges(k, cbWidth: 0)
+                let w = intrinsicWidths(k)
+                var extra = k.Margin.Horizontal
+                if col == 0 { extra += sub.Margin.Left + sub.Border.Left + sub.Padding.Left }
+                if col == n - 1 { extra += sub.Margin.Right + sub.Border.Right + sub.Padding.Right }
+                out.append((column: it.column + col, min: w.min + extra, max: w.max + extra))
+            }
+        }
+        return out
     }
 
     /// Tracks with a repeat(auto-fill) expanded to as many as fit.

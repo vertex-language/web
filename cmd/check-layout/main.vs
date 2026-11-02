@@ -668,6 +668,14 @@ func testColumns() {
     check(cs.rect("mc")!.Width == cs.rect("mx")!.Width + 20, "calc-size() on max-content (got \(cs.rect("mc")!.Width) and \(cs.rect("mx")!.Width))")
     check(cs.rect("tall")!.Height == 65, "calc-size() on an auto height (got \(cs.rect("tall")!.Height))")
 
+    guard let sg = layoutOf("""
+    <body style='margin:0'><div style='display:grid;grid-template-columns:auto auto;width:400px'>
+    <div style='grid-column:1 / 3;display:grid;grid-template-columns:subgrid;padding-left:10px'><div id=wide style='width:150px;height:5px'></div><div id=thin style='width:30px;height:5px'></div></div>
+    <div id=c1 style='height:5px'></div><div id=c2 style='height:5px'></div>
+    </div></body>
+    """) else { check(false, "layout"); return }
+    check(sg.rect("c1")!.Width - sg.rect("c2")!.Width == 130, "a subgrid's items size the parent's auto columns (got \(sg.rect("c1")!.Width) \(sg.rect("c2")!.Width))")
+
     guard let ms = layoutOf("""
     <body style='margin:0'><div style='display:masonry;grid-template-columns:50px 50px 50px;width:150px;column-gap:0;row-gap:0'>
     <div style='height:30px'></div><div style='height:10px'></div><div style='height:20px'></div>

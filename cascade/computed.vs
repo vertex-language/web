@@ -102,6 +102,8 @@ public final class ComputedStyle {
     public var ScrollTimelineName: string = ""
     public var ViewTimelineName: string = ""
     public var ViewTransitionName: string = ""
+    /// view-transition-class: what ::view-transition-group(.name) picks.
+    public var ViewTransitionClasses: [string] = []
     /// clip-path: url(#id), and filter: url(#id).
     public var ClipURL: string = ""
     public var FilterURL: string = ""
@@ -123,6 +125,10 @@ public final class ComputedStyle {
     /// shape-outside as a clip shape, and shape-margin in pixels.
     public var ShapeOutside: ClipPath? = nil
     public var ShapeMargin: float32 = 0
+    /// shape-outside: url(): the image whose alpha is the shape, and
+    /// shape-image-threshold, the alpha above which it's in.
+    public var ShapeOutsideURL: string = ""
+    public var ShapeImageThreshold: float32 = 0
     /// corner-shape, per corner from the top left: superellipse exponents as
     /// text, or "notch" or "square". Empty for all round.
     public var CornerShapes: [string] = []

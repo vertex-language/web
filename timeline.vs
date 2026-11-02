@@ -203,35 +203,49 @@ extension Page {
         if oldPicture == nil { return }
         update()
         transitionMoves = []
+        transitionElapsed = 0
+        // The pseudo-elements say how long, after how much and how it eases:
+        // the page's fade by root's, each group by its name, then its
+        // view-transition-class, then *.
+        rootTiming = transitionTiming(["view-transition-group(root)", "view-transition-old(root)", "view-transition-new(root)", "view-transition-group(*)", "view-transition"])
+        transitionLength = rootTiming.delay + rootTiming.duration
         for (id, b) in builder.byNode where !b.Style.ViewTransitionName.isEmpty {
             guard let n = b.Node, let now = BoundsOf(n), let was = oldGroups[b.Style.ViewTransitionName] else { continue }
-            transitionMoves.append(TransitionMove(from: was.rect, to: now, node: id))
+            var keys = ["view-transition-group(\(b.Style.ViewTransitionName))"]
+            for c in b.Style.ViewTransitionClasses { keys.append("view-transition-group(.\(c))") }
+            keys.append("view-transition-group(*)")
+            let timing = transitionTiming(keys)
+            if timing.delay + timing.duration > transitionLength { transitionLength = timing.delay + timing.duration }
+            transitionMoves.append(TransitionMove(from: was.rect, to: now, node: id, timing: timing))
         }
         transitionFade = 1
         needsRepaint = true
-        // ::view-transition-group(*) and the rest may say how long.
-        transitionLength = 0.25
-        if let html = Document?.Tree.ElementsByTagName("html").first, let box = builder.byNode[html.Id] {
-            for which in ["view-transition-group(*)", "view-transition-old(root)", "view-transition-new(root)", "view-transition"] {
-                if let style = resolver.ResolvePseudo(html, which, parent: box.Style, context: context), let d = style.Animation.Durations.first, d > 0 {
-                    transitionLength = float64(d)
-                    break
-                }
-            }
+    }
+
+    /// The first of these pseudo-elements on the root that says how long,
+    /// with its delay and easing; a quarter second, eased, where none does.
+    func transitionTiming(which: [string]) -> TransitionTiming {
+        guard let html = Document?.Tree.ElementsByTagName("html").first, let box = builder.byNode[html.Id] else { return TransitionTiming() }
+        for w in which {
+            guard let style = resolver.ResolvePseudo(html, w, parent: box.Style, context: context) else { continue }
+            let a = style.Animation
+            guard let d = a.Durations.first, d > 0 else { continue }
+            return TransitionTiming(duration: float64(d), delay: float64(a.Delays.first ?? 0), easing: a.Timings.first ?? cascade.Easing.ease)
         }
+        return TransitionTiming()
     }
 
     /// Eases the fade. Answers whether it moved.
     func advanceTransition(time: float64) -> bool {
         guard oldPicture != nil else { return false }
         if transitionAt < 0 { transitionAt = time }
-        let t = (time - transitionAt) / transitionLength
-        if t >= 1 {
+        transitionElapsed = time - transitionAt
+        if transitionElapsed >= transitionLength {
             oldPicture = nil
             transitionMoves = []
             transitionFade = 0
         } else {
-            transitionFade = float32(1 - t)
+            transitionFade = 1 - rootTiming.progress(transitionElapsed)
         }
         needsRepaint = true
         return true
@@ -242,14 +256,14 @@ extension Page {
     func drawTransition(on canvas: draw.Canvas, view: draw.IRect, scale: float32) {
         guard let old = oldPicture else { return }
         canvas.DrawImage(old, into: view, opacity: transitionFade)
-        let k = 1 - transitionFade
         for m in transitionMoves {
+            let k = m.timing.progress(transitionElapsed)
             let x = m.from.X + (m.to.X - m.from.X) * k
             let y = m.from.Y + (m.to.Y - m.from.Y) * k
             let w = m.from.Width + (m.to.Width - m.from.Width) * k
             let h = m.from.Height + (m.to.Height - m.from.Height) * k
             let crop = cropped(old, m.from, scale: scale)
-            canvas.DrawImage(crop, into: draw.Rect(x + float32(view.X) / scale, y + float32(view.Y) / scale, w, h).Snapped(scale: scale), opacity: transitionFade)
+            canvas.DrawImage(crop, into: draw.Rect(x + float32(view.X) / scale, y + float32(view.Y) / scale, w, h).Snapped(scale: scale), opacity: 1 - k)
         }
     }
 
@@ -287,5 +301,37 @@ struct TransitionMove {
     var from: draw.Rect
     var to: draw.Rect
     var node: int64
+    var timing: TransitionTiming
+}
+
+/// How a part of a view transition runs: for how long, after how much, and
+/// how it eases.
+struct TransitionTiming {
+    var duration: float64
+    var delay: float64
+    var easing: cascade.Easing
+
+    /// A quarter second, eased, as the user agent's sheet has it. (Written
+    /// out: a memberwise init with these defaults, called from page.vs, is
+    /// what vsc_TODO.md's memberwise entry is about.)
+    init() {
+        duration = 0.25
+        delay = 0
+        easing = cascade.Easing.ease
+    }
+
+    init(duration: float64, delay: float64, easing: cascade.Easing) {
+        self.duration = duration
+        self.delay = delay
+        self.easing = easing
+    }
+
+    /// How far along it is, eased, so long into the transition.
+    func progress(elapsed: float64) -> float32 {
+        var t = float32((elapsed - delay) / duration)
+        if t < 0 { t = 0 }
+        if t > 1 { t = 1 }
+        return easing.Progress(t)
+    }
 }
 

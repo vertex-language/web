@@ -124,6 +124,12 @@ final class FloatContext {
                 if let shape = box.Style.ShapeOutside {
                     placed.shape = ClipRegionOf(box, x: x + box.Margin.Left, y: y + box.Margin.Top, shape: shape)
                     placed.shapeMargin = box.Style.ShapeMargin
+                } else if let img = box.ShapeImage, img.Width > 0 && img.Height > 0 {
+                    // An image's shape: where its alpha is over the threshold,
+                    // the image stretched over the content box.
+                    let content = draw.Rect(x + box.Margin.Left + box.ContentX, y + box.Margin.Top + box.ContentY, box.InnerWidth, box.Height - box.Border.Vertical - box.Padding.Vertical)
+                    placed.shape = AlphaRegion(img, over: content, threshold: box.Style.ShapeImageThreshold)
+                    placed.shapeMargin = box.Style.ShapeMargin
                 }
                 floats.append(placed)
                 return placed

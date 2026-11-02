@@ -1784,6 +1784,17 @@ func testCompositing() {
     let underHit = ho.ElementAt(draw.Point(pinAt.X + 20, pinAt.Y + pinAt.Height - 5))?.GetAttribute("id") ?? "none"
     check(underHit == "pin", "a positioned inline-block in a line is hit over a later block (got \(underHit))")
 
+    // shape-outside: url(): text wraps round the image's opaque part.
+    let so = web.Page()
+    so.SetViewportSize(draw.Size(300, 200))
+    so.LoadHTML("<style>body { margin: 0; font-size: 10px; line-height: 10px } #fl { float: left; width: 100px; height: 40px; shape-outside: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAABCAYAAAD5PA/NAAAAEElEQVR4nGNgYGD4D8VgAAAV+wH/4ACp4gAAAABJRU5ErkJggg==) }</style><div id=fl></div><p id=wrap style='margin: 0'>word word word word word word word word word word word word word word word word word word word word</p>")
+    _ = so.BoundsOf(so.QuerySelector("#wrap")!)
+    var sop = [uint8](repeating: 0, count: 300 * 200 * 4)
+    so.Draw(into: &sop, width: 300, height: 200, scale: 1)
+    let soLines = so.BoxFor(so.QuerySelector("#wrap")!)!.Lines
+    let soX = soLines.isEmpty ? -1 : soLines[0].X
+    check(soX >= 50 && soX < 60, "shape-outside with an image wraps text round its opaque half (first line at \(soX))")
+
     // @page :first, :left and :right.
     let pf = web.Page()
     pf.SetViewportSize(draw.Size(300, 200))
@@ -1995,10 +2006,33 @@ func testCompositing() {
     _ = vw.Advance(time: 10.125)
     vw.Draw(into: &vwp, width: 100, height: 100, scale: 1)
     let halfway = pixelAt(vwp, 100, 50, 50)
-    check(halfway.R > 90 && halfway.R < 170 && halfway.B > 90, "and fades (got \(halfway))")
+    // Eased, as the user agent's animation is: ease at half the time is
+    // about 0.8 of the way.
+    check(halfway.R > 30 && halfway.R < 80 && halfway.B > 170, "and fades, eased (got \(halfway))")
     _ = vw.Advance(time: 10.3)
     vw.Draw(into: &vwp, width: 100, height: 100, scale: 1)
     check(pixelAt(vwp, 100, 50, 50) == draw.Color(0, 0, 255) && !vw.NeedsAnimation(), "to the new (got \(pixelAt(vwp, 100, 50, 50)))")
+    // A group's own timing, by its view-transition-class.
+    let vc = web.Page()
+    vc.SetViewportSize(draw.Size(100, 100))
+    vc.LoadHTML("""
+    <style>body { margin: 0; background: white } #a { position: absolute; left: 0; top: 0; width: 20px; height: 20px; background: rgb(0,255,0); view-transition-name: a; view-transition-class: slow }
+    ::view-transition-group(.slow) { animation-duration: 1s; animation-timing-function: linear } ::view-transition-group(root) { animation-duration: 0.2s }</style><div id=a></div>
+    """)
+    var vcp = [uint8](repeating: 0, count: 100 * 100 * 4)
+    vc.Draw(into: &vcp, width: 100, height: 100, scale: 1)
+    vc.StartViewTransition {
+        vc.Document?.SetAttribute(vc.QuerySelector("#a")!, "style", "left: 60px")
+    }
+    _ = vc.Advance(time: 10)
+    _ = vc.Advance(time: 10.5)
+    vc.Draw(into: &vcp, width: 100, height: 100, scale: 1)
+    let vcMid = pixelAt(vcp, 100, 40, 10)
+    check(vc.NeedsAnimation() && vcMid.R > 90 && vcMid.R < 170 && vcMid.G > 200,
+          "a group with view-transition-class runs on its own timing, past the page's fade (got \(vcMid))")
+    _ = vc.Advance(time: 11.1)
+    check(!vc.NeedsAnimation(), "and the transition ends with its last group")
+
     let nav = web.Page()
     nav.SetViewportSize(draw.Size(100, 100))
     nav.LoadHTML("<style>body { background: rgb(255,0,0) }</style>")

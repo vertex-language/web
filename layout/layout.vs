@@ -31,6 +31,9 @@ public final class Layout {
     /// The root being laid out: what fixed boxes are positioned against.
     var rootBox: Box? = nil
 
+    /// Images by URL, as they've loaded: shape-outside's.
+    public var Images: [string: draw.Image] = [:]
+
     public init(viewportWidth: float32, viewportHeight: float32) {
         ViewportWidth = viewportWidth
         ViewportHeight = viewportHeight
@@ -453,6 +456,7 @@ public final class Layout {
     /// Height and the edges; the caller places X and Y.
     func layoutBlock(box: Box, cb: ContainingBlock, flow: Flow) {
         resolveEdges(box, cbWidth: cb.Width)
+        box.ShapeImage = box.Style.ShapeOutsideURL.isEmpty ? nil : Images[box.Style.ShapeOutsideURL]
         box.Positioned = []
         box.ColumnFragments = []
         let s = box.Style

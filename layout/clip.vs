@@ -25,6 +25,12 @@ public struct ClipRegion {
     public var Path: draw.Path = draw.Path()
     /// nonzero or evenodd, for polygons and paths.
     public var EvenOdd: bool = false
+    /// An image's alpha over Rect, a row at a time, and what it must be over
+    /// to be in.
+    public var Alpha: [uint8] = []
+    public var AlphaWidth: int = 0
+    public var AlphaHeight: int = 0
+    public var Threshold: float32 = 0
 
     init(kind: string) {
         Kind = kind
@@ -56,6 +62,12 @@ public struct ClipRegion {
             return dx * dx + dy * dy <= 1
         case "polygon":
             return windingAt(Points, [0], px, py, EvenOdd)
+        case "alpha":
+            if Rect.Width <= 0 || Rect.Height <= 0 || px < Rect.X || py < Rect.Y || px >= Rect.X + Rect.Width || py >= Rect.Y + Rect.Height { return false }
+            let col = int((px - Rect.X) / Rect.Width * float32(AlphaWidth))
+            let row = int((py - Rect.Y) / Rect.Height * float32(AlphaHeight))
+            let a = Alpha[(row < AlphaHeight ? row : AlphaHeight - 1) * AlphaWidth + (col < AlphaWidth ? col : AlphaWidth - 1)]
+            return float32(a) > Threshold * 255
         default:
             return windingAt(Path.Points, Path.Starts, px, py, EvenOdd)
         }
@@ -90,6 +102,23 @@ func windingAt(points: [draw.Point], starts: [int], px: float32, py: float32, ev
 /// page, or nil for none. Percentages are of the reference box (the
 /// border box unless the clip-path names another), a circle's of its
 /// diagonal over root two.
+/// An image's alpha as a shape, stretched over a rectangle on the page.
+public func AlphaRegion(img: draw.Image, over rect: draw.Rect, threshold: float32) -> ClipRegion {
+    var r = ClipRegion("alpha")
+    r.Rect = rect
+    r.AlphaWidth = int(img.Width)
+    r.AlphaHeight = int(img.Height)
+    r.Threshold = threshold
+    var a = [uint8](repeating: 0, count: r.AlphaWidth * r.AlphaHeight)
+    var i = 0
+    while i < a.count {
+        a[i] = img.Pixels[i * 4 + 3]
+        i += 1
+    }
+    r.Alpha = a
+    return r
+}
+
 /// A polygon on the page, as clip-path's polygon() makes one: for paint to
 /// cut a layer to an outline of its own.
 public func PolygonRegion(points: [draw.Point]) -> ClipRegion {

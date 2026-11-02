@@ -306,7 +306,11 @@ public final class Page {
     var oldGroups: [string: (node: int64, rect: draw.Rect)] = [:]
     var transitionMoves: [TransitionMove] = []
     var transitionFade: float32 = 0
+    /// How long it all runs, the last group's end; the page's own fade's
+    /// timing; and how far in it is.
     var transitionLength: float64 = 0.25
+    var rootTiming = TransitionTiming()
+    var transitionElapsed: float64 = 0
     var transitionAt: float64 = -1
     var drawnScale: float32 = 0
     /// The panel open over the page, if any.
@@ -1002,6 +1006,7 @@ public final class Page {
         if needsLayout {
             if let r = root {
                 let run = layout.Layout(viewportWidth: size.Width, viewportHeight: size.Height)
+                run.Images = images
                 run.Run(r)
                 r.ViewportScrollX = scroll.X
                 r.ViewportScrollY = scroll.Y
@@ -1587,6 +1592,8 @@ extension Page {
             if let bg = s.BackgroundImage, !bg.URL.isEmpty { wanted.append(bg.URL) }
             if !s.MaskURL.isEmpty { wanted.append(s.MaskURL) }
             if !s.BorderImageURL.isEmpty { wanted.append(s.BorderImageURL) }
+            // A float's shape is laid out, so its image is a marker's kind.
+            if !s.ShapeOutsideURL.isEmpty && b.Kind != .text { wanted.append(s.ShapeOutsideURL); markers.append(s.ShapeOutsideURL) }
             if !s.ListStyleImage.isEmpty && s.Display == .listItem { wanted.append(s.ListStyleImage); markers.append(s.ListStyleImage) }
             for c in b.Children { visit(c) }
             for p in b.Positioned where p.Parent?.Id != b.Id { visit(p) }

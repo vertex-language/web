@@ -136,6 +136,8 @@ public final class Box {
     public var TextStart: int = 0
     /// The image a replaced image box shows, once loaded.
     public var Image: draw.Image? = nil
+    /// The image shape-outside names, once loaded: a float's shape.
+    public var ShapeImage: draw.Image? = nil
     /// The baseline of the box's first line, from its top, for aligning
     /// it in a line of its parent's; nil where it has no line.
     public var Baseline: float32? = nil

@@ -1551,8 +1551,11 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
         let names = (keywordOf(v) ?? "none").split(separator: " ").map { string($0) }
         s.AnchorScope = names == ["none"] ? [] : names
     case .shapeOutside:
-        // A shape as clip-path reads one, its box the margin box unless said.
+        // A shape as clip-path reads one, its box the margin box unless said;
+        // or an image, whose alpha is the shape.
         s.ShapeOutside = nil
+        s.ShapeOutsideURL = ""
+        if case .url(let u) = v { s.ShapeOutsideURL = u }
         if case .clipShape = v {
             let held = s.ClipPath
             var asClip = d
@@ -1563,6 +1566,7 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
             if s.ShapeOutside != nil && s.ShapeOutside!.Box.isEmpty { s.ShapeOutside!.Box = "margin-box" }
         }
     case .shapeMargin: if let p = pixels(v, s, ctx) { s.ShapeMargin = p }
+    case .shapeImageThreshold: if case .number(let n) = v { s.ShapeImageThreshold = n < 0 ? 0 : (n > 1 ? 1 : n) }
     case .cornerShape: s.CornerShapes = (keywordOf(v) ?? "").split(separator: " ").map { string($0) }
     case .interpolateSize: s.InterpolateKeywords = keywordOf(v) == "allow-keywords"
     case .maskOrigin: if let k = keywordOf(v) { s.MaskOrigin = k }
@@ -1600,6 +1604,9 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
     case .viewTransitionName:
         let k = keywordOf(v) ?? ""
         s.ViewTransitionName = k == "none" ? "" : k
+    case .viewTransitionClass:
+        let names = (keywordOf(v) ?? "none").split(separator: " ").map { string($0) }
+        s.ViewTransitionClasses = names == ["none"] ? [] : names
     case .writingMode: if let k = keywordOf(v) { s.WritingMode = k }
     case .textOrientation: if let k = keywordOf(v) { s.TextOrientation = k }
     case .perspective:
@@ -2606,7 +2613,10 @@ func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .positionVisibility: b.PositionVisibility = a.PositionVisibility
     case .positionTryOrder: b.PositionTryOrder = a.PositionTryOrder
     case .anchorScope: b.AnchorScope = a.AnchorScope
-    case .shapeOutside: b.ShapeOutside = a.ShapeOutside
+    case .shapeOutside:
+        b.ShapeOutside = a.ShapeOutside
+        b.ShapeOutsideURL = a.ShapeOutsideURL
+    case .shapeImageThreshold: b.ShapeImageThreshold = a.ShapeImageThreshold
     case .shapeMargin: b.ShapeMargin = a.ShapeMargin
     case .cornerShape: b.CornerShapes = a.CornerShapes
     case .interpolateSize: b.InterpolateKeywords = a.InterpolateKeywords
@@ -2634,6 +2644,7 @@ func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .scrollTimelineName: b.ScrollTimelineName = a.ScrollTimelineName
     case .viewTimelineName: b.ViewTimelineName = a.ViewTimelineName
     case .viewTransitionName: b.ViewTransitionName = a.ViewTransitionName
+    case .viewTransitionClass: b.ViewTransitionClasses = a.ViewTransitionClasses
     case .writingMode: b.WritingMode = a.WritingMode
     case .textOrientation: b.TextOrientation = a.TextOrientation
     case .perspective: b.Perspective = a.Perspective
