@@ -115,6 +115,8 @@ public final class Box {
     public var FirstLineStyle: cascade.ComputedStyle? = nil
     /// An <input type=file>'s ::file-selector-button, where rules give one.
     public var FileButtonStyle: cascade.ComputedStyle? = nil
+    /// position-visibility has hidden it.
+    public var AnchorHidden: bool = false
     /// What clip-path or mask: url(#id) names in the document, and which.
     public var EffectContent: svg.Drawing? = nil
     public var EffectIsMask: bool = false

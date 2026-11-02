@@ -178,7 +178,23 @@ public final class RuleSet {
             case "page":
                 // Only a sheet in general: :first, :left and the rest aren't kept.
                 if !at.Params.isEmpty { continue }
-                PageRule = pageRuleOf(at)
+                var rule = pageRuleOf(at)
+                for box in at.AtRules {
+                    for d in box.Declarations where d.Property == "content" {
+                        var words: [string] = []
+                        var i = 0
+                        while i < d.Tokens.count {
+                            let t = d.Tokens[i]
+                            if t.Kind == .string { words.append(t.Value) }
+                            if t.Kind == .function && css.lower(t.Value) == "counter" && i + 1 < d.Tokens.count {
+                                words.append("\u{1}" + css.lower(d.Tokens[i + 1].Value))
+                            }
+                            i += 1
+                        }
+                        rule.MarginBoxes[css.lower(box.Name)] = words
+                    }
+                }
+                PageRule = rule
             case "font-feature-values":
                 for kind in at.AtRules {
                     for d in kind.Declarations {
@@ -1510,6 +1526,20 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
     case .textBoxEdge: if let k = keywordOf(v) { s.TextBoxEdge = k }
     case .initialLetter: if case .number(let n) = v { s.InitialLetter = n }
     case .overflowAnchor: s.NoScrollAnchor = keywordOf(v) == "none"
+    case .textStrokeWidth: if let p = pixels(v, s, ctx) { s.TextStrokeWidth = p }
+    case .textStrokeColor:
+        if case .currentColor = v { s.TextStrokeColor = nil } else { s.TextStrokeColor = colorOf(v) }
+    case .paintOrder:
+        let w = (keywordOf(v) ?? "").split(separator: " ").map { css.lower(string($0)) }
+        if let st = w.firstIndex(of: "stroke") {
+            let fi = w.firstIndex(of: "fill")
+            s.StrokeBeforeFill = fi == nil || st < fi!
+        } else {
+            s.StrokeBeforeFill = false
+        }
+    case .transformBox: if let k = keywordOf(v) { s.TransformBox = k }
+    case .timelineScope: s.TimelineScope = (keywordOf(v) ?? "").split(separator: " ").map { string($0) }
+    case .positionVisibility: s.PositionVisibility = css.lower(keywordOf(v) ?? "always")
     case .shapeOutside:
         // A shape as clip-path reads one, its box the margin box unless said.
         s.ShapeOutside = nil
@@ -1653,6 +1683,7 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
     case .alignContent: if let k = keywordOf(v) { s.AlignContent = justifyOf(k) }
     case .alignItems: if let k = keywordOf(v) { s.AlignItems = alignOf(k) }
     case .alignSelf: if let k = keywordOf(v) { s.AlignSelf = alignOf(k) }
+        s.AlignSelfWord = keywordOf(v) == "anchor-center" ? "anchor-center" : ""
     case .flexGrow: if case .number(let n) = v { s.FlexGrow = n < 0 ? 0 : n }
     case .flexShrink: if case .number(let n) = v { s.FlexShrink = n < 0 ? 0 : n }
     case .flexBasis: if let l = length(v, s, ctx) { s.FlexBasis = l }
@@ -2537,6 +2568,12 @@ func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .textBoxEdge: b.TextBoxEdge = a.TextBoxEdge
     case .initialLetter: b.InitialLetter = a.InitialLetter
     case .overflowAnchor: b.NoScrollAnchor = a.NoScrollAnchor
+    case .textStrokeWidth: b.TextStrokeWidth = a.TextStrokeWidth
+    case .textStrokeColor: b.TextStrokeColor = a.TextStrokeColor
+    case .paintOrder: b.StrokeBeforeFill = a.StrokeBeforeFill
+    case .transformBox: b.TransformBox = a.TransformBox
+    case .timelineScope: b.TimelineScope = a.TimelineScope
+    case .positionVisibility: b.PositionVisibility = a.PositionVisibility
     case .shapeOutside: b.ShapeOutside = a.ShapeOutside
     case .shapeMargin: b.ShapeMargin = a.ShapeMargin
     case .cornerShape: b.CornerShapes = a.CornerShapes

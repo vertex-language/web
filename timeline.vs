@@ -55,6 +55,35 @@ extension Page {
                 }
                 cur = n.Parent
             }
+            // Or a name an ancestor's timeline-scope reaches for, on any
+            // element under it.
+            if subject == nil {
+                var scope: html.Node? = node
+                while let n = scope, subject == nil {
+                    if let b = previousBoxes[n.Id], b.Style.TimelineScope.contains(where: { css.lower($0) == name }) {
+                        func search(under: html.Node) {
+                            if subject != nil { return }
+                            if let c = previousBoxes[under.Id] {
+                                if css.lower(c.Style.ScrollTimelineName) == name {
+                                    subject = under
+                                    scroller = c
+                                    return
+                                }
+                                if css.lower(c.Style.ViewTimelineName) == name {
+                                    subject = under
+                                    isView = true
+                                    scroller = nearestScroller(under)
+                                    return
+                                }
+                            }
+                            for k in under.Children where k.Kind == html.NodeKind.element { search(k) }
+                        }
+                        search(n)
+                        break
+                    }
+                    scope = n.Parent
+                }
+            }
             if subject == nil { return nil }
         } else {
             return nil
@@ -80,6 +109,15 @@ extension Page {
             let p = layout.PagePosition(b)
             let start = (horizontal ? p.x : p.y) - origin
             let length = horizontal ? b.Width : b.Height
+            // view()'s insets take from the view at each end.
+            var insets: [float32] = []
+            for w in words where w.hasSuffix("px") {
+                if let v = float32(w.dropLast(2)) { insets.append(v) }
+            }
+            if let first = insets.first {
+                view -= first + (insets.count > 1 ? insets[1] : first)
+                origin -= insets.count > 1 ? 0 : 0
+            }
             low = start - view
             high = start + length
             ranges["cover"] = (start - view, start + length)
@@ -171,13 +209,23 @@ extension Page {
         }
         transitionFade = 1
         needsRepaint = true
+        // ::view-transition-group(*) and the rest may say how long.
+        transitionLength = 0.25
+        if let html = Document?.Tree.ElementsByTagName("html").first, let box = builder.byNode[html.Id] {
+            for which in ["view-transition-group(*)", "view-transition-old(root)", "view-transition-new(root)", "view-transition"] {
+                if let style = resolver.ResolvePseudo(html, which, parent: box.Style, context: context), let d = style.Animation.Durations.first, d > 0 {
+                    transitionLength = float64(d)
+                    break
+                }
+            }
+        }
     }
 
     /// Eases the fade. Answers whether it moved.
     func advanceTransition(time: float64) -> bool {
         guard oldPicture != nil else { return false }
         if transitionAt < 0 { transitionAt = time }
-        let t = (time - transitionAt) / 0.25
+        let t = (time - transitionAt) / transitionLength
         if t >= 1 {
             oldPicture = nil
             transitionMoves = []

@@ -245,7 +245,7 @@ func parseComplexSelector(selStr: string) -> ComplexSelector? {
                 }
                 if isElement || name == "before" || name == "after" || name == "first-line" || name == "first-letter" {
                     // ::highlight(name) keeps its name: each is its own.
-                    part.PseudoElement = name == "highlight" || name == "picker" ? "\(name)(\(argument))" : name
+                    part.PseudoElement = name == "highlight" || name == "picker" || name.hasPrefix("view-transition") && !argument.isEmpty ? "\(name)(\(argument))" : name
                 } else {
                     var pseudo = Pseudo(name: name, argument: argument)
                     if name == "nth-child" || name == "nth-last-child" || name == "nth-of-type" || name == "nth-last-of-type" {

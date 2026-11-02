@@ -48,6 +48,10 @@ final class MediaState {
     var ended = false
     var lastTime: float64 = -1
     var lastReported: float64 = -1
+    /// Where a seek is going, -1 for none; when a playing element's time last
+    /// moved, for :buffering and :stalled.
+    var seekingTo: float64 = -1
+    var movedAt: float64 = -1
 
     init(node: html.Node, player: any MediaPlayer, source: string) {
         self.node = node
@@ -143,7 +147,11 @@ extension Page {
     }
 
     public func SeekMedia(node: html.Node, to seconds: float64) {
-        media[node.Id]?.player.Seek(to: seconds)
+        guard let m = media[node.Id] else { return }
+        m.player.Seek(to: seconds)
+        m.seekingTo = seconds
+        context.MediaSeeking.insert(node.Id)
+        needsStyle = true
     }
 
     public func SetMediaVolume(node: html.Node, volume: float32) {
@@ -163,7 +171,7 @@ extension Page {
     }
 
     /// Reads each player: the changes as events, a new picture as a repaint.
-    func advanceMedia() -> bool {
+    func advanceMedia(time: float64 = 0) -> bool {
         var repaint = false
         let refused = mediaErrors
         mediaErrors = []
@@ -201,6 +209,24 @@ extension Page {
                 if m.ended { _ = dispatchMedia("ended", to: m.node) }
             }
             let t = p.CurrentTime
+            // A seek has landed when the time has got there.
+            if m.seekingTo >= 0 && (p.CurrentTime - m.seekingTo < 0.05 && m.seekingTo - p.CurrentTime < 0.05) {
+                m.seekingTo = -1
+                context.MediaSeeking.remove(id)
+                needsStyle = true
+                repaint = true
+            }
+            // Playing, with time standing still: waiting for data.
+            if p.Paused || t != m.lastTime { m.movedAt = time }
+            let waited = time - m.movedAt
+            let buffering = (!p.Paused && !p.Ended && waited > 0.5) || (!p.Ready && !p.Failed)
+            let stalled = !p.Paused && !p.Ended && waited > 3
+            if buffering != context.MediaBuffering.contains(id) || stalled != context.MediaStalled.contains(id) {
+                if buffering { context.MediaBuffering.insert(id) } else { context.MediaBuffering.remove(id) }
+                if stalled { context.MediaStalled.insert(id) } else { context.MediaStalled.remove(id) }
+                needsStyle = true
+                repaint = true
+            }
             if t != m.lastTime {
                 m.lastTime = t
                 // The bar shows it.

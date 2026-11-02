@@ -1671,6 +1671,94 @@ func testCompositing() {
     ga.Draw(into: &gap, width: 40, height: 40, scale: 1)
     check(pixelAt(gap, 40, 20, 20).R > 200, "and it goes round (got \(pixelAt(gap, 40, 20, 20)))")
 
+    // Text strokes, will-change, transform-box, element states.
+    let st2 = web.Page()
+    st2.SetViewportSize(draw.Size(300, 300))
+    st2.LoadHTML("""
+    <style>body { margin: 0; background: white } #ts { font: 60px Times; -webkit-text-stroke: 3px rgb(255,0,0); color: transparent; width: 100px; height: 60px; line-height: 60px; position: absolute; left: 0; top: 0 }
+    #wc { will-change: transform; position: absolute; left: 100px; top: 0; width: 50px; height: 50px } #fx2 { position: fixed; left: 5px; top: 5px; width: 5px; height: 5px }
+    #tb { position: absolute; left: 150px; top: 0; width: 40px; height: 40px; padding: 20px; transform-box: content-box; transform-origin: 0 0; transform: scale(2); background: rgb(0,255,0) }
+    #stt:state(open) { color: rgb(1,2,3) } #stt:fullscreen { background-color: rgb(4,5,6) } #af:autofill { background-color: rgb(7,8,9) }
+    @counter-style pd { system: numeric; symbols: "0" "1" "2" "3" "4" "5" "6" "7" "8" "9"; pad: 3 "0"; suffix: ""; range: 1 5; fallback: decimal }
+    </style>
+    <div id=ts>H</div><div id=wc><div id=fx2></div></div><div id=tb></div><p id=stt>state</p><input id=af>
+    <ol style="list-style-type: pd"><li id=c1>a</li><li>b</li><li>c</li><li>d</li><li>e</li><li id=c6>f</li></ol>
+    """)
+    var st2p = [uint8](repeating: 0, count: 300 * 300 * 4)
+    st2.Draw(into: &st2p, width: 300, height: 300, scale: 1)
+    var strokeRed = 0
+    var sy2: int32 = 0
+    while sy2 < 60 {
+        var sx2: int32 = 0
+        while sx2 < 100 {
+            let c = pixelAt(st2p, 300, sx2, sy2)
+            if c.R > 200 && c.G < 80 { strokeRed += 1 }
+            sx2 += 1
+        }
+        sy2 += 1
+    }
+    check(strokeRed > 40, "-webkit-text-stroke draws the outline (\(strokeRed) pixels)")
+    let fx2b = st2.BoundsOf(st2.QuerySelector("#fx2")!)!
+    check(fx2b.X == 105 && fx2b.Y == 5, "will-change: transform holds its fixed descendants (got \(fx2b.X) \(fx2b.Y))")
+    // Scaled about the content box's corner: its border box's corner moves out.
+    check(pixelAt(st2p, 300, 145, 5) != draw.Color.white || pixelAt(st2p, 300, 131, 2) != draw.Color.white, "transform-box: content-box moves the origin (got \(pixelAt(st2p, 300, 145, 5)))")
+    let sttN = st2.QuerySelector("#stt")!
+    st2.SetCustomState(sttN, name: "open", on: true)
+    check(st2.BoxFor(sttN)!.Style.Color == draw.Color(1, 2, 3), ":state() answers what's set (got \(st2.BoxFor(sttN)!.Style.Color))")
+    st2.SetFullscreenElement(sttN)
+    check(st2.BoxFor(sttN)!.Style.BackgroundColor == draw.Color(4, 5, 6), ":fullscreen answers it")
+    let afN = st2.QuerySelector("#af")!
+    st2.SetAutofilled(afN, on: true)
+    check(st2.BoxFor(afN)!.Style.BackgroundColor == draw.Color(7, 8, 9), ":autofill answers it")
+    check(st2.BoxFor(st2.QuerySelector("#c1")!)!.Marker == "001", "@counter-style's pad (got \(st2.BoxFor(st2.QuerySelector("#c1")!)!.Marker))")
+    check(st2.BoxFor(st2.QuerySelector("#c6")!)!.Marker.hasPrefix("6"), "and range's fallback (got \(st2.BoxFor(st2.QuerySelector("#c6")!)!.Marker))")
+    // Field-sizing, horizontal text inside vertical, balance beside a float.
+    let fs2 = web.Page()
+    fs2.SetViewportSize(draw.Size(400, 300))
+    fs2.LoadHTML("""
+    <style>body { margin: 0; font-size: 20px; line-height: 20px } input, textarea { font-size: 20px; padding: 0; border: 0 } #sized { field-sizing: content } #ta { field-sizing: content }
+    #vb { writing-mode: vertical-rl; height: 100px; position: absolute; left: 300px; top: 0 } #hb { writing-mode: horizontal-tb; width: 30px; height: 10px; background: rgb(255,0,0); display: block }
+    #fb { float: left; width: 50px; height: 80px } #bal { text-wrap: balance; width: 250px }</style>
+    <input id=sized value="abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"><textarea id=ta>one
+    two
+    three</textarea><div id=vb><div id=hb></div></div>
+    <div><div id=fb></div><p id=bal style="margin: 0">word word word word word word word word word word word</p></div>
+    """)
+    check(fs2.BoundsOf(fs2.QuerySelector("#sized")!)!.Width > 300, "field-sizing: content on an <input> (got \(fs2.BoundsOf(fs2.QuerySelector("#sized")!)!.Width))")
+    check(fs2.BoundsOf(fs2.QuerySelector("#ta")!)!.Height < 80, "and a <textarea>'s height is its lines' (got \(fs2.BoundsOf(fs2.QuerySelector("#ta")!)!.Height))")
+    let hbb = fs2.BoundsOf(fs2.QuerySelector("#hb")!)!
+    check(hbb.Width == 30 && hbb.Height == 10, "horizontal-tb inside vertical keeps its physical size (got \(hbb.Width) x \(hbb.Height))")
+    let balLines = fs2.BoxFor(fs2.QuerySelector("#bal")!)!.Lines
+    var widest: float32 = 0
+    var narrowest: float32 = 10000
+    var bi = 0
+    while bi < balLines.count {
+        var w: float32 = 0
+        for f in balLines[bi].Fragments { w += f.Width }
+        if w > widest { widest = w }
+        if w < narrowest { narrowest = w }
+        bi += 1
+    }
+    check(balLines.count >= 2 && widest - narrowest < 60, "text-wrap: balance works beside a float (\(balLines.count) lines, \(narrowest) to \(widest))")
+    // Print's margin boxes.
+    let pm = web.Page()
+    pm.SetViewportSize(draw.Size(300, 200))
+    pm.LoadHTML("<style>@page { size: 200px 100px; margin: 20px; @bottom-center { content: counter(page) \" of \" counter(pages) } } body { margin: 0 } div { height: 50px }</style><div></div><div></div>")
+    let pmSheets = pm.Print(scale: 1)
+    var pmDark = 0
+    if let first = pmSheets.first {
+        var y = 80
+        while y < 100 {
+            var x = 0
+            while x < 200 {
+                if first.Pixels[(y * 200 + x) * 4] < 120 { pmDark += 1 }
+                x += 1
+            }
+            y += 1
+        }
+    }
+    check(pmDark > 5, "@page's margin boxes print (\(pmDark) pixels)")
+
     // Printing.
     let pr = web.Page()
     pr.SetViewportSize(draw.Size(300, 200))
@@ -1935,6 +2023,12 @@ func testCompositing() {
     keep.SetViewportSize(draw.Size(400, 300))
     keep.LoadHTML("<style>body { margin: 0; font-size: 20px; line-height: 1 } p { margin: 0; width: 100px; word-break: keep-all }</style><p id=k>\u{65E5}\u{672C}\u{8A9E}\u{65E5}\u{672C}\u{8A9E}\u{65E5}\u{672C}\u{8A9E}</p>")
     check(keep.BoxFor(keep.QuerySelector("#k")!)!.Lines.count == 1, "word-break: keep-all doesn't break them")
+
+    // fit-content across a vertical box holds its lines at its own height.
+    let vf = web.Page()
+    vf.SetViewportSize(draw.Size(400, 400))
+    vf.LoadHTML("<style>body { margin: 0; font-size: 20px; line-height: 20px } #f { writing-mode: vertical-rl; height: 60px; width: fit-content }</style><div id=f>aaaaaa bbbbbb cccccc dddddd</div>")
+    check(vf.BoundsOf(vf.QuerySelector("#f")!)!.Width >= 60, "fit-content across a vertical box counts its lines at its own height (got \(vf.BoundsOf(vf.QuerySelector("#f")!)!.Width))")
 
     // The accessibility tree.
     let ax = web.Page()
@@ -2234,7 +2328,7 @@ func testCompositing() {
     check(smBox("cond").Width == 22, "if(style()) takes the first branch that holds (got \(smBox("cond").Width))")
     check(smBox("mq").Width == 33, "if(media()) and else (got \(smBox("mq").Width))")
     check(smBox("plainline").Height == 20 && smBox("trim").Height < 20, "text-box-trim cuts the half-leading (got \(smBox("plainline").Height) \(smBox("trim").Height))")
-    check(smBox("field").Width > 60 && smBox("field").Height >= 40, "field-sizing: content fits what it holds (got \(smBox("field").Width) \(smBox("field").Height))")
+    check(smBox("field").Width > 60 && smBox("field").Height >= 30 && smBox("field").Height < 60, "field-sizing: content fits what it holds (got \(smBox("field").Width) \(smBox("field").Height))")
     check(smBox("one").Marker == "A) " && smBox("two").Marker == "B) " && smBox("three").Marker == "A) ", "@counter-style markers (got \(smBox("one").Marker) \(smBox("two").Marker) \(smBox("three").Marker))")
     var smp = [uint8](repeating: 0, count: 300 * 300 * 4)
     sm.Draw(into: &smp, width: 300, height: 300, scale: 1)

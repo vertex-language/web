@@ -295,6 +295,11 @@ public struct PaintItem {
     /// turned back about the middle of its TileWidth, TileHeight over its
     /// baseline.
     public var Upright: bool = false
+    /// Text's outline: its width in CSS pixels and color; whether it goes
+    /// under the fill.
+    public var StrokeWidth: float32 = 0
+    public var StrokeColor: draw.Color = draw.Color.transparent
+    public var StrokeFirst: bool = false
     public var Opacity: float32
     /// An image's tile size and whether it repeats each way; the rect is
     /// the area it covers.
@@ -828,8 +833,12 @@ final class DisplayListBuilder {
         let y = parentY + box.Y + box.OffsetY
         let savedOpacity = opacity
         if s.Opacity < 1 { opacity = opacity * s.Opacity }
+        if box.AnchorHidden {
+            opacity = savedOpacity
+            return
+        }
         var transform = s.HasTransform
-            ? draw.Affine.translate(x, y).Concat(s.TransformMatrix(width: box.Width, height: box.Height)).Concat(draw.Affine.translate(-x, -y))
+            ? draw.Affine.translate(x, y).Concat(s.TransformMatrix(width: box.Width, height: box.Height, box: layout.TransformBoxOf(box))).Concat(draw.Affine.translate(-x, -y))
             : draw.Affine.identity
         if box.QuarterTurn != 0 { transform = transform.Concat(layout.QuarterMatrix(box, x: x, y: y)) }
         // A plane in 3D: its matrix, on top of its context's.
@@ -1035,7 +1044,7 @@ final class DisplayListBuilder {
                 if phase == .floats { paintBox(child, x: sx, y: sy, skipBackground: skipBackground) }
                 continue
             }
-            if child.Style.IsPositioned || child.Style.HasTransform || child.Style.Perspective > 0 || child.Style.Preserve3D || child.QuarterTurn != 0 {
+            if child.Style.IsPositioned || child.Style.HasTransform || child.Style.Perspective > 0 || child.Style.Preserve3D || child.QuarterTurn != 0 || child.Style.WillChangeStacks {
                 // A relative or sticky box paints as a whole, with what
                 // is positioned against it, among the stacking context's
                 // positioned boxes.
@@ -1702,7 +1711,14 @@ final class DisplayListBuilder {
                     if f.Owner.Style.IsVertical {
                         appendVerticalText(f, x: x + f.X, baseline: y + f.Y + f.Ascent, c: textColor, spacing: f.Owner.Style.LetterSpacing)
                     } else {
-                        items.append(.text(x + f.X, y + f.Y + f.Ascent, f.Run, textColor, f.Owner.Style.LetterSpacing))
+                        var item = PaintItem.text(x + f.X, y + f.Y + f.Ascent, f.Run, textColor, f.Owner.Style.LetterSpacing)
+                        // -webkit-text-stroke: its outline, in its color.
+                        if f.Kind == .text && f.Owner.Style.TextStrokeWidth > 0 {
+                            item.StrokeWidth = f.Owner.Style.TextStrokeWidth
+                            item.StrokeColor = color(f.Owner.Style.TextStrokeColor ?? ownColor)
+                            item.StrokeFirst = f.Owner.Style.StrokeBeforeFill
+                        }
+                        items.append(item)
                     }
                 }
                 // text-emphasis: a mark over each character, half its size.
@@ -2046,24 +2062,38 @@ final class DisplayListBuilder {
         case .listBox:
             // Its rows, the chosen ones lit, from where it has scrolled to.
             guard let node = box.Node else { break }
-            let options = dom.Descendants(node, tag: "option")
+            let rows = layout.ListBoxItems(node)
             let rowH = layout.ListBoxRowHeight(s)
             let top = listTops[node.Id] ?? 0
             items.append(.clip(inner))
             var i = top
             var rowY = inner.Y
-            while i < options.count && rowY < inner.Bottom {
-                let o = options[i]
-                let off = o.HasAttribute("disabled")
-                if o.HasAttribute("selected") {
-                    items.append(.fill(draw.Rect(inner.X, rowY, inner.Width, rowH), color(s.AccentColor ?? css.SystemAccent), draw.Radii.zero))
+            while i < rows.count && rowY < inner.Bottom {
+                let o = rows[i]
+                if o.TagName == "optgroup" {
+                    // A group's label: not a choice, and bold.
+                    let boldFace = font.Load(font.Spec(families: s.FontFamilies, size: s.FontSize, weight: 700))
+                    items.append(.text(inner.X + 4, rowY + 1 + face.Ascent, boldFace.Shape(o.GetAttribute("label") ?? ""), color(s.Color), 0))
+                } else {
+                    let off = o.HasAttribute("disabled") || (o.Parent?.TagName == "optgroup" && o.Parent!.HasAttribute("disabled"))
+                    if o.HasAttribute("selected") {
+                        items.append(.fill(draw.Rect(inner.X, rowY, inner.Width, rowH), color(s.AccentColor ?? css.SystemAccent), draw.Radii.zero))
+                    }
+                    let c = off ? draw.Color(160, 160, 160) : (o.HasAttribute("selected") ? draw.Color.white : s.Color)
+                    let inset: float32 = o.Parent?.TagName == "optgroup" ? 16 : 4
+                    items.append(.text(inner.X + inset, rowY + 1 + face.Ascent, face.Shape(dom.CollapseSpace(o.InnerText())), color(c), 0))
                 }
-                let c = off ? draw.Color(160, 160, 160) : (o.HasAttribute("selected") ? draw.Color.white : s.Color)
-                items.append(.text(inner.X + 4, rowY + 1 + face.Ascent, face.Shape(dom.CollapseSpace(o.InnerText())), color(c), 0))
                 rowY += rowH
                 i += 1
             }
             items.append(PaintItem.unclip)
+            // A bar, where there's more than shows.
+            let shown = layout.ListBoxRows(node)
+            if rows.count > shown {
+                let span = inner.Height * float32(shown) / float32(rows.count)
+                let at = (inner.Height - span) * float32(top) / float32(rows.count - shown)
+                items.append(.fill(draw.Rect(inner.Right - 5, inner.Y + at, 4, span), color(draw.Color(0, 0, 0, 80)), draw.Radii(all: 2)))
+            }
         case .select:
             let run = face.Shape(box.Text)
             let ty = inner.Y + (inner.Height - face.LineHeight) / 2 + face.Ascent
@@ -2269,7 +2299,13 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
             let run = item.Run
             let c = item.Color
             let letterSpacing = item.LetterSpacing
-            if item.Upright {
+            if item.StrokeWidth > 0 {
+                let outline = font.RunOutline(run, x: x * scale + dx, baseline: baseline * scale + dy, scale: scale, letterSpacing: letterSpacing)
+                let line = outline.Stroked(draw.Stroke(width: item.StrokeWidth * scale, join: .round))
+                if item.StrokeFirst { canvas.FillPath(line, item.StrokeColor) }
+                canvas.FillPath(outline, c)
+                if !item.StrokeFirst { canvas.FillPath(line, item.StrokeColor) }
+            } else if item.Upright {
                 let cx = (x + item.TileWidth / 2) * scale + dx
                 let cy = (baseline - item.TileHeight) * scale + dy
                 let reach = int32(item.TileWidth * scale * 1.5) + 4
@@ -2670,7 +2706,7 @@ public func SelectedPart(f: layout.Fragment, node: html.Node, range: (start: dom
 /// with the code.
 public func ReadsAttribute(name: string) -> bool {
     switch name {
-    case "controls", "disabled", "selected", "alt", "max", "min", "step", "placeholder", "value", "checked", "data-viewport":
+    case "controls", "disabled", "selected", "label", "alt", "max", "min", "step", "placeholder", "value", "checked", "data-viewport":
         return true
     default:
         return false

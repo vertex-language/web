@@ -11,6 +11,13 @@ public struct CounterStyle {
     var suffix: string = ". "
     /// `system: extends name`, or what to use where this one can't say.
     var base: string = ""
+    /// range's bounds, in pairs; none is all. pad's length and symbol;
+    /// negative's two sides.
+    var ranges: [(low: int, high: int)] = []
+    var padLength: int = 0
+    var padSymbol: string = ""
+    var negativeBefore: string = "-"
+    var negativeAfter: string = ""
 }
 
 public var CounterStyles: [string: CounterStyle] = [:]
@@ -52,6 +59,25 @@ func DefineCounterStyle(at: css.AtRule) {
             c.prefix = symbolWords(d.Tokens).first ?? ""
         case "suffix":
             c.suffix = symbolWords(d.Tokens).first ?? ""
+        case "pad":
+            for t in d.Tokens {
+                if t.Kind == .number { c.padLength = int(t.NumberVal) }
+                if t.Kind == .string || t.Kind == .ident { c.padSymbol = t.Value }
+            }
+        case "negative":
+            let words = symbolWords(d.Tokens)
+            if let first = words.first { c.negativeBefore = first }
+            if words.count > 1 { c.negativeAfter = words[1] }
+        case "range":
+            var pair: [int] = []
+            for t in d.Tokens {
+                if t.Kind == .number { pair.append(int(t.NumberVal)) }
+                if t.Kind == .ident { pair.append(css.lower(t.Value) == "infinite" ? (pair.count % 2 == 0 ? -1000000000 : 1000000000) : 0) }
+                if pair.count == 2 {
+                    c.ranges.append((low: pair[0], high: pair[1]))
+                    pair = []
+                }
+            }
         case "fallback":
             if c.base.isEmpty { c.base = css.lower(symbolWords(d.Tokens).first ?? "") }
         default:
@@ -66,8 +92,26 @@ func DefineCounterStyle(at: css.AtRule) {
 /// the number and no style of its own to fall back on.
 public func CounterStyleText(name: string, n: int, marker: bool) -> string? {
     guard let c = CounterStyles[name] else { return nil }
-    guard let body = counterBody(c, n) else { return nil }
+    // Out of its range, or beyond it, its fallback says it.
+    var inRange = c.ranges.isEmpty
+    for r in c.ranges where n >= r.low && n <= r.high { inRange = true }
+    guard inRange, var body = counterBody(c, n < 0 && usesNegative(c) ? -n : n) else {
+        if !c.base.isEmpty, c.base != name, let f = CounterStyleText(c.base, n: n, marker: marker) { return f }
+        return marker ? "\(n). " : "\(n)"
+    }
+    // pad fills it out to a length, in characters.
+    var count = 0
+    for _ in body.unicodeScalars { count += 1 }
+    while count < c.padLength && !c.padSymbol.isEmpty {
+        body = c.padSymbol + body
+        count += 1
+    }
+    if n < 0 && usesNegative(c) { body = c.negativeBefore + body + c.negativeAfter }
     return c.prefix + body + (marker ? c.suffix : "")
+}
+
+func usesNegative(c: CounterStyle) -> bool {
+    return c.system == "symbolic" || c.system == "alphabetic" || c.system == "numeric" || c.system == "additive"
 }
 
 func counterBody(c: CounterStyle, n: int) -> string? {
@@ -94,14 +138,14 @@ func counterBody(c: CounterStyle, n: int) -> string? {
         return out
     case "numeric":
         if count < 2 { return nil }
-        var v = n < 0 ? -n : n
+        var v = n
         if v == 0 { return c.symbols[0] }
         var out = ""
         while v > 0 {
             out = c.symbols[v % count] + out
             v /= count
         }
-        return (n < 0 ? "-" : "") + out
+        return out
     case "additive":
         if n < 0 || c.additive.isEmpty { return nil }
         var left = n

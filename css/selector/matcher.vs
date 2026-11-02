@@ -39,6 +39,14 @@ public final class MatchContext {
     public var Playing = Set<int64>()
     /// The base-select elements whose pickers are open, by node id.
     public var PickerOpen = Set<int64>()
+    /// What a host says: fields it filled, the fullscreen element (0 none),
+    /// :state()'s names by element. And the media elements in each state.
+    public var Autofilled = Set<int64>()
+    public var FullscreenElement: int64 = 0
+    public var CustomStates: [int64: Set<string>] = [:]
+    public var MediaSeeking = Set<int64>()
+    public var MediaBuffering = Set<int64>()
+    public var MediaStalled = Set<int64>()
     // Each element's 1-based place among its parent's element children,
     // and each parent's count of them, filled in a parent at a time: the
     // nth-child family asks for every element on a page.
@@ -316,8 +324,19 @@ func matchPseudo(p: Pseudo, node: html.Node, ctx: MatchContext) -> bool {
         return ctx.Modal.contains(node.Id)
     case "popover-open":
         return ctx.PopoverOpen.contains(node.Id)
-    case "autofill", "fullscreen", "picture-in-picture", "seeking",
-         "buffering", "stalled", "volume-locked", "state":
+    case "autofill", "-webkit-autofill":
+        return ctx.Autofilled.contains(node.Id)
+    case "fullscreen":
+        return ctx.FullscreenElement == node.Id
+    case "seeking":
+        return ctx.MediaSeeking.contains(node.Id)
+    case "buffering":
+        return ctx.MediaBuffering.contains(node.Id)
+    case "stalled":
+        return ctx.MediaStalled.contains(node.Id)
+    case "state":
+        return ctx.CustomStates[node.Id]?.contains(p.Argument) ?? false
+    case "picture-in-picture", "volume-locked":
         return false
     default:
         return false

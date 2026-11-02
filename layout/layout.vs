@@ -85,6 +85,8 @@ public final class Layout {
             // Text shares its element's style; it's the element that's named.
             if b.Kind != .text {
                 for n in b.Style.AnchorNames { named[n] = b }
+                // A popover's invoker is what it's anchored to by default.
+                if let t = b.Node?.GetAttribute("popovertarget") { named["#invoker:" + t] = b }
             }
             for c in b.Children { walk(c) }
             for p in b.Positioned { walk(p) }
@@ -127,6 +129,17 @@ public final class Layout {
             }
         }
         guard let at = chosen ?? first else { return }
+        // position-visibility: hidden when it overflows, or its anchor is out
+        // of view.
+        child.AnchorHidden = false
+        if s.PositionVisibility.contains("no-overflow") && chosen == nil { child.AnchorHidden = true }
+        if s.PositionVisibility.contains("anchors-visible") {
+            let key = s.PositionAnchor
+            if let a = named[key] {
+                let p = PagePosition(a)
+                if p.x + a.Width < viewX || p.y + a.Height < viewY || p.x > viewX + ViewportWidth || p.y > viewY + ViewportHeight { child.AnchorHidden = true }
+            }
+        }
         if at.w != child.Width || at.h != child.Height {
             let cb = ContainingBlock(width: child.Parent?.PaddingBoxWidth ?? ViewportWidth, height: child.Parent?.PaddingBoxHeight)
             layoutFixed(child, width: at.w, height: at.h != child.Height ? at.h : nil, cb: cb, flow: Flow(positioned: child, floats: FloatContext(), x: 0, y: 0))
@@ -142,7 +155,8 @@ public final class Layout {
     func anchoredSpot(child: Box, uses: [cascade.AnchorUse], area: [string], named: [string: Box]) -> (x: float32, y: float32, w: float32, h: float32)? {
         let s = child.Style
         func rect(name: string) -> (x: float32, y: float32, w: float32, h: float32)? {
-            let key = name.isEmpty ? s.PositionAnchor : name
+            var key = name.isEmpty ? s.PositionAnchor : name
+            if key.isEmpty, let id = child.Node?.GetAttribute("id") { key = "#invoker:" + id }
             guard let a = named[key] else { return nil }
             let p = PagePosition(a)
             return (x: p.x, y: p.y, w: a.Width, h: a.Height)
@@ -223,6 +237,9 @@ public final class Layout {
             if !acrossSet { x = a.x + (a.w - w) / 2 }
             if !downSet { y = a.y + (a.h - h) / 2 }
         }
+        // anchor-center: over the anchor's middle on that axis.
+        if s.JustifySelf == "anchor-center", let a = rect("") { x = a.x + (a.w - w) / 2 }
+        if s.AlignSelfWord == "anchor-center", let a = rect("") { y = a.y + (a.h - h) / 2 }
         return (x: x, y: y, w: w, h: h)
     }
 
@@ -368,7 +385,7 @@ public final class Layout {
         var inner = box.IsFormattingRoot ? flow.root(box) : (s.IsPositioned ? flow.positionedBy(box) : flow)
         // A transform, a filter or containment makes the box what its
         // fixed descendants are placed against, instead of the viewport.
-        if s.HasTransform || s.Perspective > 0 || s.Preserve3D || !s.Filters.isEmpty || s.ContainPaint || s.LayoutContained { inner.fixed = box }
+        if s.HasTransform || s.WillChangeContains || s.Perspective > 0 || s.Preserve3D || !s.Filters.isEmpty || s.ContainPaint || s.LayoutContained { inner.fixed = box }
         let contentHeight = layoutContent(box, flow: inner)
 
         // Height: given, or the content's, or the ratio's where the
@@ -774,7 +791,9 @@ public final class Layout {
         // Across a vertical box's lines is as wide as they stack.
         if let inner = box.VerticalContent {
             let across = intrinsicWidths(inner).max
-            let room = ViewportHeight > 0 ? ViewportHeight : across
+            // Its lines are as long as its own height, where it has one.
+            var room = ViewportHeight > 0 ? ViewportHeight : across
+            if let given = heightFromStyle(box, s.Height, cbHeight: nil) { room = given - box.Padding.Vertical - box.Border.Vertical }
             let measure = Flow(positioned: inner, floats: FloatContext(), x: 0, y: 0)
             let saved = inner.Style.Width
             inner.Style.Width = .px(across < room ? across : room)
@@ -953,7 +972,10 @@ public final class Layout {
                 } else if let t = top, let b = bottom, !isSizingKeyword(s.Height) {
                     child.DefiniteInnerHeight = cbHeight - t - b - child.Margin.Vertical - child.Padding.Vertical - child.Border.Vertical
                 }
-                let contentHeight = layoutContent(child, flow: Flow(positioned: child, floats: FloatContext(), x: 0, y: 0))
+                // A transform, a filter or containment here holds fixed descendants too.
+                var childFlow = Flow(positioned: child, floats: FloatContext(), x: 0, y: 0)
+                if s.HasTransform || s.WillChangeContains || s.Perspective > 0 || s.Preserve3D || !s.Filters.isEmpty || s.ContainPaint || s.LayoutContained { childFlow.fixed = child }
+                let contentHeight = layoutContent(child, flow: childFlow)
                 var h = contentHeight + child.Padding.Vertical + child.Border.Vertical
                 if let given = heightFromStyle(child, s.Height, cbHeight: cbHeight) {
                     h = given
@@ -1064,7 +1086,7 @@ public final class Layout {
 /// code.
 public func ReadsAttribute(name: string) -> bool {
     switch name {
-    case "src", "colspan", "rowspan", "start", "type", "value", "selected", "placeholder", "multiple", "poster", "data", "lang", "size", "id":
+    case "src", "colspan", "rowspan", "start", "type", "value", "selected", "placeholder", "multiple", "poster", "data", "lang", "size", "popovertarget", "id":
         return true
     default:
         return false

@@ -306,6 +306,7 @@ public final class Page {
     var oldGroups: [string: (node: int64, rect: draw.Rect)] = [:]
     var transitionMoves: [TransitionMove] = []
     var transitionFade: float32 = 0
+    var transitionLength: float64 = 0.25
     var transitionAt: float64 = -1
     var drawnScale: float32 = 0
     /// The panel open over the page, if any.
@@ -638,6 +639,26 @@ public final class Page {
         return changed
     }
 
+    /// Says a host filled a field, for :autofill.
+    public func SetAutofilled(node: html.Node, on: bool) {
+        if on { context.Autofilled.insert(node.Id) } else { context.Autofilled.remove(node.Id) }
+        needsStyle = true
+    }
+
+    /// Says which element fills the screen, nil for none: :fullscreen.
+    public func SetFullscreenElement(node: html.Node?) {
+        context.FullscreenElement = node?.Id ?? 0
+        needsStyle = true
+    }
+
+    /// Sets or clears a custom state on an element: :state(name).
+    public func SetCustomState(node: html.Node, name: string, on: bool) {
+        var names = context.CustomStates[node.Id] ?? Set<string>()
+        if on { names.insert(name) } else { names.remove(name) }
+        context.CustomStates[node.Id] = names
+        needsStyle = true
+    }
+
     /// The page's title, from <title>.
     public var Title: string { return title }
 
@@ -834,7 +855,7 @@ public final class Page {
         if easeOverscroll(time) { repaint = true }
         if advanceTransition(time: time) { repaint = true }
         if advanceAnimatedImages(time) { repaint = true }
-        if advanceMedia() { repaint = true }
+        if advanceMedia(time: time) { repaint = true }
         if advanceScroll(time) { repaint = true }
         for (_, frame) in frames where frame.page.NeedsAnimation() {
             if frame.page.Advance(time: time) {
@@ -1194,8 +1215,8 @@ public final class Page {
     /// it is shown; nil before it is laid out, or when it isn't.
     public func BoundsOf(node: html.Node) -> draw.Rect? {
         guard let box = BoxFor(node) else { return nil }
-        let p = layout.PagePosition(box)
-        return draw.Rect(p.x - scroll.X, p.y - scroll.Y, box.Width, box.Height)
+        let r = layout.VisualBounds(box)
+        return draw.Rect(r.X - scroll.X, r.Y - scroll.Y, r.Width, r.Height)
     }
 
     /// The root of the layout tree.

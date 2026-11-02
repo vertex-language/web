@@ -491,6 +491,9 @@ public struct PageDescriptor {
     public var Width: float32 = 0
     public var Height: float32 = 0
     public var Margins: [float32] = []
+    /// Margin boxes' text by slot ("top-center"): strings, and counter names
+    /// after a mark of \u{1}.
+    public var MarginBoxes: [string: [string]] = [:]
 }
 
 public var PageRule: PageDescriptor? = nil

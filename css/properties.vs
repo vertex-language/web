@@ -61,6 +61,12 @@ public enum Prop: int32 {
     case mixBlendMode
     case isolation
     case overflowAnchor
+    case textStrokeWidth
+    case textStrokeColor
+    case paintOrder
+    case transformBox
+    case timelineScope
+    case positionVisibility
     case shapeOutside
     case shapeMargin
     case cornerShape
@@ -429,6 +435,8 @@ let propNames: [string: Prop] = [
     "-webkit-text-emphasis-style": .textEmphasisStyle, "-webkit-text-emphasis-color": .textEmphasisColor, "-webkit-text-emphasis-position": .textEmphasisPosition,
     "shape-outside": .shapeOutside, "shape-margin": .shapeMargin, "corner-shape": .cornerShape, "interpolate-size": .interpolateSize,
     "mask-origin": .maskOrigin, "mask-clip": .maskClip, "-webkit-mask-origin": .maskOrigin, "-webkit-mask-clip": .maskClip,
+    "-webkit-text-stroke-width": .textStrokeWidth, "-webkit-text-stroke-color": .textStrokeColor, "paint-order": .paintOrder,
+    "transform-box": .transformBox, "timeline-scope": .timelineScope, "position-visibility": .positionVisibility,
     "overflow-anchor": .overflowAnchor, "writing-mode": .writingMode, "text-orientation": .textOrientation,
     "perspective": .perspective, "perspective-origin": .perspectiveOrigin, "backface-visibility": .backfaceVisibility,
     "transform-style": .transformStyle,
@@ -908,7 +916,19 @@ func longhands(d: Declaration) -> [Longhand] {
     case "place-items":
         if let v = parseValue(.alignItems, [tokens[0]]) { set(.alignItems, v) }
         if let j = parseValue(.justifyItems, [tokens.count > 1 ? tokens[1] : tokens[0]]) { set(.justifyItems, j) }
-    case "transform-box",
+    case "-webkit-text-stroke":
+        // A width and a color, in either order.
+        var i = 0
+        while i < tokens.count {
+            if let c = parseColorAt(tokens, i) {
+                set(.textStrokeColor, c.0)
+                i += c.1
+                continue
+            }
+            if let l = parseLengthValue(tokens[i], allowAuto: false) { set(.textStrokeWidth, l) }
+            i += 1
+        }
+    case "@none-placeholder",
          "src", "unicode-range",
          "-webkit-font-smoothing", "-moz-osx-font-smoothing",
          "speak",
@@ -1086,6 +1106,7 @@ func longhandsOf(name: string) -> [Prop] {
     case "transition", "-webkit-transition": return transitionProps
     case "animation", "-webkit-animation": return animationProps
     case "text-box": return [.textBoxTrim, .textBoxEdge]
+    case "-webkit-text-stroke": return [.textStrokeWidth, .textStrokeColor]
     case "font-variant": return [.fontVariantNumeric, .fontVariantLigatures, .fontVariantCaps, .fontVariantEastAsian]
     case "text-emphasis", "-webkit-text-emphasis": return [.textEmphasisStyle, .textEmphasisColor]
     case "font": return [.fontFamily, .fontSize, .fontWeight, .fontStyle, .lineHeight]
@@ -1937,6 +1958,8 @@ func parseFilters(tokens: [Token]) -> Value? {
 func parseValue(prop: Prop, tokens: [Token]) -> Value? {
     let t = tokens[0]
     let kw = t.Kind == .ident ? lower(t.Value) : ""
+    if prop == .alignSelf && kw == "anchor-center" { return .keyword(kw) }
+    if prop == .justifySelf && kw == "anchor-center" { return .keyword(kw) }
     switch prop {
     case .display:
         switch kw {
@@ -2457,6 +2480,25 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
     case .maskOrigin, .maskClip:
         switch kw {
         case "border-box", "padding-box", "content-box", "fill-box", "stroke-box", "view-box", "no-clip": return .keyword(kw)
+        default: return nil
+        }
+    case .textStrokeWidth:
+        switch kw {
+        case "thin": return .length(1, .px)
+        case "medium": return .length(3, .px)
+        case "thick": return .length(5, .px)
+        default: return parseLengthValue(t, allowAuto: false)
+        }
+    case .textStrokeColor:
+        if kw == "currentcolor" { return .currentColor }
+        return parseColorAt(tokens, 0)?.0
+    case .paintOrder, .timelineScope, .positionVisibility:
+        var words: [string] = []
+        for tok in tokens where tok.Kind == .ident { words.append(tok.Value) }
+        return words.isEmpty ? nil : .keyword(joinWords(words))
+    case .transformBox:
+        switch kw {
+        case "content-box", "border-box", "fill-box", "stroke-box", "view-box": return .keyword(kw)
         default: return nil
         }
     case .overflowAnchor:

@@ -105,6 +105,17 @@ public final class ComputedStyle {
     /// clip-path: url(#id), and filter: url(#id).
     public var ClipURL: string = ""
     public var FilterURL: string = ""
+    /// -webkit-text-stroke's width in pixels and color (nil for the text's);
+    /// paint-order: the stroke before the fill. Inherited.
+    public var TextStrokeWidth: float32 = 0
+    public var TextStrokeColor: draw.Color? = nil
+    public var StrokeBeforeFill: bool = false
+    /// transform-box, timeline-scope's names, position-visibility.
+    public var TransformBox: string = "border-box"
+    public var TimelineScope: [string] = []
+    public var PositionVisibility: string = "always"
+    /// align-self: anchor-center, which AlignItems has no word for.
+    public var AlignSelfWord: string = ""
     /// shape-outside as a clip shape, and shape-margin in pixels.
     public var ShapeOutside: ClipPath? = nil
     public var ShapeMargin: float32 = 0
@@ -429,6 +440,9 @@ public final class ComputedStyle {
         ListStyleType = parent.ListStyleType
         ImageRendering = parent.ImageRendering
         WritingMode = parent.WritingMode
+        TextStrokeWidth = parent.TextStrokeWidth
+        TextStrokeColor = parent.TextStrokeColor
+        StrokeBeforeFill = parent.StrokeBeforeFill
         InterpolateKeywords = parent.InterpolateKeywords
         FontFeatureSettings = parent.FontFeatureSettings
         FontVariationSettings = parent.FontVariationSettings
@@ -653,6 +667,18 @@ extension ComputedStyle {
         return out.joined(separator: ",")
     }
 
+    /// will-change on what would make a containing block and stacking
+    /// context: the box acts as though it already had one.
+    public var WillChangeContains: bool {
+        if WillChange == "auto" { return false }
+        return WillChange.contains("transform") || WillChange.contains("perspective") || WillChange.contains("filter")
+    }
+
+    public var WillChangeStacks: bool {
+        if WillChange == "auto" { return false }
+        return WillChangeContains || WillChange.contains("opacity") || WillChange.contains("clip-path") || WillChange.contains("mask") || WillChange.contains("mix-blend-mode") || WillChange.contains("isolation")
+    }
+
     /// Whether anchor positioning has anything to do with the box.
     public var IsAnchored: bool {
         return !AnchorUses.isEmpty || !PositionArea.isEmpty
@@ -705,9 +731,9 @@ extension ComputedStyle {
     }
 
     /// TransformMatrix in 3D.
-    public func Matrix3D(width: float32, height: float32) -> draw.Matrix4 {
-        let ox = TransformOriginX.Resolve(width) ?? width / 2
-        let oy = TransformOriginY.Resolve(height) ?? height / 2
+    public func Matrix3D(width: float32, height: float32, box: draw.Rect? = nil) -> draw.Matrix4 {
+        let ox = (box?.X ?? 0) + (TransformOriginX.Resolve(box?.Width ?? width) ?? (box?.Width ?? width) / 2)
+        let oy = (box?.Y ?? 0) + (TransformOriginY.Resolve(box?.Height ?? height) ?? (box?.Height ?? height) / 2)
         var m = draw.Matrix4.translate(ox, oy)
         for list in [Translate, Rotate, Scale, Transform] {
             for op in list { m = m.Concat(op.Matrix4(width: width, height: height)) }
@@ -718,9 +744,10 @@ extension ComputedStyle {
     /// The box's transform, in coordinates whose origin is its border
     /// box's top left: translate, rotate, scale and then transform, all
     /// about transform-origin.
-    public func TransformMatrix(width: float32, height: float32) -> draw.Affine {
-        let ox = TransformOriginX.Resolve(width) ?? width / 2
-        let oy = TransformOriginY.Resolve(height) ?? height / 2
+    public func TransformMatrix(width: float32, height: float32, box: draw.Rect? = nil) -> draw.Affine {
+        // transform-box: the origin's percentages are of it, from its corner.
+        let ox = (box?.X ?? 0) + (TransformOriginX.Resolve(box?.Width ?? width) ?? (box?.Width ?? width) / 2)
+        let oy = (box?.Y ?? 0) + (TransformOriginY.Resolve(box?.Height ?? height) ?? (box?.Height ?? height) / 2)
         var m = draw.Affine.translate(ox, oy)
         for list in [Translate, Rotate, Scale, Transform] {
             for op in list { m = m.Concat(op.Matrix(width: width, height: height)) }

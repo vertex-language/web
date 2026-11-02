@@ -8,7 +8,7 @@
 // stroke-width, stroke-linecap, stroke-linejoin, stroke-miterlimit,
 // stroke-opacity, dashes) of those and <line>; markers; patterns; clip-path,
 // mask and a run of filter primitives by url(); <text> and <tspan>; and the
-// viewBox with preserveAspectRatio. Text on a path isn't drawn yet.
+// viewBox with preserveAspectRatio, and text on a path.
 package svg
 
 import (
@@ -192,7 +192,34 @@ public final class Drawing {
         }
         if solid { paint = blackFill }
         if let t = s.text {
-            if paint.kind != 0 { drawText(t, m, on: canvas, paint: paint, opacity: solid ? 1 : s.opacity, currentColor: currentColor) }
+            // Plain text as glyphs; anything more as its outline.
+            if s.stroke.kind == 0 && paint.kind != 3 && paint.kind != 4 && t.along.isEmpty {
+                if paint.kind != 0 { drawText(t, m, on: canvas, paint: paint, opacity: solid ? 1 : s.opacity, currentColor: currentColor) }
+                return
+            }
+            let path = textOutline(t, m)
+            let face = font.Load(t.spec)
+            let box = Matrix(font.Load(t.spec).Shape(t.text).Width, 0, 0, face.Ascent + face.Descent, t.x, t.y - face.Ascent)
+            func fillText() {
+                if paint.kind != 0 { fillPath(path, rule: .nonZero, paint: paint, opacity: solid ? 1 : s.opacity, m: m, box: box, on: canvas, currentColor: currentColor) }
+            }
+            func strokeText() {
+                if s.stroke.kind != 0 && !solid {
+                    let det = m.A * m.D - m.B * m.C
+                    let unit = math.Sqrt(det < 0 ? -det : det)
+                    var st = s.strokeStyle
+                    st.Width = st.Width * unit
+                    let line = s.dashes.isEmpty ? path : dashed(path, dashes: s.dashes.map { $0 * unit }, offset: s.dashOffset * unit)
+                    fillPath(line.Stroked(st), rule: .nonZero, paint: s.stroke, opacity: s.opacity * s.strokeOpacity, m: m, box: box, on: canvas, currentColor: currentColor)
+                }
+            }
+            if s.strokeFirst {
+                strokeText()
+                fillText()
+            } else {
+                fillText()
+                strokeText()
+            }
             return
         }
         if paint.kind == 0 && (s.stroke.kind == 0 || solid) { return }

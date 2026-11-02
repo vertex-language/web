@@ -15,6 +15,10 @@ struct TextRun {
     var y: float32
     var spec: font.Spec
     var anchor: string
+    /// <textPath>: the points of the path it runs along, and how far along it
+    /// starts, in user units.
+    var along: [(x: float32, y: float32)] = []
+    var startOffset: float32 = 0
 }
 
 /// The families a font-family names, unquoted.
@@ -65,28 +69,126 @@ func walkText(n: element, ctx: Context, d: Drawing, ids: [string: element]) {
     for r in runs { d.shapes.append(r) }
 }
 
-func collectText(n: element, ctx: Context, runs: inout [Shape], x: inout float32, y: inout float32, ids: [string: element], atStart: bool) {
+func collectText(n: element, ctx: Context, runs: inout [Shape], x: inout float32, y: inout float32, ids: [string: element], atStart: bool,
+                 along: [(x: float32, y: float32)] = [], startOffset: float32 = 0) {
     var first = atStart
     for c in n.Children {
         if c.TagName == "#text" {
             let words = collapsed(c.Text, keepLeading: !first)
             if words.isEmpty { continue }
             first = false
-            let run = TextRun(text: words, x: x, y: y, spec: ctx.spec, anchor: ctx.anchor)
+            var run = TextRun(text: words, x: x, y: y, spec: ctx.spec, anchor: ctx.anchor)
+            run.along = along
+            run.startOffset = startOffset
             runs.append(Shape(ops: [], coords: [], matrix: ctx.matrix, fill: ctx.fill, rule: ctx.rule, opacity: ctx.opacity,
-                              fillInherited: ctx.fillInherited, stroke: noFill, strokeStyle: ctx.strokeStyle, strokeOpacity: 1,
-                              clips: ctx.clips, masks: ctx.masks, clipRule: ctx.clipRule, text: run))
+                              fillInherited: ctx.fillInherited, stroke: ctx.stroke, strokeStyle: ctx.strokeStyle, strokeOpacity: ctx.strokeOpacity,
+                              clips: ctx.clips, masks: ctx.masks, clipRule: ctx.clipRule, dashes: ctx.dashes, dashOffset: ctx.dashOffset, text: run))
             x += font.Load(ctx.spec).Shape(words).Width
+        } else if c.TagName == "textpath" {
+            // The path it names, in its own units, as points.
+            guard let href = c.GetAttribute("href") ?? c.GetAttribute("xlink:href"), let target = referenced(href, ids) else { continue }
+            var ops: [uint8] = []
+            var coords: [float32] = []
+            outline(target, &ops, &coords)
+            let points = flattened(ops, coords)
+            var offset = coordinate(c.GetAttribute("startoffset")) ?? 0
+            if (c.GetAttribute("startoffset") ?? "").hasSuffix("%") { offset *= pathLength(points) }
+            collectText(c, ctx.with(c, ids: ids), &runs, &x, &y, ids, atStart: first, along: points, startOffset: offset)
+            first = false
         } else if c.TagName == "tspan" || c.TagName == "a" {
             if isHidden(c) { continue }
             if let v = lengthAttribute(c.GetAttribute("x")) { x = v }
             if let v = lengthAttribute(c.GetAttribute("y")) { y = v }
             x += lengthAttribute(c.GetAttribute("dx")) ?? 0
             y += lengthAttribute(c.GetAttribute("dy")) ?? 0
-            collectText(c, ctx.with(c, ids: ids), &runs, &x, &y, ids, atStart: first)
+            collectText(c, ctx.with(c, ids: ids), &runs, &x, &y, ids, atStart: first, along: along, startOffset: startOffset)
             first = false
         }
     }
+}
+
+/// A path's commands as points along it.
+func flattened(ops: [uint8], coords: [float32]) -> [(x: float32, y: float32)] {
+    var out: [(x: float32, y: float32)] = []
+    var k = 0
+    for op in ops {
+        switch op {
+        case opMove, opLine:
+            out.append((x: coords[k], y: coords[k + 1]))
+            k += 2
+        case opCubic:
+            guard let p0 = out.last else { break }
+            var i: float32 = 1
+            while i <= 16 {
+                let t = i / 16
+                let u = 1 - t
+                out.append((x: u * u * u * p0.x + 3 * u * u * t * coords[k] + 3 * u * t * t * coords[k + 2] + t * t * t * coords[k + 4],
+                            y: u * u * u * p0.y + 3 * u * u * t * coords[k + 1] + 3 * u * t * t * coords[k + 3] + t * t * t * coords[k + 5]))
+                i += 1
+            }
+            k += 6
+        default:
+            break
+        }
+    }
+    return out
+}
+
+func pathLength(points: [(x: float32, y: float32)]) -> float32 {
+    var total: float32 = 0
+    var i = 1
+    while i < points.count {
+        let dx = points[i].x - points[i - 1].x
+        let dy = points[i].y - points[i - 1].y
+        total += math.Sqrt(dx * dx + dy * dy)
+        i += 1
+    }
+    return total
+}
+
+/// Where a distance along points falls, and which way the path goes there;
+/// nil past its end.
+func pointAlong(points: [(x: float32, y: float32)], at distance: float32) -> (x: float32, y: float32, angle: float32)? {
+    if distance < 0 { return nil }
+    var left = distance
+    var i = 1
+    while i < points.count {
+        let dx = points[i].x - points[i - 1].x
+        let dy = points[i].y - points[i - 1].y
+        let len = math.Sqrt(dx * dx + dy * dy)
+        if left <= len && len > 0 {
+            return (x: points[i - 1].x + dx * left / len, y: points[i - 1].y + dy * left / len, angle: math.Atan2(dy, dx))
+        }
+        left -= len
+        i += 1
+    }
+    return nil
+}
+
+/// A text run's glyphs as an outline in device pixels.
+func textOutline(t: TextRun, m: Matrix) -> draw.Path {
+    let det = m.A * m.D - m.B * m.C
+    let unit = math.Sqrt(det < 0 ? -det : det)
+    let run = font.Load(t.spec).Shape(t.text)
+    let frame = math.Atan2(m.B, m.A)
+    var path = draw.Path()
+    var pen: float32 = 0
+    var i = 0
+    while i < run.Glyphs.count {
+        let adv = run.Advances[i]
+        if t.along.isEmpty {
+            let p = m.Apply(t.x + pen, t.y)
+            font.AppendOutline(&path, face: run.Faces[i], glyph: run.Glyphs[i], x: p.x, baseline: p.y, scale: unit, turn: frame)
+        } else if let at = pointAlong(t.along, at: t.startOffset + t.x + pen + adv / 2) {
+            // Its middle on the path, turned with it.
+            let turn = at.angle + frame
+            let p = m.Apply(at.x, at.y)
+            font.AppendOutline(&path, face: run.Faces[i], glyph: run.Glyphs[i], x: p.x - math.Cos(turn) * adv / 2 * unit, baseline: p.y - math.Sin(turn) * adv / 2 * unit, scale: unit, turn: turn)
+        }
+        pen += adv
+        i += 1
+    }
+    return path
 }
 
 /// Runs of white space made one; a leading one dropped at a line's start.

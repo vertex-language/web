@@ -23,6 +23,51 @@ public struct Hit {
 /// matrix of the plane whose children are being asked.
 var hitContext: (screen: (x: float32, y: float32), matrix: draw.Matrix4)? = nil
 
+/// A box's rectangle on the page as it shows: through the turns of any
+/// vertical text it's in, whose layout it's in unturned.
+public func VisualBounds(box: Box) -> draw.Rect {
+    let p = PagePosition(box)
+    var x0 = p.x
+    var y0 = p.y
+    var x1 = p.x + box.Width
+    var y1 = p.y + box.Height
+    var turned = false
+    var cur = box.Parent
+    while let a = cur {
+        if a.QuarterTurn != 0 {
+            turned = true
+            let at = PagePosition(a)
+            let m = QuarterMatrix(a, x: at.x, y: at.y)
+            let c0 = m.Apply(x0, y0)
+            let c1 = m.Apply(x1, y1)
+            x0 = c0.x < c1.x ? c0.x : c1.x
+            x1 = c0.x < c1.x ? c1.x : c0.x
+            y0 = c0.y < c1.y ? c0.y : c1.y
+            y1 = c0.y < c1.y ? c1.y : c0.y
+        }
+        cur = a.Parent
+    }
+    if !turned { return draw.Rect(p.x, p.y, box.Width, box.Height) }
+    return draw.Rect(x0, y0, x1 - x0, y1 - y0)
+}
+
+/// What transform-box says a box's transforms are about: nil for its border
+/// box, the rectangle within it otherwise.
+public func TransformBoxOf(box: Box) -> draw.Rect? {
+    switch box.Style.TransformBox {
+    case "content-box", "fill-box":
+        return draw.Rect(box.ContentX, box.ContentY, box.InnerWidth, box.InnerHeight)
+    case "view-box":
+        // The viewport's, from the box's corner.
+        let at = PagePosition(box)
+        var top = box
+        while let up = top.Parent { top = up }
+        return draw.Rect(-at.x, -at.y, top.Width, top.Height)
+    default:
+        return nil
+    }
+}
+
 /// How a vertical box's content turns from where layout set it, x and y its
 /// corner, to where it shows: its corner stays at the box's top left.
 public func QuarterMatrix(box: Box, x: float32, y: float32) -> draw.Affine {
@@ -39,7 +84,7 @@ public func ThreeDMatrix(box: Box, x: float32, y: float32) -> draw.Matrix4? {
     let perspective = parent?.Perspective ?? 0
     let needed = s.UsedPreserve3D || (s.HasTransform && (s.Is3D || perspective > 0 || (parent?.UsedPreserve3D ?? false)))
     if !needed { return nil }
-    var m = draw.Matrix4.translate(x, y).Concat(s.Matrix3D(width: box.Width, height: box.Height)).Concat(draw.Matrix4.translate(-x, -y))
+    var m = draw.Matrix4.translate(x, y).Concat(s.Matrix3D(width: box.Width, height: box.Height, box: TransformBoxOf(box))).Concat(draw.Matrix4.translate(-x, -y))
     if perspective > 0, let pb = box.Parent {
         let at = PagePosition(box)
         let pat = PagePosition(pb)
@@ -75,10 +120,11 @@ public func HitTest(box: Box, px: float32, py: float32, originX: float32, origin
         hitContext = saved
         return hit
     }
+    if box.AnchorHidden { return nil }
     if box.Style.HasTransform {
         let x = originX + box.X + box.OffsetX
         let y = originY + box.Y + box.OffsetY
-        let t = draw.Affine.translate(x, y).Concat(box.Style.TransformMatrix(width: box.Width, height: box.Height)).Concat(draw.Affine.translate(-x, -y))
+        let t = draw.Affine.translate(x, y).Concat(box.Style.TransformMatrix(width: box.Width, height: box.Height, box: TransformBoxOf(box))).Concat(draw.Affine.translate(-x, -y))
         guard let inv = t.Inverted() else { return nil }
         let p = inv.Apply(px, py)
         return hitTestBox(box, p.x, p.y, originX: originX, originY: originY)

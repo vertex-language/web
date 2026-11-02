@@ -74,6 +74,12 @@ extension Layout {
     /// and line-clamp ask: balanced lines, a last line not left with one
     /// word, or only so many lines with an ellipsis.
     func layoutInline(box: Box, contentWidth: float32, flow: Flow) -> float32 {
+        // Floats placed by a try are taken back for the next.
+        let placedBefore = flow.floats.floats.count
+        func untried() {
+            let extra = flow.floats.floats.count - placedBefore
+            if extra > 0 { flow.floats.floats.removeLast(extra) }
+        }
         var height = layoutInlineOnce(box, contentWidth: contentWidth, flow: flow)
         let wrap = box.Style.TextWrapStyle
         let n = box.Lines.count
@@ -86,6 +92,7 @@ extension Layout {
                 var k = 0
                 while k < 12 {
                     let mid = (lo + hi) / 2
+                    untried()
                     _ = layoutInlineOnce(box, contentWidth: mid, flow: flow)
                     if box.Lines.count > n { lo = mid } else { hi = mid }
                     k += 1
@@ -96,11 +103,13 @@ extension Layout {
                 var k: float32 = 1
                 while k <= 4 {
                     let w = contentWidth * (1 - 0.05 * k)
+                    untried()
                     _ = layoutInlineOnce(box, contentWidth: w, flow: flow)
                     if box.Lines.count == n && !lonelyLastLine(box) { narrowest = w; break }
                     k += 1
                 }
             }
+            untried()
             height = layoutInlineOnce(box, contentWidth: narrowest, flow: flow)
             if narrowest < contentWidth { shiftForAlignment(box, contentWidth - narrowest) }
         }
@@ -114,13 +123,12 @@ extension Layout {
         return height
     }
 
-    /// Whether the lines can be laid out again: no floats near, and no
-    /// out-of-flow boxes among the content, which a layout places.
+    /// Whether the lines can be laid out again: no absolutely positioned
+    /// boxes among the content, which a layout attaches once each.
     func canReflow(box: Box, flow: Flow) -> bool {
-        if !flow.floats.floats.isEmpty { return false }
         func clean(b: Box) -> bool {
-            for c in b.Children {
-                if c.Style.IsOutOfFlow { return false }
+            for c in b.Children where c.Kind != .text {
+                if c.Style.Position == .absolute || c.Style.Position == .fixed { return false }
                 if c.Kind == .inline && !clean(c) { return false }
             }
             return true
@@ -380,6 +388,14 @@ extension Layout {
                             continue
                         }
                     }
+                }
+                // hanging-punctuation: allow-end and force-end let a stop at a
+                // line's end stand out past it, rather than move down.
+                let hangingWords = box.Style.HangingPunctuation
+                if lineHasContent && (hangingWords.contains("allow-end") || hangingWords.contains("force-end")) && isStop(item.text) {
+                    lineItems.append(item)
+                    lineHasContent = true
+                    continue
                 }
                 if lineHasContent && item.breakable && canBreak && lineWidth + item.width > available() + 0.01 {
                     // Break before the item, at the last space. The
@@ -1433,6 +1449,14 @@ func inFirstLineFont(item: Item, block: Box, style: cascade.ComputedStyle) -> It
         out.width = style.Face.SpaceWidth + style.WordSpacing + style.LetterSpacing
     }
     return out
+}
+
+/// A full stop or comma, for hanging-punctuation's allow-end and force-end.
+func isStop(text: string) -> bool {
+    switch text {
+    case ",", ".", "\u{060C}", "\u{06D4}", "\u{3001}", "\u{3002}", "\u{FF0C}", "\u{FF0E}", "\u{FE50}", "\u{FE51}", "\u{FE52}", "\u{FF61}", "\u{FF64}": return true
+    default: return false
+    }
 }
 
 /// Opening marks hanging-punctuation: first hangs.

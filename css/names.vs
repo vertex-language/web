@@ -19,14 +19,14 @@ let shorthandNames: [string] = [
     "inset-block-start", "inset-block-end", "inline-size", "block-size", "min-inline-size", "max-inline-size",
     "min-block-size", "max-block-size", "border-inline", "border-block", "border-inline-start", "border-inline-end",
     "border-block-start", "border-block-end", "border-inline-end-width", "border-block-start-width",
-    "font-variant", "text-emphasis", "-webkit-text-emphasis", "text-box", "border-block-end-width", "grid-template", "grid", "place-self", "place-content", "text-wrap", "overscroll-behavior", "contain-intrinsic-size", "scroll-padding", "scroll-margin", "scroll-padding-block", "scroll-padding-inline", "scroll-margin-block", "scroll-margin-inline", "transition", "-webkit-transition", "animation", "-webkit-animation", "container", "mask", "-webkit-mask", "border-image", "-webkit-border-image", "columns", "column-rule"
+    "-webkit-text-stroke", "font-variant", "text-emphasis", "-webkit-text-emphasis", "text-box", "border-block-end-width", "grid-template", "grid", "place-self", "place-content", "text-wrap", "overscroll-behavior", "contain-intrinsic-size", "scroll-padding", "scroll-margin", "scroll-padding-block", "scroll-padding-inline", "scroll-margin-block", "scroll-margin-inline", "transition", "-webkit-transition", "animation", "-webkit-animation", "container", "mask", "-webkit-mask", "border-image", "-webkit-border-image", "columns", "column-rule"
 ]
 
 /// Properties the engine knows and parses past, but does not apply yet:
 /// a page that uses them renders without them. The same names as the
 /// case in Longhands that sets nothing.
 let unappliedNames: [string] = [
-    "transform-box", "paint-order",
+    
     "src",
     "unicode-range",
     "-webkit-font-smoothing", "-moz-osx-font-smoothing",

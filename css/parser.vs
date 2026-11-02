@@ -10,6 +10,9 @@ public class Parser {
     var nested: [Rule] = []
     /// The next rule's or at-rule's source position.
     var position = 0
+    /// Whether a block of declarations also takes at-rules, and those it found.
+    var collectsAtRules = false
+    var nestedAtRules: [AtRule] = []
 
     public init(scanner: Scanner) {
         self.scanner = scanner
@@ -76,10 +79,18 @@ public class Parser {
         }
         advance() // skip '{'
         let lowerName = toLower(name)
-        if lowerName == "font-face" || lowerName == "page" || lowerName == "counter-style" || lowerName == "function" || lowerName == "position-try" || lowerName == "view-transition" || lowerName == "stylistic" || lowerName == "styleset" || lowerName == "character-variant" || lowerName == "swash" || lowerName == "ornaments" || lowerName == "annotation" || lowerName == "font-feature-values" || lowerName == "property" || lowerName == "position-try" {
-            // A block of declarations, not of rules.
+        if lowerName == "font-face" || lowerName == "page" || lowerName == "counter-style" || lowerName == "function" || lowerName.hasPrefix("top-") || lowerName.hasPrefix("bottom-") || lowerName.hasPrefix("left-") || lowerName.hasPrefix("right-") || lowerName == "position-try" || lowerName == "view-transition" || lowerName == "stylistic" || lowerName == "styleset" || lowerName == "character-variant" || lowerName == "swash" || lowerName == "ornaments" || lowerName == "annotation" || lowerName == "font-feature-values" || lowerName == "property" || lowerName == "position-try" {
+            // A block of declarations, not of rules; @page's and
+            // @font-feature-values' hold at-rules of their own among them.
+            let saved = nestedAtRules
+            let savedFlag = collectsAtRules
+            nestedAtRules = []
+            collectsAtRules = lowerName == "page" || lowerName == "font-feature-values"
             let decls = parseDeclarationBlock()
-            return AtRule(name: name, params: params, rules: [], declarations: decls)
+            let nested = nestedAtRules
+            nestedAtRules = saved
+            collectsAtRules = savedFlag
+            return AtRule(name: name, params: params, rules: [], declarations: decls, atRules: nested)
         }
         var innerRules: [Rule] = []
         var innerAtRules: [AtRule] = []
@@ -171,6 +182,10 @@ public class Parser {
         var decls: [Declaration] = []
 
         while current.Kind != TokenKind.closeBrace && current.Kind != TokenKind.eof {
+            if collectsAtRules && current.Kind == TokenKind.atKeyword {
+                if let at = parseAtRule() { nestedAtRules.append(at) }
+                continue
+            }
             if !parents.isEmpty && startsNestedRule(current) {
                 // `&:hover {`, `.x {`, `> a {`, `:focus {`: a nested rule.
                 if current.Kind == TokenKind.atKeyword {

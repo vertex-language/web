@@ -1,7 +1,9 @@
 package web
 
 import (
+    "compress/flate"
     "image/draw"
+    "text/font"
     "web/cascade"
     "web/layout"
 )
@@ -79,6 +81,7 @@ extension Page {
             size = draw.Size(contentW, bottom - top)
             needsRepaint = true
             Draw(into: &pixels, width: w, height: h, scale: scale, at: draw.Point(paper.Left, paper.Top))
+            drawMarginBoxes(&pixels, width: w, height: h, scale: scale, paper: paper, page: i + 1, pages: cuts.count - 1)
             sheets.append(draw.Image(width: w, height: h, pixels: pixels))
             i += 1
         }
@@ -94,6 +97,28 @@ extension Page {
         return sheets
     }
 
+    /// @page's margin boxes on a sheet: their text at the sheet's corners and
+    /// edges, counter(page) and counter(pages) filled in.
+    func drawMarginBoxes(pixels: inout [uint8], width: int32, height: int32, scale: float32, paper: PrintPaper, page: int, pages: int) {
+        guard let rule = cascade.PageRule, !rule.MarginBoxes.isEmpty else { return }
+        let face = font.Load(font.Spec(families: ["system-ui"], size: 10))
+        draw.WithCanvas(&pixels, width: width, height: height) { canvas in
+            for (slot, words) in rule.MarginBoxes {
+                var text = ""
+                for w in words {
+                    if w == "\u{1}page" { text += "\(page)" } else if w == "\u{1}pages" { text += "\(pages)" } else { text += w }
+                }
+                let run = face.Shape(text)
+                let top = slot.hasPrefix("top")
+                let y = top ? paper.Top / 2 : paper.Height - paper.Bottom / 2
+                var x = paper.Width / 2 - run.Width / 2
+                if slot.hasSuffix("left") { x = paper.Left }
+                if slot.hasSuffix("right") { x = paper.Width - paper.Right - run.Width }
+                font.DrawRun(canvas, run, x: x * scale, baseline: (y + face.Ascent / 2) * scale, scale: scale, color: draw.Color(60, 60, 60))
+            }
+        }
+    }
+
     /// The page as a PDF, each sheet a picture on a page of its paper's size.
     public func PrintPDF(paper: PrintPaper = PrintPaper(), scale: float32 = 2) -> [uint8] {
         let sheets = Print(paper: paper, scale: scale)
@@ -106,7 +131,12 @@ extension Page {
         let s = box.Style
         if s.BreakInsideAvoid && box.Parent != nil { out.never.append((top, top + box.Height)) }
         if box.Kind == .replaced || box.Kind == .lineBreak { return }
-        for l in box.Lines { out.may.append(top + l.Y) }
+        // Lines keep orphans at a sheet's foot and widows at its head.
+        var at = 0
+        for l in box.Lines {
+            if at >= Int(s.Orphans) && box.Lines.count - at >= Int(s.Widows) || at == 0 { out.may.append(top + l.Y) }
+            at += 1
+        }
         for c in box.Children where c.Kind != .text {
             let at = layout.PagePosition(c)
             let cTop = at.y + scroll.Y
@@ -156,7 +186,21 @@ func forcesPageBreak(word: string) -> bool {
     return word == "page" || word == "always" || word == "left" || word == "right" || word == "recto" || word == "verso"
 }
 
-/// A PDF of pictures, a page each: uncompressed, and enough for any reader.
+/// Bytes as zlib wraps them: what PDF's FlateDecode reads.
+func zlibOf(data: [uint8]) -> [uint8] {
+    var a: uint32 = 1
+    var b: uint32 = 0
+    for v in data {
+        a = (a + uint32(v)) % 65521
+        b = (b + a) % 65521
+    }
+    var out: [uint8] = [0x78, 0x9C]
+    out += flate.Compress(data)
+    out += [uint8(b >> 8), uint8(b & 255), uint8(a >> 8), uint8(a & 255)]
+    return out
+}
+
+/// A PDF of pictures, a page each, enough for any reader.
 func pdfOf(sheets: [draw.Image], widthPoints: float32, heightPoints: float32) -> [uint8] {
     var out: [uint8] = []
     var offsets: [int] = []
@@ -195,8 +239,9 @@ func pdfOf(sheets: [draw.Image], widthPoints: float32, heightPoints: float32) ->
             o += 3
             i += 4
         }
-        add("\(page + 2) 0 obj\n<< /Type /XObject /Subtype /Image /Width \(img.Width) /Height \(img.Height) /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length \(rgb.count) >>\nstream\n")
-        out += rgb
+        let packed = zlibOf(rgb)
+        add("\(page + 2) 0 obj\n<< /Type /XObject /Subtype /Image /Width \(img.Width) /Height \(img.Height) /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length \(packed.count) >>\nstream\n")
+        out += packed
         add("\nendstream\nendobj\n")
         k += 1
     }

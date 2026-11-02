@@ -139,6 +139,49 @@ func main() -> int32 {
     p = render("<svg viewBox='0 0 20 20'><filter id=bl><feGaussianBlur stdDeviation=2 /></filter><rect x=5 y=5 width=10 height=10 fill='#000' filter='url(#bl)'/></svg>")
     check(at(p, 3, 10).a > 0 && at(p, 10, 10).a > 200, "feGaussianBlur (\(at(p, 3, 10)))")
     print("Text")
+    p = render("<svg viewBox='0 0 40 40'><text x=2 y=30 font-size=30 fill=none stroke='#f00' stroke-width=2>H</text></svg>", size: 40)
+    var strokeLit = 0
+    var sy: int32 = 0
+    while sy < 40 {
+        var sx: int32 = 0
+        while sx < 40 {
+            if at(p, sx, sy, size: 40).r > 100 { strokeLit += 1 }
+            sx += 1
+        }
+        sy += 1
+    }
+    check(strokeLit > 30, "<text> takes a stroke along its outline (\(strokeLit) pixels)")
+    p = render("<svg viewBox='0 0 40 40'><defs><linearGradient id=gt><stop offset=0 stop-color='#f00'/><stop offset=1 stop-color='#00f'/></linearGradient></defs><text x=0 y=32 font-size=40 fill='url(#gt)'>HH</text></svg>", size: 40)
+    var reds = 0
+    var blues = 0
+    sy = 0
+    while sy < 40 {
+        var sx: int32 = 0
+        while sx < 40 {
+            let c = at(p, sx, sy, size: 40)
+            if c.r > 180 && c.b < 110 { reds += 1 }
+            if c.b > 120 && c.r < 140 && c.a > 200 { blues += 1 }
+            sx += 1
+        }
+        sy += 1
+    }
+    check(reds > 5 && blues > 5, "<text> with a gradient runs across it (\(reds) \(blues))")
+    p = render("<svg viewBox='0 0 100 100'><path id=arc d='M10 90 L90 10' fill=none /><text font-size=20 fill='#00f'><textPath href='#arc'>IIII</textPath></text></svg>", size: 100)
+    var nearPath = 0
+    var far = 0
+    sy = 0
+    while sy < 100 {
+        var sx: int32 = 0
+        while sx < 100 {
+            if at(p, sx, sy, size: 100).a > 100 {
+                if sx + sy > 70 && sx + sy < 130 && sx < 90 { nearPath += 1 }
+                if sx + sy < 50 || sx + sy > 150 { far += 1 }
+            }
+            sx += 1
+        }
+        sy += 1
+    }
+    check(nearPath > 10 && far == 0, "<textPath> sets its glyphs along the path (\(nearPath) near, \(far) far)")
     p = render("<svg viewBox='0 0 40 40' ><text x=2 y=30 font-size=30 fill='#f00'>HH</text></svg>", size: 40)
     var lit = 0
     var y: int32 = 0

@@ -366,9 +366,15 @@ public final class BoxTreeBuilder {
                 // that says so hands it to what's in it.
                 let starts = style.IsVertical && (!parentStyle.IsVertical || node.TagName == "html")
                 if style.IsVertical && !starts { style.SwapAxesForVertical() }
+                // Horizontal again inside vertical: it turns back.
+                let turnsBack = !style.IsVertical && parentStyle.IsVertical && node.TagName != "html"
+                if turnsBack { style.SwapAxesForVertical() }
                 if let box = makeBox(child, style: style, parentStyle: parentStyle, listIndex: &listIndex) {
                     resolveURLEffects(box, style, in: child)
-                    if starts { turnVertical(box) } else if box.Kind == .replaced && style.AxesSwapped {
+                    if turnsBack {
+                        turnVertical(box)
+                        box.VerticalContent?.QuarterTurn = -1
+                    } else if starts { turnVertical(box) } else if box.Kind == .replaced && style.AxesSwapped {
                         let w = box.IntrinsicWidth
                         box.IntrinsicWidth = box.IntrinsicHeight
                         box.IntrinsicHeight = w
@@ -444,6 +450,14 @@ public final class BoxTreeBuilder {
                 // the padding around it, as a browser's input does.
                 box.IntrinsicWidth = 150
                 box.IntrinsicHeight = style.Face.LineHeight
+                // field-sizing: content: as wide as what it holds, whatever
+                // the user agent's sheet says.
+                if style.FieldSizing == "content" {
+                    var shown = box.Text
+                    if shown.isEmpty { shown = node.GetAttribute("placeholder") ?? "" }
+                    box.IntrinsicWidth = style.Face.Measure(shown) + 4
+                    if style.Width == .px(150) { style.Width = .auto }
+                }
             }
         case "textarea":
             box = Box(kind: .replaced, style: style, node: node)
@@ -461,6 +475,8 @@ public final class BoxTreeBuilder {
                 for l in lines { widest = widest > style.Face.Measure(string(l)) ? widest : style.Face.Measure(string(l)) }
                 box.IntrinsicWidth = widest + 4
                 box.IntrinsicHeight = style.LineHeightPx * float32(lines.count > 0 ? lines.count : 1)
+                if style.Width == .px(200) { style.Width = .auto }
+                if style.Height == .px(60) { style.Height = .auto }
             }
         case "select" where style.Appearance != "base-select" && isListBox(node):
             // A list of its rows, each its own line.
@@ -949,4 +965,21 @@ public func ListBoxRows(node: html.Node) -> int {
 
 public func ListBoxRowHeight(style: cascade.ComputedStyle) -> float32 {
     return style.Face.LineHeight + 2
+}
+
+/// A list box's rows, in order: each option, and each group's label.
+public func ListBoxItems(select: html.Node) -> [html.Node] {
+    var out: [html.Node] = []
+    func walk(n: html.Node) {
+        for c in n.Children where c.Kind == html.NodeKind.element {
+            if c.TagName == "option" {
+                out.append(c)
+            } else if c.TagName == "optgroup" {
+                out.append(c)
+                walk(c)
+            }
+        }
+    }
+    walk(select)
+    return out
 }

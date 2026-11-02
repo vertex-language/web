@@ -224,11 +224,17 @@ extension Page {
         if select.HasAttribute("disabled") { return }
         Focus(select)
         guard let b = builder.byNode[select.Id], let doc = Document else { return }
+        let rows = layout.ListBoxItems(select)
         let options = dom.Descendants(select, tag: "option")
         let at = layout.PagePosition(b)
         let y = p.Y + scroll.Y - at.y - b.ContentY
-        let i = (listTop[select.Id] ?? 0) + int(y / layout.ListBoxRowHeight(b.Style))
-        if i < 0 || i >= options.count || options[i].HasAttribute("disabled") { return }
+        let row = (listTop[select.Id] ?? 0) + int(y / layout.ListBoxRowHeight(b.Style))
+        if row < 0 || row >= rows.count || rows[row].TagName != "option" || rows[row].HasAttribute("disabled") { return }
+        if rows[row].Parent?.TagName == "optgroup" && rows[row].Parent!.HasAttribute("disabled") { return }
+        // Which option that row is: labels don't count among them.
+        var i = 0
+        while i < options.count && options[i].Id != rows[row].Id { i += 1 }
+        if i >= options.count { return }
         let many = select.HasAttribute("multiple")
         if many && modifiers.Shift, let from = listAnchor[select.Id] {
             var k = 0
@@ -251,7 +257,7 @@ extension Page {
     }
 
     func scrollListBox(select: html.Node, by rows: int) {
-        let total = dom.Descendants(select, tag: "option").count
+        let total = layout.ListBoxItems(select).count
         let most = total - layout.ListBoxRows(select)
         var top = (listTop[select.Id] ?? 0) + rows
         if top > most { top = most }
