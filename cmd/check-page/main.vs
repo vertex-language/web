@@ -1605,6 +1605,8 @@ func testCompositing() {
     #t { display: table }
     #cs { width: 100px; height: 100px; background: rgb(255,0,0); border-radius: 50px; corner-shape: bevel }
     #sq { width: 100px; height: 100px; background: rgb(255,0,0); border-radius: 50px; corner-shape: squircle }
+    #sqi { width: 100px; height: 100px; background: linear-gradient(rgb(0,0,255), rgb(0,0,255)); border-radius: 50px; corner-shape: squircle }
+    #bev { width: 100px; height: 100px; border: 10px solid; border-color: rgb(255,0,0) rgb(0,255,0) rgb(0,0,255) rgb(255,128,0); border-radius: 30px; corner-shape: bevel }
     #mk { width: 100px; height: 40px; padding: 10px; box-sizing: border-box; background: rgb(0,0,255); mask-image: linear-gradient(black, black); mask-clip: content-box }
     #over { position: relative; height: 10px } #cover { margin-top: -10px; height: 10px }
     #grow { interpolate-size: allow-keywords; transition: height 1s linear; overflow: hidden; height: 0 } #grow.open { height: auto } #grow div { height: 40px }
@@ -1614,7 +1616,7 @@ func testCompositing() {
     <div id=g><div id=sub><div id=s1></div><div id=s2></div><div id=s3></div></div></div>
     <div id=m><div id=m1 style="height: 30px"></div><div id=m2 style="height: 10px"></div><div id=m3 style="height: 10px"></div></div>
     <div id=t>loose text</div>
-    <div id=cs></div><div id=sq></div><div id=mk></div>
+    <div id=cs></div><div id=sq></div><div id=sqi></div><div id=bev></div><div id=mk></div>
     <div id=over></div><div id=cover></div>
     <div id=grow><div></div></div>
     <div id=cgrow><div></div></div>
@@ -1643,6 +1645,13 @@ func testCompositing() {
     // A round corner would leave (10, 10) outside; a squircle covers (14, 14)
     // where a circle doesn't.
     check(loc(sqAt.X + 14, sqAt.Y + 14) == draw.Color(255, 0, 0), "corner-shape: squircle bulges past round (got \(loc(sqAt.X + 14, sqAt.Y + 14)))")
+    let sqiAt = lob("sqi")
+    check(loc(sqiAt.X + 50, sqiAt.Y + 50) == draw.Color(0, 0, 255) && loc(sqiAt.X + 3, sqiAt.Y + 3) == draw.Color.white,
+          "corner-shape with a background image keeps it to the shape (got \(loc(sqiAt.X + 3, sqiAt.Y + 3)))")
+    let bevAt = lob("bev")
+    check(loc(bevAt.X + 60, bevAt.Y + 4) == draw.Color(255, 0, 0) && loc(bevAt.X + 115, bevAt.Y + 60) == draw.Color(0, 255, 0)
+          && loc(bevAt.X + 60, bevAt.Y + 115) == draw.Color(0, 0, 255) && loc(bevAt.X + 4, bevAt.Y + 60) == draw.Color(255, 128, 0),
+          "corner-shape's border takes each side's color (got \(loc(bevAt.X + 4, bevAt.Y + 60)) \(loc(bevAt.X + 115, bevAt.Y + 60)))")
     let mkAt = lob("mk")
     check(loc(mkAt.X + 50, mkAt.Y + 20) == draw.Color(0, 0, 255) && loc(mkAt.X + 5, mkAt.Y + 20) == draw.Color.white, "mask-clip: content-box cuts the padding (got \(loc(mkAt.X + 5, mkAt.Y + 20)))")
     let overAt = lob("over")
@@ -2369,6 +2378,8 @@ func testCompositing() {
     <div id=fn></div><div id=cond></div><div id=mq></div>
     <div id=clip><div></div></div>
     <p id=plainline style="margin: 0">x</p><p id=trim style="margin: 0">x</p>
+    <div id=trimouter style="text-box: trim-both text"><p style="margin: 0">x</p><div><p style="margin: 0">y</p></div></div>
+    <p id=trimcap style="margin: 0; text-box: trim-start cap">X</p><p id=trimex style="margin: 0; text-box: trim-start ex">x</p>
     <textarea id=field>one
     two lines long enough</textarea>
     <ol style="list-style-type: thumbs"><li id=one>x</li><li id=two>y</li><li id=three>z</li></ol>
@@ -2379,6 +2390,12 @@ func testCompositing() {
     check(smBox("cond").Width == 22, "if(style()) takes the first branch that holds (got \(smBox("cond").Width))")
     check(smBox("mq").Width == 33, "if(media()) and else (got \(smBox("mq").Width))")
     check(smBox("plainline").Height == 20 && smBox("trim").Height < 20, "text-box-trim cuts the half-leading (got \(smBox("plainline").Height) \(smBox("trim").Height))")
+    let cut = smBox("plainline").Height - smBox("trim").Height
+    check(smBox("trimouter").Height == 40 - cut, "text-box-trim on a block reaches its first and last children's lines, nested too (got \(smBox("trimouter").Height), cut \(cut))")
+    let capFace = smBox("trimcap").Style.Face
+    let capTop = smBox("trimcap").Lines[0].Y + (20 - capFace.Ascent - capFace.Descent) / 2 + capFace.Ascent - capFace.CapHeight
+    check(smBox("trimcap").Height < smBox("trim").Height + cut / 2 && smBox("trimex").Height < smBox("trimcap").Height && capFace.CapHeight > 0,
+          "text-box-edge: cap trims to the font's cap height, above ex (got \(smBox("trimcap").Height) \(smBox("trimex").Height) \(capTop))")
     check(smBox("field").Width > 60 && smBox("field").Height >= 30 && smBox("field").Height < 60, "field-sizing: content fits what it holds (got \(smBox("field").Width) \(smBox("field").Height))")
     check(smBox("one").Marker == "A) " && smBox("two").Marker == "B) " && smBox("three").Marker == "A) ", "@counter-style markers (got \(smBox("one").Marker) \(smBox("two").Marker) \(smBox("three").Marker))")
     var smp = [uint8](repeating: 0, count: 300 * 300 * 4)

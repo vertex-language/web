@@ -90,6 +90,14 @@ func windingAt(points: [draw.Point], starts: [int], px: float32, py: float32, ev
 /// page, or nil for none. Percentages are of the reference box (the
 /// border box unless the clip-path names another), a circle's of its
 /// diagonal over root two.
+/// A polygon on the page, as clip-path's polygon() makes one: for paint to
+/// cut a layer to an outline of its own.
+public func PolygonRegion(points: [draw.Point]) -> ClipRegion {
+    var r = ClipRegion("polygon")
+    r.Points = points
+    return r
+}
+
 public func ClipRegionOf(box: Box, x: float32, y: float32, shape: cascade.ClipPath? = nil) -> ClipRegion? {
     guard let cp = shape ?? box.Style.ClipPath else { return nil }
     // The reference box, and its corners.

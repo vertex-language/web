@@ -17,7 +17,8 @@ extension Layout {
     /// next free cell row by row, then sized to their cells. Answers the
     /// content height.
     /// Masonry: the column tracks as a grid sizes them; each item in turn in
-    /// the shortest, straight under what's there.
+    /// the shortest, straight under what's there. One that spans tracks goes
+    /// where the tallest of them is shortest, or at the line it names.
     func layoutMasonry(box: Box, contentWidth: float32, flow: Flow) -> float32 {
         let s = box.Style
         let gap = s.ColumnGap.Or(0, base: contentWidth)
@@ -70,17 +71,50 @@ extension Layout {
                 continue
             }
             resolveEdges(child, cbWidth: contentWidth)
-            var at = 0
-            var i = 1
-            while i < heights.count {
-                if heights[i] < heights[at] - 0.01 { at = i }
-                i += 1
+            let count = heights.count
+            let place = child.Style.GridColumn
+            var start = place.Start > 0 ? int(place.Start) - 1 : -1
+            var span = int(place.Span > 0 ? place.Span : 1)
+            if place.Start > 0 && place.End != 0 {
+                let end = place.End > 0 ? int(place.End) - 1 : count + 1 + int(place.End)
+                if end > start { span = end - start }
             }
-            let cell = sizes[at]
+            if span > count { span = count }
+            if start + span > count { start = count - span }
+            // How tall the run of tracks from c is: its tallest.
+            func top(c: int) -> float32 {
+                var most: float32 = 0
+                var k = c
+                while k < c + span {
+                    if heights[k] > most { most = heights[k] }
+                    k += 1
+                }
+                return most
+            }
+            var at = start
+            if at < 0 {
+                at = 0
+                var c = 1
+                while c + span <= count {
+                    if top(c) < top(at) - 0.01 { at = c }
+                    c += 1
+                }
+            }
+            let y = top(at)
+            var cell = sizes[at]
+            var k = at + 1
+            while k < at + span {
+                cell += gap + sizes[k]
+                k += 1
+            }
             layoutFixed(child, width: cell - child.Margin.Horizontal, height: nil, cb: ContainingBlock(width: cell, height: nil), flow: flow.root(child))
             child.X = xs[at] + child.Margin.Left
-            child.Y = box.ContentY + heights[at] + child.Margin.Top
-            heights[at] += child.OuterHeight + rowGap
+            child.Y = box.ContentY + y + child.Margin.Top
+            k = at
+            while k < at + span {
+                heights[k] = y + child.OuterHeight + rowGap
+                k += 1
+            }
         }
         var most: float32 = 0
         for h in heights where h - rowGap > most { most = h - rowGap }

@@ -1113,13 +1113,23 @@ final class DisplayListBuilder {
         var radii = s.Radii(width: box.Width, height: box.Height)
         if !radii.IsZero { radii = radii.Fitted(box.Width, box.Height) }
         // corner-shape: the box drawn as the outline its corners make.
-        if !s.CornerShapes.isEmpty && !radii.IsZero && s.BackgroundImage == nil {
+        if !s.CornerShapes.isEmpty && !radii.IsZero && !imageOnly {
             let outer = cornerOutline(rect, radii, s.CornerShapes)
             if s.BackgroundColor.A > 0 {
                 var fill = PaintItem(.path)
                 fill.Outline = pathOf(outer)
                 fill.Color = color(s.BackgroundColor)
                 items.append(fill)
+            }
+            // The image, in a layer cut to the outline.
+            if s.BackgroundImage != nil {
+                var layer = PaintItem(.layer)
+                layer.Rect = rect
+                layer.MaskRect = rect
+                layer.Shape = layout.PolygonRegion(outer)
+                items.append(layer)
+                paintBackgroundAndBorder(box, x: x, y: y, imageOnly: true)
+                items.append(PaintItem(.unlayer))
             }
             let b = box.Border
             if b.Top > 0 || b.Right > 0 || b.Bottom > 0 || b.Left > 0 {
@@ -1132,10 +1142,43 @@ final class DisplayListBuilder {
                     i -= 1
                 }
                 ring.Close()
-                var edge = PaintItem(.path)
-                edge.Outline = ring
-                edge.Color = color(borderSideColor(s, 0))
-                items.append(edge)
+                var sides: [draw.Color] = []
+                var side = 0
+                while side < 4 {
+                    sides.append(color(borderSideColor(s, side)))
+                    side += 1
+                }
+                if sides[1] == sides[0] && sides[2] == sides[0] && sides[3] == sides[0] {
+                    var edge = PaintItem(.path)
+                    edge.Outline = ring
+                    edge.Color = sides[0]
+                    items.append(edge)
+                } else {
+                    // A color a side: the ring in each side's wedge, from its
+                    // corners to the middle.
+                    let mid = draw.Point(x + box.Width / 2, y + box.Height / 2)
+                    let tl = draw.Point(x, y)
+                    let tr = draw.Point(x + box.Width, y)
+                    let br = draw.Point(x + box.Width, y + box.Height)
+                    let bl = draw.Point(x, y + box.Height)
+                    let wedges = [[tl, tr, mid], [tr, br, mid], [br, bl, mid], [bl, tl, mid]]
+                    var i = 0
+                    while i < 4 {
+                        if sides[i].A > 0 {
+                            var layer = PaintItem(.layer)
+                            layer.Rect = rect
+                            layer.MaskRect = rect
+                            layer.Shape = layout.PolygonRegion(wedges[i])
+                            items.append(layer)
+                            var edge = PaintItem(.path)
+                            edge.Outline = ring
+                            edge.Color = sides[i]
+                            items.append(edge)
+                            items.append(PaintItem(.unlayer))
+                        }
+                        i += 1
+                    }
+                }
             }
             return
         }

@@ -132,6 +132,10 @@ func testStyles() {
     check(noStyleBorder?.BorderTopWidth == 0, "a border with no style has no width")
     let inheritColor = styleOf("<div style='color: red'><p style='border-color: currentcolor; color: inherit'>x</p></div>", "p")
     check(inheritColor?.Color == draw.Color(255, 0, 0) && inheritColor?.BorderTopColor == nil, "inherit and currentcolor")
+    let fnColors = styleOf("<div style='border-color: rgb(255,0,0) rgb(0 255 0) hsl(240 100% 50%) #ff8000'>x</div>", "div")
+    check(fnColors?.BorderTopColor == draw.Color(255, 0, 0) && fnColors?.BorderRightColor == draw.Color(0, 255, 0)
+          && fnColors?.BorderBottomColor == draw.Color(0, 0, 255) && fnColors?.BorderLeftColor == draw.Color(255, 128, 0),
+          "border-color with rgb() and hsl() for its sides (got \(fnColors?.BorderTopColor) \(fnColors?.BorderLeftColor))")
     let percentFont = styleOf("<div style='font-size: 10px'><p style='font-size: 150%'>x</p></div>", "p")
     check(percentFont?.FontSize == 15, "percentage font-size is of the parent")
     let bg = styleOf("<div style='background: url(x.png) #123456 no-repeat'>x</div>", "div")

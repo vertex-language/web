@@ -180,6 +180,9 @@ public final class Box {
     /// shows in, relative to its border box's corner, where its
     /// background and border are drawn. Empty where it is whole.
     public var ColumnFragments: [draw.Rect] = []
+    /// text-box-trim from a block above whose first or last formatted line
+    /// is in this box, and that block's text-box-edge.
+    public var TrimFromAbove: (start: bool, end: bool, edge: string) = (start: false, end: false, edge: "")
 
     /// Whether the box draws something of its own: a border, padding,
     /// a background or a shadow.

@@ -464,21 +464,23 @@ extension Layout {
     /// edges text-box-edge names. Answers how much height went.
     func trimTextBox(box: Box) -> float32 {
         let s = box.Style
-        if s.TextBoxTrim == "none" || box.Lines.isEmpty { return 0 }
+        let trim = trimOf(box)
+        if !trim.start && !trim.end || box.Lines.isEmpty { return 0 }
         let face = s.Face
         let half = (s.LineHeightPx - (face.Ascent + face.Descent)) / 2
-        let edges = s.TextBoxEdge.split(separator: " ").map { string($0) }
+        let edges = trim.edge.split(separator: " ").map { string($0) }
         let over = edges.first ?? "text"
         let under = edges.count > 1 ? edges[1] : (over == "cap" || over == "ex" ? "alphabetic" : over)
         var top: float32 = 0
         var bottom: float32 = 0
-        if s.TextBoxTrim != "trim-end" {
+        if trim.start {
             top = half
-            // The font says its x height; caps are near enough 1.4 of it.
-            if over == "cap" { top += face.Ascent - face.XHeight * 1.4 }
+            // The font's cap height, or near enough 1.4 of its x height
+            // where it doesn't say.
+            if over == "cap" { top += face.Ascent - (face.CapHeight > 0 ? face.CapHeight : face.XHeight * 1.4) }
             if over == "ex" { top += face.Ascent - face.XHeight }
         }
-        if s.TextBoxTrim != "trim-start" {
+        if trim.end {
             bottom = half
             if under == "alphabetic" { bottom += face.Descent }
         }

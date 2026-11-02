@@ -668,6 +668,16 @@ func testColumns() {
     check(cs.rect("mc")!.Width == cs.rect("mx")!.Width + 20, "calc-size() on max-content (got \(cs.rect("mc")!.Width) and \(cs.rect("mx")!.Width))")
     check(cs.rect("tall")!.Height == 65, "calc-size() on an auto height (got \(cs.rect("tall")!.Height))")
 
+    guard let ms = layoutOf("""
+    <body style='margin:0'><div style='display:masonry;grid-template-columns:50px 50px 50px;width:150px;column-gap:0;row-gap:0'>
+    <div style='height:30px'></div><div style='height:10px'></div><div style='height:20px'></div>
+    <div id=d style='height:10px;grid-column:span 2'></div><div id=e style='height:5px;grid-column:1'></div><div id=f style='height:5px;grid-column:2 / -1'></div>
+    </div></body>
+    """) else { check(false, "layout"); return }
+    check(ms.rect("d")! == draw.Rect(50, 20, 100, 10), "a masonry item spanning two tracks goes where the taller of them is shortest (got \(ms.rect("d")!))")
+    check(ms.rect("e")! == draw.Rect(0, 30, 50, 5) && ms.rect("f")! == draw.Rect(50, 30, 100, 5),
+          "and one with a line goes there, to its end line (got \(ms.rect("e")!) \(ms.rect("f")!))")
+
     guard let mv = layoutOf("<body style='margin:0'><div id=mc style='width:400px;column-count:2;column-gap:0'><div style='height:30px'></div><div id=t style='height:30px;background:red'>x</div></div></body>") else { check(false, "layout"); return }
     let mvf = mv.box("t")!.ColumnFragments
     check(mvf.count == 1 && mvf[0].X == 200 && mv.rect("mc")!.Height == 30,

@@ -676,6 +676,16 @@ public final class Layout {
     /// Stacks block children top to bottom, collapsing the margins that
     /// meet: adjacent siblings', and a first or last child's with the
     /// parent's where nothing separates them.
+    /// The text-box-trim a box's lines are cut by: its own, and what a block
+    /// above passes down, with the edges it names.
+    func trimOf(box: Box) -> (start: bool, end: bool, edge: string) {
+        let own = box.Style.TextBoxTrim
+        let start = own == "trim-start" || own == "trim-both" || box.TrimFromAbove.start
+        let end = own == "trim-end" || own == "trim-both" || box.TrimFromAbove.end
+        let edge = own != "none" || box.TrimFromAbove.edge.isEmpty ? box.Style.TextBoxEdge : box.TrimFromAbove.edge
+        return (start: start, end: end, edge: edge)
+    }
+
     func layoutBlockChildren(box: Box, contentWidth: float32, flow: Flow) -> float32 {
         let cb = ContainingBlock(width: contentWidth, height: definiteInnerHeight(box))
         // The content box's corner in the formatting context, for floats.
@@ -693,6 +703,22 @@ public final class Layout {
         var firstCollapsed = false
         var lastChild: Box? = nil
         var contentRight: float32 = 0
+
+        // text-box-trim reaches the first and last formatted lines: in the
+        // first and last children in flow, however deep.
+        let trim = trimOf(box)
+        var firstInFlow: Box? = nil
+        var lastInFlow: Box? = nil
+        for child in box.Children {
+            child.TrimFromAbove = (start: false, end: false, edge: "")
+            if child.Style.Position == .absolute || child.Style.Position == .fixed || child.Style.Float != .none { continue }
+            if firstInFlow == nil { firstInFlow = child }
+            lastInFlow = child
+        }
+        if trim.start, let f = firstInFlow { f.TrimFromAbove = (start: true, end: false, edge: trim.edge) }
+        if trim.end, let l = lastInFlow {
+            l.TrimFromAbove = (start: l.TrimFromAbove.start, end: true, edge: trim.edge)
+        }
 
         for child in box.Children {
             if child.Style.Position == .absolute || child.Style.Position == .fixed {

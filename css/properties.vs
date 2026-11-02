@@ -639,7 +639,7 @@ func longhands(d: Declaration) -> [Longhand] {
         guard let four = fourValues(tokens, parseBorderStyle) else { return [] }
         set(.borderTopStyle, four[0]); set(.borderRightStyle, four[1]); set(.borderBottomStyle, four[2]); set(.borderLeftStyle, four[3])
     case "border-color":
-        guard let four = fourValues(tokens, parseColorValue) else { return [] }
+        guard let four = fourColors(tokens) else { return [] }
         set(.borderTopColor, four[0]); set(.borderRightColor, four[1]); set(.borderBottomColor, four[2]); set(.borderLeftColor, four[3])
     case "border", "border-top", "border-right", "border-bottom", "border-left", "border-inline", "border-block",
          "border-inline-start", "border-inline-end", "border-block-start", "border-block-end":
@@ -1569,6 +1569,26 @@ func parseBorderStyle(t: Token) -> Value? {
         return .keyword(lower(t.Value))
     default:
         return nil
+    }
+}
+
+/// One to four colors, as border-color takes them: rgb() and the other
+/// functions among them too.
+func fourColors(tokens: [Token]) -> [Value]? {
+    var vals: [Value] = []
+    var i = 0
+    while i < tokens.count && vals.count < 4 {
+        guard let found = parseColorAt(tokens, i) else { return nil }
+        vals.append(found.0)
+        i += found.1
+    }
+    if i < tokens.count { return nil }
+    switch vals.count {
+    case 1: return [vals[0], vals[0], vals[0], vals[0]]
+    case 2: return [vals[0], vals[1], vals[0], vals[1]]
+    case 3: return [vals[0], vals[1], vals[2], vals[1]]
+    case 4: return vals
+    default: return nil
     }
 }
 
