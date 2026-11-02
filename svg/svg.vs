@@ -84,6 +84,8 @@ struct Shape {
     var clips: [Drawing] = []
     var masks: [Drawing] = []
     var clipRule: draw.FillRule = .nonZero
+    /// paint-order: the stroke goes down before the fill.
+    var strokeFirst: bool = false
     /// A <text> run instead of an outline.
     var text: TextRun? = nil
 }
@@ -184,15 +186,26 @@ public final class Drawing {
         if paint.kind == 0 && (s.stroke.kind == 0 || solid) { return }
         let path = devicePath(s, m)
         let box = boundingBox(s)
-        if paint.kind != 0 {
-            fillPath(path, rule: solid ? s.clipRule : s.rule, paint: paint, opacity: solid ? 1 : s.opacity, m: m, box: box, on: canvas, currentColor: currentColor)
+        func putFill() {
+            if paint.kind != 0 {
+                fillPath(path, rule: solid ? s.clipRule : s.rule, paint: paint, opacity: solid ? 1 : s.opacity, m: m, box: box, on: canvas, currentColor: currentColor)
+            }
         }
-        if s.stroke.kind != 0 && !solid {
-            // The width scales as the transform does.
-            let det = m.A * m.D - m.B * m.C
-            var st = s.strokeStyle
-            st.Width = st.Width * math.Sqrt(det < 0 ? -det : det)
-            fillPath(path.Stroked(st), rule: .nonZero, paint: s.stroke, opacity: s.opacity * s.strokeOpacity, m: m, box: box, on: canvas, currentColor: currentColor)
+        func putStroke() {
+            if s.stroke.kind != 0 && !solid {
+                // The width scales as the transform does.
+                let det = m.A * m.D - m.B * m.C
+                var st = s.strokeStyle
+                st.Width = st.Width * math.Sqrt(det < 0 ? -det : det)
+                fillPath(path.Stroked(st), rule: .nonZero, paint: s.stroke, opacity: s.opacity * s.strokeOpacity, m: m, box: box, on: canvas, currentColor: currentColor)
+            }
+        }
+        if s.strokeFirst {
+            putStroke()
+            putFill()
+        } else {
+            putFill()
+            putStroke()
         }
     }
 
@@ -326,6 +339,7 @@ struct Context {
     var clips: [Drawing] = []
     var masks: [Drawing] = []
     var clipRule: draw.FillRule = .nonZero
+    var strokeFirst: bool = false
     var spec = font.Spec(families: ["sans-serif"], size: 16)
     var anchor: string = "start"
 
@@ -336,7 +350,7 @@ struct Context {
         if let t = n.GetAttribute("transform") { c.matrix = matrix.Times(parseTransform(t)) }
         var props: [(string, string)] = []
         for name in ["fill", "fill-rule", "fill-opacity", "opacity", "stroke", "stroke-width", "stroke-linecap",
-                     "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "clip-path", "mask", "clip-rule",
+                     "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "clip-path", "mask", "clip-rule", "paint-order",
                      "font-family", "font-size", "font-weight", "font-style", "text-anchor"] {
             if let v = n.GetAttribute(name) { props.append((name, v)) }
         }
@@ -361,6 +375,12 @@ struct Context {
                 }
             case "fill-rule":
                 c.rule = v == "evenodd" ? .evenOdd : .nonZero
+            case "paint-order":
+                // Only the first word that puts the stroke before the fill.
+                let words = v.split(separator: " ").map { string($0) }
+                let at = words.firstIndex(of: "stroke")
+                let fillAt = words.firstIndex(of: "fill")
+                c.strokeFirst = at != nil && (fillAt == nil || at! < fillAt!)
             case "clip-rule":
                 c.clipRule = v == "evenodd" ? .evenOdd : .nonZero
             case "clip-path":
@@ -456,7 +476,7 @@ func walk(n: element, ctx: Context, d: Drawing, ids: [string: element]) {
             d.shapes.append(Shape(ops: ops, coords: coords, matrix: inner.matrix, fill: fill, rule: inner.rule,
                                   opacity: inner.opacity, fillInherited: inner.fillInherited && c.TagName != "line",
                                   stroke: inner.stroke, strokeStyle: inner.strokeStyle, strokeOpacity: inner.strokeOpacity,
-                                  clips: inner.clips, masks: inner.masks, clipRule: inner.clipRule))
+                                  clips: inner.clips, masks: inner.masks, clipRule: inner.clipRule, strokeFirst: inner.strokeFirst))
         }
     }
 }

@@ -137,6 +137,8 @@ final class ElementAnimations {
 }
 
 final class Animator {
+    /// What a transition starts from where an element first shows.
+    var startingStyle: ((html.Node, cascade.ComputedStyle, cascade.ComputedStyle?) -> cascade.ComputedStyle?)? = nil
     /// The page's time, in seconds, as the host last gave it.
     var now: float64 = 0
     var elements: [int64: ElementAnimations] = [:]
@@ -250,7 +252,14 @@ final class Animator {
         // The style it had: what a transition the new style declares
         // starts from (the before-change style), even where the old one
         // declared none.
-        let prior = previous[node.Id]
+        var prior = previous[node.Id]
+        // Showing for the first time, @starting-style says what it was.
+        if prior == nil || prior!.Display == .none, style.Display != .none, let starting = startingStyle {
+            if let s = starting(node, style, parent) {
+                prior = s
+                elements[node.Id]?.base = [:]
+            }
+        }
         previous[node.Id] = style
         previousNodes[node.Id] = node
         // Elements with nothing to run, and nothing running, cost nothing.

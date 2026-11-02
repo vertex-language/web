@@ -120,6 +120,8 @@ func main() -> int32 {
     check(at(p, 12, 10).r == 255 && at(p, 17, 10).a == 0, "objectBoundingBox clip units")
     p = render("<svg viewBox='0 0 20 20'><mask id=m><rect width=10 height=20 fill=white /></mask><g mask='url(#m)'><rect width=20 height=20 fill='#00f'/></g></svg>")
     check(at(p, 5, 10).b == 255 && at(p, 15, 10).a == 0, "a mask keeps what is bright in it")
+    p = render("<svg viewBox='0 0 20 20'><rect x=5 y=5 width=10 height=10 fill='#00f' stroke='#f00' stroke-width=4 paint-order=stroke /></svg>")
+    check(at(p, 6, 10).b == 255 && at(p, 6, 10).r == 0, "paint-order: stroke puts the fill over the stroke (\(at(p, 6, 10)))")
     print("Text")
     p = render("<svg viewBox='0 0 40 40' ><text x=2 y=30 font-size=30 fill='#f00'>HH</text></svg>", size: 40)
     var lit = 0

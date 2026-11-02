@@ -111,6 +111,8 @@ public final class Box {
     public var MarkerStyle: cascade.ComputedStyle? = nil
     public var SelectionStyle: cascade.ComputedStyle? = nil
     public var FirstLineStyle: cascade.ComputedStyle? = nil
+    /// An <input type=file>'s ::file-selector-button, where rules give one.
+    public var FileButtonStyle: cascade.ComputedStyle? = nil
     /// Where a text box's text starts in its node's, in bytes: not 0 for
     /// what follows a ::first-letter.
     public var TextStart: int = 0

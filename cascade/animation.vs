@@ -613,6 +613,10 @@ func identityOp(like op: TransformOp) -> TransformOp {
     case "scale": return TransformOp("scale", numbers: [1, 1])
     case "rotate": return TransformOp("rotate", numbers: [0])
     case "skew": return TransformOp("skew", numbers: [0, 0])
+    case "translate3d": return TransformOp("translate3d", lengths: [.px(0), .px(0), .px(0)])
+    case "scale3d": return TransformOp("scale3d", numbers: [1, 1, 1])
+    case "rotate3d": return TransformOp("rotate3d", numbers: [op.Numbers[0], op.Numbers[1], op.Numbers[2], 0])
+    case "matrix3d": return TransformOp("matrix3d", numbers: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
     default: return TransformOp("matrix", numbers: [1, 0, 0, 1, 0, 0])
     }
 }

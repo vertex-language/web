@@ -244,7 +244,8 @@ func parseComplexSelector(selStr: string) -> ComplexSelector? {
                     if pos < len { pos += 1 }
                 }
                 if isElement || name == "before" || name == "after" || name == "first-line" || name == "first-letter" {
-                    part.PseudoElement = name
+                    // ::highlight(name) keeps its name: each is its own.
+                    part.PseudoElement = name == "highlight" ? "highlight(\(argument))" : name
                 } else {
                     var pseudo = Pseudo(name: name, argument: argument)
                     if name == "nth-child" || name == "nth-last-child" || name == "nth-of-type" || name == "nth-last-of-type" {

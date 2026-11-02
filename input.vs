@@ -393,6 +393,17 @@ extension Page {
         needsStyle = true
     }
 
+    /// What's moving the pointer, for the moves to come: what a host with a
+    /// pen says before a pointerMoved.
+    public func SetMovingPointer(kind: string, pressure: float32, tiltX: float32, tiltY: float32) {
+        var info = dom.PointerInfo()
+        info.Kind = kind
+        info.Pressure = pressure
+        info.TiltX = tiltX
+        info.TiltY = tiltY
+        dom.CurrentPointer = info
+    }
+
     func setCurrentPointer(e: Pointer) {
         var info = dom.PointerInfo()
         info.Kind = e.Kind
@@ -696,10 +707,41 @@ extension Page {
         return .handled
     }
 
+    /// %20 and the rest as what they stand for.
+    func percentDecoded(s: string) -> string {
+        let b = [uint8](s.utf8)
+        var out: [uint8] = []
+        func hex(c: uint8) -> uint8? {
+            if c >= 48 && c <= 57 { return c - 48 }
+            if c >= 97 && c <= 102 { return c - 87 }
+            if c >= 65 && c <= 70 { return c - 55 }
+            return nil
+        }
+        var i = 0
+        while i < b.count {
+            if b[i] == 37 && i + 2 < b.count, let h = hex(b[i + 1]), let l = hex(b[i + 2]) {
+                out.append(h * 16 + l)
+                i += 3
+            } else {
+                out.append(b[i])
+                i += 1
+            }
+        }
+        return stringOf(out, 0, out.count)
+    }
+
+    /// Jumps to a fragment of this document: "#id", or "#:~:text=word".
+    public func GoToFragment(href: string) { navigate(href) }
+
     func navigate(href: string) {
         if href.hasPrefix("#") {
             let b = [uint8](href.utf8)
             let id = stringOf(b, 1, b.count)
+            // #:~:text=word names text rather than an element.
+            if id.hasPrefix(":~:text=") {
+                goToTextFragment(percentDecoded(string(id.dropFirst(8))))
+                return
+            }
             if let target = Document?.Tree.ElementById(id) {
                 self.target = target
                 needsStyle = true
@@ -750,8 +792,9 @@ extension Page {
                     let maxX = b.ContentWidth - b.InnerWidth
                     if maxY > 0 && ((dy > 0 && b.ScrollY < maxY) || (dy < 0 && b.ScrollY > 0)) {
                         scrollAnimation = nil
+                        let was = draw.Point(b.ScrollX, b.ScrollY)
                         setElementScroll(b, draw.Point(b.ScrollX, math.Clamp(b.ScrollY + dy, 0, maxY)))
-                        noteWheelScroll(b)
+                        noteWheelScroll(b, from: was)
                         return .handled
                     }
                     // Sideways, by the wheel's x or, in a container that only
@@ -759,8 +802,9 @@ extension Page {
                     let sideways = dx != 0 ? dx : (maxY <= 0 ? dy : 0)
                     if maxX > 0 && ((sideways > 0 && b.ScrollX < maxX) || (sideways < 0 && b.ScrollX > 0)) {
                         scrollAnimation = nil
+                        let was = draw.Point(b.ScrollX, b.ScrollY)
                         setElementScroll(b, draw.Point(math.Clamp(b.ScrollX + sideways, 0, maxX), b.ScrollY))
-                        noteWheelScroll(b)
+                        noteWheelScroll(b, from: was)
                         return .handled
                     }
                     // overscroll-behavior: a container at its end keeps the
@@ -775,9 +819,18 @@ extension Page {
         scroll.Y += dy
         scroll.X += dx
         clampScroll()
+        // What the page couldn't take stretches it, as far as a hand would.
+        if precise && Bounces && (root?.Style.OverscrollY ?? "auto") == "auto" {
+            let past = before.Y + dy - scroll.Y
+            if past != 0 && contentHeight > size.Height {
+                overscroll = math.Clamp(overscroll + past * 0.3, -120, 120)
+                overscrollAt = -1
+                needsRepaint = true
+            }
+        }
         if scroll.Y != before.Y || scroll.X != before.X {
             needsRepaint = true
-            noteWheelScroll(nil)
+            noteWheelScroll(nil, from: before)
             // What is under the pointer changed.
             if let p = pointer { _ = pointerMoved(p) }
         }

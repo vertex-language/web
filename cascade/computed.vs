@@ -77,6 +77,24 @@ public final class ComputedStyle {
     public var BlendMode: draw.BlendMode = .normal
     /// isolation: isolate.
     public var Isolated: bool = false
+    /// image-rendering (inherited); overflow-clip-margin in pixels;
+    /// field-sizing; text-box-trim and text-box-edge; initial-letter's
+    /// size in lines (0 for normal).
+    public var ImageRendering: string = "auto"
+    public var OverflowClipMargin: float32 = 0
+    public var FieldSizing: string = "fixed"
+    public var TextBoxTrim: string = "none"
+    public var TextBoxEdge: string = "text"
+    public var InitialLetter: float32 = 0
+    /// overflow-anchor: none: the box isn't what a scroll keeps its place by.
+    public var NoScrollAnchor: bool = false
+    /// perspective, in CSS pixels (0 for none), and where the viewer is
+    /// over the box; backface-visibility: hidden; transform-style: preserve-3d.
+    public var Perspective: float32 = 0
+    public var PerspectiveOriginX: css.Length = .percent(50)
+    public var PerspectiveOriginY: css.Length = .percent(50)
+    public var BackfaceHidden: bool = false
+    public var Preserve3D: bool = false
     /// border-image: its source (a URL or a gradient, neither for none),
     /// the four slices (numbers as pixels, or percentages of the image)
     /// and fill, the widths and outsets, and the horizontal and
@@ -351,6 +369,7 @@ public final class ComputedStyle {
         OverflowWrap = parent.OverflowWrap
         WordBreak = parent.WordBreak
         ListStyleType = parent.ListStyleType
+        ImageRendering = parent.ImageRendering
         ListStylePosition = parent.ListStylePosition
         Cursor = parent.Cursor
         PointerEvents = parent.PointerEvents
@@ -478,6 +497,27 @@ public struct TransformOp {
         default: return draw.Affine.identity
         }
     }
+
+    /// Whether the function reaches out of the plane.
+    public var Is3D: bool {
+        switch Name {
+        case "translate3d", "scale3d", "rotate3d", "perspective", "matrix3d": return true
+        default: return false
+        }
+    }
+
+    /// The function as a 3D matrix, for a border box of width by height.
+    public func Matrix4(width: float32, height: float32) -> draw.Matrix4 {
+        switch Name {
+        case "translate3d":
+            return draw.Matrix4.translate(Lengths[0].Resolve(width) ?? 0, Lengths[1].Resolve(height) ?? 0, z: Lengths[2].Pixels ?? 0)
+        case "scale3d": return draw.Matrix4.scale(Numbers[0], Numbers[1], Numbers[2])
+        case "rotate3d": return draw.Matrix4.rotate(Numbers[0], Numbers[1], Numbers[2], radians: Numbers[3])
+        case "perspective": return draw.Matrix4.perspective(Lengths[0].Pixels ?? 0)
+        case "matrix3d": return draw.Matrix4(m: Numbers)
+        default: return draw.Matrix4(affine: Matrix(width: width, height: height))
+        }
+    }
 }
 
 extension ComputedStyle {
@@ -499,6 +539,31 @@ extension ComputedStyle {
 
     public var HasTransform: bool {
         return !Transform.isEmpty || !Translate.isEmpty || !Rotate.isEmpty || !Scale.isEmpty
+    }
+
+    /// Whether any of the box's transforms reaches out of the plane.
+    public var Is3D: bool {
+        for list in [Translate, Rotate, Scale, Transform] {
+            for op in list where op.Is3D { return true }
+        }
+        return false
+    }
+
+    /// Whether the box's children keep their place in 3D: what would
+    /// flatten them (a clip, a filter, opacity, a blend) wins.
+    public var UsedPreserve3D: bool {
+        return Preserve3D && !ClipsOverflow && Filters.isEmpty && Opacity >= 1 && !HasCompositing
+    }
+
+    /// TransformMatrix in 3D.
+    public func Matrix3D(width: float32, height: float32) -> draw.Matrix4 {
+        let ox = TransformOriginX.Resolve(width) ?? width / 2
+        let oy = TransformOriginY.Resolve(height) ?? height / 2
+        var m = draw.Matrix4.translate(ox, oy)
+        for list in [Translate, Rotate, Scale, Transform] {
+            for op in list { m = m.Concat(op.Matrix4(width: width, height: height)) }
+        }
+        return m.Concat(draw.Matrix4.translate(-ox, -oy))
     }
 
     /// The box's transform, in coordinates whose origin is its border

@@ -26,8 +26,7 @@ let shorthandNames: [string] = [
 /// a page that uses them renders without them. The same names as the
 /// case in Longhands that sets nothing.
 let unappliedNames: [string] = [
-    "perspective", "perspective-origin", "backface-visibility",
-    "transform-style", "transform-box",
+    "transform-box", "paint-order",
     "font-variant", "font-stretch", "font-feature-settings", "src",
     "unicode-range",
     "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",

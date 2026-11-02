@@ -74,6 +74,8 @@ dialog:modal { position: fixed; top: 0; bottom: 0; max-width: calc(100% - 6px - 
 ::backdrop { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 2147470000; }
 dialog::backdrop { background-color: rgba(0, 0, 0, 0.1); }
 video { object-fit: contain; }
+input::file-selector-button { background-color: rgb(239, 239, 239); border: 1px solid rgb(118, 118, 118); border-radius: 3px; color: black; }
+::target-text { background-color: rgb(255, 235, 59); }
 br { display: inline; }
 table { display: table; box-sizing: border-box; border-spacing: 2px; border-collapse: separate; text-indent: 0; }
 caption { display: table-caption; text-align: center; }

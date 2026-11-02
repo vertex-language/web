@@ -19,9 +19,49 @@ public struct Hit {
     public var PageY: float32
 }
 
+/// The 3D context being tested in: the point on the screen, and the
+/// matrix of the plane whose children are being asked.
+var hitContext: (screen: (x: float32, y: float32), matrix: draw.Matrix4)? = nil
+
+/// A box's matrix on the page where it needs one in 3D, its parent's
+/// perspective included: nil for a box a 2D transform, or none, will do.
+/// x and y are its border box's corner.
+public func ThreeDMatrix(box: Box, x: float32, y: float32) -> draw.Matrix4? {
+    let s = box.Style
+    let parent = box.Parent?.Style
+    let perspective = parent?.Perspective ?? 0
+    let needed = s.UsedPreserve3D || (s.HasTransform && (s.Is3D || perspective > 0 || (parent?.UsedPreserve3D ?? false)))
+    if !needed { return nil }
+    var m = draw.Matrix4.translate(x, y).Concat(s.Matrix3D(width: box.Width, height: box.Height)).Concat(draw.Matrix4.translate(-x, -y))
+    if perspective > 0, let pb = box.Parent {
+        let at = PagePosition(box)
+        let pat = PagePosition(pb)
+        let ox = x - at.x + pat.x + (parent!.PerspectiveOriginX.Resolve(pb.Width) ?? pb.Width / 2)
+        let oy = y - at.y + pat.y + (parent!.PerspectiveOriginY.Resolve(pb.Height) ?? pb.Height / 2)
+        m = draw.Matrix4.translate(ox, oy).Concat(draw.Matrix4.perspective(perspective)).Concat(draw.Matrix4.translate(-ox, -oy)).Concat(m)
+    }
+    return m
+}
+
 /// The innermost box under a page point. A transformed box is tested
 /// where it paints: the point is taken back through its transform.
 public func HitTest(box: Box, px: float32, py: float32, originX: float32, originY: float32) -> Hit? {
+    if let local = ThreeDMatrix(box, x: originX + box.X + box.OffsetX, y: originY + box.Y + box.OffsetY) {
+        // A plane in a 3D context answers to the point on the screen.
+        var screen = (x: px, y: py)
+        var full = local
+        if box.Parent?.Style.UsedPreserve3D ?? false, let c = hitContext {
+            screen = c.screen
+            full = c.matrix.Concat(local)
+        }
+        if box.Style.BackfaceHidden && !full.FacesViewer { return nil }
+        guard let p = full.Unproject(screen.x, screen.y) else { return nil }
+        let saved = hitContext
+        if box.Style.UsedPreserve3D { hitContext = (screen: screen, matrix: full) }
+        let hit = hitTestBox(box, p.x, p.y, originX: originX, originY: originY)
+        hitContext = saved
+        return hit
+    }
     if box.Style.HasTransform {
         let x = originX + box.X + box.OffsetX
         let y = originY + box.Y + box.OffsetY

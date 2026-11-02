@@ -6,8 +6,8 @@ import (
     "web/html"
 )
 
-// HTML drag and drop: a press on a draggable="true" element that moves
-// a few pixels is a drag. dragstart fires at it (with a DataTransfer for
+// HTML drag and drop: a press on a draggable element -- draggable="true",
+// or a link or an image by default -- that moves a few pixels is a drag. dragstart fires at it (with a DataTransfer for
 // the data), then drag as it moves; what it moves over gets dragenter,
 // dragover and dragleave; a dragover listener that calls PreventDefault
 // takes the drop, and drop fires there on release; dragend at the source
@@ -21,10 +21,13 @@ final class DragState {
     var started = false
     var over: html.Node? = nil
     var accepted = false
+    /// Where the pointer has got to.
+    var at: draw.Point
 
     init(source: html.Node, start: draw.Point) {
         self.source = source
         self.start = start
+        at = start
     }
 }
 
@@ -32,7 +35,8 @@ final class DragState {
 let dragThreshold: float32 = 4
 
 extension Page {
-    /// The element a press on node drags: the nearest with draggable=true.
+    /// The element a press on node drags: the nearest with draggable=true,
+    /// or a link with an href or an image, as those are by default.
     func draggableAncestor(node: html.Node?) -> html.Node? {
         var cur = node
         while let n = cur {
@@ -40,6 +44,8 @@ extension Page {
                 let d = lower(n.GetAttribute("draggable") ?? "")
                 if d == "true" { return n }
                 if d == "false" { return nil }
+                if n.TagName == "img" && n.HasAttribute("src") { return n }
+                if n.TagName == "a" && n.HasAttribute("href") { return n }
             }
             cur = n.Parent
         }
@@ -60,6 +66,14 @@ extension Page {
             let dy = p.Y - d.start.Y
             if dx * dx + dy * dy < dragThreshold * dragThreshold { return false }
             d.data.EffectAllowed = "all"
+            // A link or an image carries where it points.
+            if d.source.TagName == "a", let href = d.source.GetAttribute("href") {
+                d.data.SetData("text/uri-list", Resolve(href))
+                d.data.SetData("text/plain", Resolve(href))
+            } else if d.source.TagName == "img", let src = d.source.GetAttribute("src") {
+                d.data.SetData("text/uri-list", Resolve(src))
+                d.data.SetData("text/plain", Resolve(src))
+            }
             if !dispatch(dom.DragEvent("dragstart", X: d.start.X, Y: d.start.Y, Data: d.data), to: d.source) {
                 dragging = nil
                 return false
@@ -70,6 +84,10 @@ extension Page {
             ClearSelection()
         }
         _ = dispatch(dom.DragEvent("drag", X: p.X, Y: p.Y, Data: d.data), to: d.source)
+        // The drag image: the source, faint, under the pointer.
+        d.at = p
+        needsPaint = true
+        needsRepaint = true
         let target = dragTarget(p)
         if target?.Id != d.over?.Id {
             if let old = d.over { _ = dispatch(dom.DragEvent("dragleave", X: p.X, Y: p.Y, Data: d.data), to: old) }

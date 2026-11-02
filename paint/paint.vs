@@ -86,6 +86,35 @@ public enum PaintKind: Equatable {
     case path
 }
 
+/// What a drag shows: its source, faint, moved with the pointer.
+public struct DragImage {
+    public var box: layout.Box
+    public var dx: float32
+    public var dy: float32
+
+    public init(box: layout.Box, dx: float32, dy: float32) {
+        self.box = box
+        self.dx = dx
+        self.dy = dy
+    }
+}
+
+/// Named ranges of text and how their rules style them.
+public struct Highlight {
+    public var ranges: [(start: dom.TextPosition, end: dom.TextPosition)]
+    public var background: draw.Color
+    public var color: draw.Color
+    /// The element's own color: the rule's only shows where it differs.
+    public var inherited: draw.Color
+
+    public init(ranges: [(start: dom.TextPosition, end: dom.TextPosition)], background: draw.Color, color: draw.Color, inherited: draw.Color) {
+        self.ranges = ranges
+        self.background = background
+        self.color = color
+        self.inherited = inherited
+    }
+}
+
 /// Where a media element has got to, for its controls.
 public struct MediaProgress {
     public var time: float64
@@ -121,6 +150,15 @@ func clockOf(seconds: float64) -> string {
     return "\(t / 60):\(s < 10 ? "0" : "")\(s)"
 }
 
+/// A layer in a 3D context, waiting to be drawn in depth order.
+struct Plane {
+    var layer: draw.Layer
+    var matrix: draw.Matrix4
+    var depth: float32
+    var hidden: bool
+    var blend: draw.BlendMode
+}
+
 /// One thing to paint, in CSS pixels on the page: a filled rectangle, a
 /// border, a run of text at a baseline, an image, or a change of clip.
 public struct PaintItem {
@@ -137,6 +175,8 @@ public struct PaintItem {
     public var Run: font.Run
     public var LetterSpacing: float32
     public var Image: draw.Image?
+    /// image-rendering: pixelated or crisp-edges.
+    public var Pixelated: bool = false
     public var Opacity: float32
     /// An image's tile size and whether it repeats each way; the rect is
     /// the area it covers.
@@ -154,6 +194,12 @@ public struct PaintItem {
     public var Filters: [draw.Filter] = []
     /// A layer's transform, in the page's CSS pixels.
     public var Transform: draw.Affine = draw.Affine.identity
+    /// A layer's 3D matrix on the page, where it has one: whether it joins
+    /// its parent's 3D context, sorted with it by depth, rather than being
+    /// flattened into it; backface-visibility: hidden.
+    public var Matrix: draw.Matrix4? = nil
+    public var JoinsContext: bool = false
+    public var BackfaceHidden: bool = false
     /// A layer's clip-path, mask and blend mode. Unbounded layers take
     /// all that shows, not just the box: what overflows it blends too.
     public var Shape: layout.ClipRegion? = nil
@@ -306,6 +352,8 @@ public struct State {
     /// Each media element's newest frame and where it has got to.
     public var MediaFrames: [int64: draw.Image] = [:]
     public var MediaBars: [int64: MediaProgress] = [:]
+    public var DragImage: DragImage? = nil
+    public var Highlights: [Highlight] = []
     public var Vectors: [string: svg.Document] = [:]
     /// The selection, if any, and each text node's place in the document.
     public var SelectionStart: dom.TextPosition? = nil
@@ -346,6 +394,8 @@ public func Build(root: layout.Box, state: State, viewportWidth: float32, viewpo
     b.images = state.Images
     b.mediaFrames = state.MediaFrames
     b.mediaBars = state.MediaBars
+    b.dragImage = state.DragImage
+    b.highlights = state.Highlights
     b.bubble = state.Bubble
     b.vectors = state.Vectors
     b.selectionStart = state.SelectionStart
@@ -376,7 +426,11 @@ final class DisplayListBuilder {
     /// The page's images by URL, for backgrounds.
     var images: [string: draw.Image] = [:]
     var mediaFrames: [int64: draw.Image] = [:]
+    /// The matrix of the preserve-3d box whose children are being painted.
+    var context3D: draw.Matrix4? = nil
     var mediaBars: [int64: MediaProgress] = [:]
+    var dragImage: DragImage? = nil
+    var highlights: [Highlight] = []
     /// The page's SVG images by URL, for masks.
     var vectors: [string: svg.Document] = [:]
     /// The selection, if any, and each text node's place in the document.
@@ -410,6 +464,19 @@ final class DisplayListBuilder {
             items.append(.fill(draw.Rect(0, 0, viewportWidth, h), canvasColor, draw.Radii.zero))
         }
         paintBox(root, x: 0, y: 0, skipBackground: skipBackgroundOf)
+        if let d = dragImage {
+            // Over everything: painted again, as a whole, from where it is.
+            let at = layout.PagePosition(d.box)
+            var t = PaintItem(.translate)
+            t.X = d.dx
+            t.Y = d.dy
+            items.append(t)
+            let saved = opacity
+            opacity = 0.6
+            paintBox(d.box, x: at.x - d.box.X - d.box.OffsetX, y: at.y - d.box.Y - d.box.OffsetY, skipBackground: 0)
+            opacity = saved
+            items.append(PaintItem(.untranslate))
+        }
         if let b = bubble { paintBubble(b.rect, b.text) }
         return items
     }
@@ -532,8 +599,18 @@ final class DisplayListBuilder {
         let transform = s.HasTransform
             ? draw.Affine.translate(x, y).Concat(s.TransformMatrix(width: box.Width, height: box.Height)).Concat(draw.Affine.translate(-x, -y))
             : draw.Affine.identity
+        // A plane in 3D: its matrix, on top of its context's.
+        var matrix3D = layout.ThreeDMatrix(box, x: x, y: y)
+        let joins = matrix3D != nil && (box.Parent?.Style.UsedPreserve3D ?? false)
+        if joins, let local = matrix3D, let c = context3D { matrix3D = c.Concat(local) }
+        let savedContext3D = context3D
+        context3D = s.UsedPreserve3D ? matrix3D : nil
         // A transform that flattens the box shows nothing of it.
-        if transform.Determinant == 0 { opacity = savedOpacity; return }
+        if matrix3D == nil && transform.Determinant == 0 {
+            opacity = savedOpacity
+            context3D = savedContext3D
+            return
+        }
         if box.FixedToViewport { items.append(PaintItem(.fixed)) }
         if !s.BackdropFilters.isEmpty {
             var b = PaintItem(.backdrop)
@@ -542,12 +619,15 @@ final class DisplayListBuilder {
             b.Filters = s.BackdropFilters
             items.append(b)
         }
-        let blurred = !s.Filters.isEmpty || !transform.IsIdentity || s.HasCompositing
+        let blurred = !s.Filters.isEmpty || !transform.IsIdentity || s.HasCompositing || matrix3D != nil
         if blurred {
             var layer = PaintItem(.layer)
             layer.Rect = draw.Rect(x, y, box.Width, box.Height)
             layer.Filters = s.Filters
-            layer.Transform = transform
+            layer.Transform = matrix3D != nil ? draw.Affine.identity : transform
+            layer.Matrix = matrix3D
+            layer.JoinsContext = joins
+            layer.BackfaceHidden = s.BackfaceHidden
             if s.ClipPath != nil { layer.Shape = layout.ClipRegionOf(box, x: x, y: y) }
             layer.MaskRect = layer.Rect
             if s.MaskGradient != nil || !s.MaskURL.isEmpty { maskTiles(&layer, s) }
@@ -558,7 +638,10 @@ final class DisplayListBuilder {
         let clips = s.ClipsOverflow
         if clips {
             paintBackgroundAndBorderIfVisible(box, x: x, y: y, skipBackground: skipBackground)
-            items.append(.clip(draw.Rect(x + box.Border.Left, y + box.Border.Top, box.PaddingBoxWidth, box.PaddingBoxHeight)))
+            // overflow: clip keeps what overflows by overflow-clip-margin.
+            let reachX = s.OverflowX == .clip ? s.OverflowClipMargin : 0
+            let reachY = s.OverflowY == .clip ? s.OverflowClipMargin : 0
+            items.append(.clip(draw.Rect(x + box.Border.Left - reachX, y + box.Border.Top - reachY, box.PaddingBoxWidth + 2 * reachX, box.PaddingBoxHeight + 2 * reachY)))
             paintPhase(box, .blockBackgrounds, x: parentX, y: parentY, skipBackground: skipBackground, isRoot: true)
         } else {
             paintPhase(box, .blockBackgrounds, x: parentX, y: parentY, skipBackground: skipBackground, isRoot: false)
@@ -615,6 +698,7 @@ final class DisplayListBuilder {
         if blurred { items.append(PaintItem(.unlayer)) }
         if box.FixedToViewport { items.append(PaintItem(.unfix)) }
         opacity = savedOpacity
+        context3D = savedContext3D
     }
 
     /// empty-cells: hide on a cell with nothing in it, borders separate.
@@ -693,7 +777,7 @@ final class DisplayListBuilder {
                 if phase == .floats { paintBox(child, x: sx, y: sy, skipBackground: skipBackground) }
                 continue
             }
-            if child.Style.IsPositioned || child.Style.HasTransform {
+            if child.Style.IsPositioned || child.Style.HasTransform || child.Style.Perspective > 0 || child.Style.Preserve3D {
                 // A relative or sticky box paints as a whole, with what
                 // is positioned against it, among the stacking context's
                 // positioned boxes.
@@ -1245,6 +1329,21 @@ final class DisplayListBuilder {
                 items.append(.border(rect, widths, colors, draw.Radii.zero))
             }
         }
+        // Named highlights go under the text, and over it what they recolor.
+        for h in highlights {
+            for range in h.ranges {
+                for f in line.Fragments where f.Kind == .text {
+                    guard let node = f.Box.Node, let part = SelectedPart(f, node, range, textOrder) else { continue }
+                    let face = f.Owner.Style.Face
+                    let bytes = [uint8](f.Text.utf8)
+                    let x0 = x + f.X + face.Measure(stringOf(bytes, 0, part.from))
+                    let x1 = part.to >= bytes.count ? x + f.X + f.Width : x + f.X + face.Measure(stringOf(bytes, 0, part.to))
+                    let rect = draw.Rect(x0, y + line.Y, x1 - x0, line.Height)
+                    if h.background.A > 0 { items.append(.fill(rect, color(h.background), draw.Radii.zero)) }
+                    if h.color != h.inherited { reselected.append((rect: rect, color: h.color)) }
+                }
+            }
+        }
         // The selection's highlight goes under the text.
         if let start = selectionStart, let end = selectionEnd {
             for f in line.Fragments where f.Kind == .text {
@@ -1481,6 +1580,7 @@ final class DisplayListBuilder {
                 let spills = fitted.X < inner.X || fitted.Y < inner.Y || fitted.Right > inner.Right || fitted.Bottom > inner.Bottom
                 if spills { items.append(.clip(inner)) }
                 items.append(.image(fitted, img, opacity))
+                items[items.count - 1].Pixelated = s.ImageRendering == "pixelated" || s.ImageRendering == "crisp-edges"
                 if spills { items.append(PaintItem.unclip) }
             } else {
                 // No image: a faint frame, as browsers show a broken image.
@@ -1681,6 +1781,7 @@ final class DisplayListBuilder {
                 let spills = fitted.X < inner.X || fitted.Y < inner.Y || fitted.Right > inner.Right || fitted.Bottom > inner.Bottom
                 if spills { items.append(.clip(inner)) }
                 items.append(.image(fitted, img, opacity))
+                items[items.count - 1].Pixelated = s.ImageRendering == "pixelated" || s.ImageRendering == "crisp-edges"
                 if spills { items.append(PaintItem.unclip) }
             }
             if box.Node?.HasAttribute("controls") ?? false {
@@ -1707,16 +1808,23 @@ final class DisplayListBuilder {
             }
         case .fileInput:
             // "Choose File", as a button, then what is chosen.
-            let label = face.Shape("Choose File")
+            // ::file-selector-button restyles the button, where rules do.
+            let bs = box.FileButtonStyle
+            let bface = bs?.Face ?? face
+            let label = bface.Shape("Choose File")
             let bw = label.Width + 16
             let button = draw.Rect(inner.X, inner.Y, bw, inner.Height)
-            items.append(.fill(button, color(draw.Color(239, 239, 239)), draw.Radii(all: 3)))
-            let edge = color(draw.Color(118, 118, 118))
-            items.append(.border(button, draw.Edges(all: 1), [edge, edge, edge, edge], draw.Radii(all: 3)))
-            let ty = inner.Y + (inner.Height - face.LineHeight) / 2 + face.Ascent
-            items.append(.text(button.X + 8, ty, label, color(draw.Color.black), 0))
+            let radius = bs != nil && bs!.HasBorderRadius ? bs!.Radii(width: bw, height: inner.Height) : draw.Radii(all: 3)
+            let fillColor = bs?.BackgroundColor ?? draw.Color(239, 239, 239)
+            items.append(.fill(button, color(fillColor), radius))
+            let edge = color(bs != nil ? borderSideColor(bs!, 0) : draw.Color(118, 118, 118))
+            let edgeWidth = bs != nil ? bs!.BorderTopWidth : 1
+            if edgeWidth > 0 { items.append(.border(button, draw.Edges(all: edgeWidth), [edge, edge, edge, edge], radius)) }
+            let ty = inner.Y + (inner.Height - bface.LineHeight) / 2 + bface.Ascent
+            items.append(.text(button.X + 8, ty, label, color(bs?.Color ?? draw.Color.black), 0))
+            let ty2 = inner.Y + (inner.Height - face.LineHeight) / 2 + face.Ascent
             items.append(.clip(inner))
-            items.append(.text(button.Right + 8, ty, face.Shape(box.Text), color(s.Color), 0))
+            items.append(.text(button.Right + 8, ty2, face.Shape(box.Text), color(s.Color), 0))
             items.append(PaintItem.unclip)
         case .audio:
             paintMediaBar(box, inner, face: face, accent: s.AccentColor)
@@ -1781,6 +1889,7 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
     var layerCanvases: [draw.Canvas] = []
     var layerTransforms: [draw.Affine] = []
     var layerItems: [PaintItem] = []
+    var layerPlanes: [[Plane]] = []
     func inflate(r: draw.IRect, by: float32) -> draw.IRect {
         let d = int32(by + 0.5)
         return draw.IRect(r.X - d, r.Y - d, r.Width + 2 * d, r.Height + 2 * d)
@@ -1842,7 +1951,7 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
             if item.TileWidth <= 0 {
                 let dr = device(item.Rect)
                 if dr.IsEmpty { continue }
-                canvas.DrawImage(img, into: dr, opacity: item.Opacity)
+                canvas.DrawImage(img, into: dr, opacity: item.Opacity, nearest: item.Pixelated)
                 continue
             }
             // A background: tiles from the origin across the area, only
@@ -1897,6 +2006,18 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
             for f in item.Filters { reach += f.Reach * scale }
             var shows = canvas.Clip
             var bounds = item.Unbounded ? shows : inflate(device(item.Rect), reach)
+            if item.Matrix != nil {
+                // In 3D it can land anywhere: the box and what overflows.
+                let plane = inflate(device(item.Rect), reach + 256 * scale)
+                let layer = draw.Layer(plane)
+                layers.append(layer)
+                layerCanvases.append(canvas)
+                layerTransforms.append(draw.Affine.identity)
+                layerItems.append(item)
+                layerPlanes.append([])
+                canvas = layer.Canvas
+                continue
+            }
             // CSS pixels to the canvas's, where the layer is: what its
             // transform is conjugated by.
             let toDevice = draw.Affine(scale, 0, 0, scale, dx, dy)
@@ -1924,6 +2045,7 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
             layerCanvases.append(canvas)
             layerTransforms.append(t)
             layerItems.append(item)
+            layerPlanes.append([])
             canvas = layer.Canvas
         case .unlayer:
             guard let parent = layerCanvases.popLast() else { continue }
@@ -1932,10 +2054,39 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
             if let layer = made {
                 let t = layerTransforms.popLast() ?? draw.Affine.identity
                 var blend = draw.BlendMode.normal
+                let inside = layerPlanes.popLast() ?? []
                 if let effects = layerItems.popLast() {
                     layer.Apply(effects.Filters.map { $0.Scaled(scale) })
                     applyClipAndMask(layer, effects, scale: scale, dx: dx, dy: dy)
                     blend = effects.Blend
+                    if let m = effects.Matrix {
+                        let toDevice = draw.Matrix4(affine: draw.Affine(scale, 0, 0, scale, dx, dy))
+                        let fromDevice = draw.Matrix4(affine: draw.Affine(1 / scale, 0, 0, 1 / scale, -dx / scale, -dy / scale))
+                        let onDevice = toDevice.Concat(m).Concat(fromDevice)
+                        let r = device(effects.Rect)
+                        let center = onDevice.Apply(float32(r.X) + float32(r.Width) / 2, float32(r.Y) + float32(r.Height) / 2)
+                        var planes = [Plane(layer: layer, matrix: onDevice, depth: center.z, hidden: effects.BackfaceHidden, blend: blend)]
+                        planes.append(contentsOf: inside)
+                        if effects.JoinsContext && !layerPlanes.isEmpty {
+                            layerPlanes[layerPlanes.count - 1].append(contentsOf: planes)
+                            continue
+                        }
+                        // The context's planes, the farthest first.
+                        var i = 1
+                        while i < planes.count {
+                            var j = i
+                            while j > 0 && planes[j - 1].depth > planes[j].depth {
+                                planes.swapAt(j - 1, j)
+                                j -= 1
+                            }
+                            i += 1
+                        }
+                        for p in planes {
+                            if !p.hidden || p.matrix.FacesViewer { p.layer.Composite(onto: canvas, matrix: p.matrix, blend: p.blend) }
+                            p.layer.Free()
+                        }
+                        continue
+                    }
                 }
                 layer.Composite(onto: canvas, transform: t, blend: blend)
                 layer.Free()

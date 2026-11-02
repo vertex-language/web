@@ -298,7 +298,10 @@ extension Layout {
         }
 
         placePendingFloats()
-        for item in items {
+        let firstLineFont = firstLineFontOf(box)
+        for plain in items {
+            var item = plain
+            if firstLine, let fl = firstLineFont { item = inFirstLineFont(item, block: box, style: fl) }
             switch item.kind {
             case .float:
                 // Beside the line's content when it fits there, else at
@@ -414,6 +417,8 @@ extension Layout {
                         lineWidth += c.width
                     }
                 }
+                // A break just now took it off the first line.
+                if !firstLine { item = plain }
                 lineItems.append(item)
                 lineWidth += item.width
                 lineHasContent = true
@@ -433,7 +438,49 @@ extension Layout {
             finishLine(forced: true)
         }
         box.ContentWidth = contentRight - box.ContentX
-        return y
+        return y - trimTextBox(box)
+    }
+
+    /// text-box-trim: the first line's top and the last's bottom cut to the
+    /// edges text-box-edge names. Answers how much height went.
+    func trimTextBox(box: Box) -> float32 {
+        let s = box.Style
+        if s.TextBoxTrim == "none" || box.Lines.isEmpty { return 0 }
+        let face = s.Face
+        let half = (s.LineHeightPx - (face.Ascent + face.Descent)) / 2
+        let edges = s.TextBoxEdge.split(separator: " ").map { string($0) }
+        let over = edges.first ?? "text"
+        let under = edges.count > 1 ? edges[1] : (over == "cap" || over == "ex" ? "alphabetic" : over)
+        var top: float32 = 0
+        var bottom: float32 = 0
+        if s.TextBoxTrim != "trim-end" {
+            top = half
+            // The font says its x height; caps are near enough 1.4 of it.
+            if over == "cap" { top += face.Ascent - face.XHeight * 1.4 }
+            if over == "ex" { top += face.Ascent - face.XHeight }
+        }
+        if s.TextBoxTrim != "trim-start" {
+            bottom = half
+            if under == "alphabetic" { bottom += face.Descent }
+        }
+        if top != 0 {
+            var i = 0
+            while i < box.Lines.count {
+                box.Lines[i].Y -= top
+                var k = 0
+                while k < box.Lines[i].Fragments.count {
+                    box.Lines[i].Fragments[k].Y -= top
+                    k += 1
+                }
+                k = 0
+                while k < box.Lines[i].Spans.count {
+                    box.Lines[i].Spans[k].Y -= top
+                    k += 1
+                }
+                i += 1
+            }
+        }
+        return top + bottom
     }
 
     /// Gives each item its bidi level, where the paragraph is right to
@@ -799,7 +846,9 @@ extension Layout {
     /// vertically, and applies text-align.
     func buildLine(box: Box, items: [Item], y: float32, startX: float32, contentWidth: float32, indent: float32,
                    open: inout [OpenSpan], isFirst: Bool, isLast: Bool) -> Line {
-        let strutStyle = box.Style
+        // ::first-line's font sets the first line's text and its height.
+        let firstLineFont = isFirst ? firstLineFontOf(box) : nil
+        let strutStyle = firstLineFont ?? box.Style
         let strutFace = strutStyle.Face
         var line = Line(x: box.ContentX + startX, y: box.ContentY + y, width: contentWidth)
 
@@ -971,8 +1020,10 @@ extension Layout {
                 f.Ascent = baseline + b.Margin.Top
                 if b.Baseline == nil { f.Ascent = f.Height }
             } else {
-                let face = ownerStyle.Face
-                let lh = ownerStyle.LineHeightPx
+                // Text that takes its font from the block takes ::first-line's.
+                let setIn = firstLineFont != nil && ownerStyle.Face === box.Style.Face ? firstLineFont! : ownerStyle
+                let face = setIn.Face
+                let lh = setIn.LineHeightPx
                 let half = (lh - (face.Ascent + face.Descent)) / 2
                 f.Ascent = face.Ascent + half
                 f.Height = lh
@@ -1250,6 +1301,28 @@ extension Layout {
 /// A word cut in two at the last character boundary where the first
 /// part fits a width; the head is empty where not even one character
 /// fits.
+/// A block's ::first-line where it changes the font or the line's height:
+/// nil where only its color does, which painting alone sees to.
+func firstLineFontOf(box: Box) -> cascade.ComputedStyle? {
+    guard let fl = box.FirstLineStyle else { return nil }
+    if fl.Face !== box.Style.Face || fl.LineHeightPx != box.Style.LineHeightPx { return fl }
+    return nil
+}
+
+/// A word or space reset in ::first-line's font, where it takes its font
+/// from the block.
+func inFirstLineFont(item: Item, block: Box, style: cascade.ComputedStyle) -> Item {
+    if item.owner.Style.Face !== block.Style.Face { return item }
+    var out = item
+    if item.kind == .word {
+        out.run = style.Face.Shape(item.text)
+        out.width = out.run.Width + style.LetterSpacing * float32(out.run.Count)
+    } else if item.kind == .space {
+        out.width = style.Face.SpaceWidth + style.WordSpacing + style.LetterSpacing
+    }
+    return out
+}
+
 func splitWord(item: Item, fitting width: float32) -> (head: Item, tail: Item) {
     let bytes = [uint8](item.text.utf8)
     let face = item.owner.Style.Face

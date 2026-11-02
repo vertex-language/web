@@ -76,7 +76,7 @@ public class Parser {
         }
         advance() // skip '{'
         let lowerName = toLower(name)
-        if lowerName == "font-face" || lowerName == "page" || lowerName == "counter-style" || lowerName == "font-feature-values" || lowerName == "property" || lowerName == "position-try" {
+        if lowerName == "font-face" || lowerName == "page" || lowerName == "counter-style" || lowerName == "function" || lowerName == "font-feature-values" || lowerName == "property" || lowerName == "position-try" {
             // A block of declarations, not of rules.
             let decls = parseDeclarationBlock()
             return AtRule(name: name, params: params, rules: [], declarations: decls)

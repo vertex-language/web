@@ -62,8 +62,124 @@ func overlap(a: [css.Prop], b: [css.Prop]) -> bool {
 
 /// Whether tokens call var().
 func usesVar(tokens: [css.Token]) -> bool {
-    for t in tokens where t.Kind == .function && css.lower(t.Value) == "var" { return true }
+    for t in tokens where t.Kind == .function {
+        let name = css.lower(t.Value)
+        if name == "var" || name == "if" || name.hasPrefix("--") { return true }
+    }
     return false
+}
+
+/// What media() in an if() asks about: the viewport last set.
+var conditionWidth: float32 = 0
+var conditionHeight: float32 = 0
+var conditionDark: bool = false
+
+/// A function @function defines: its parameters, each with what it takes
+/// where a call leaves it out, and its result.
+struct CustomFunction {
+    var params: [(name: string, fallback: [css.Token]?)]
+    var result: [css.Token]
+}
+
+var customFunctions: [string: CustomFunction] = [:]
+
+/// Reads `@function --name(--a, --b: 1) { result: ... }`.
+func DefineCustomFunction(at: css.AtRule) {
+    let tokens = css.Tokenize(at.Params).filter { $0.Kind != .eof }
+    guard let head = tokens.first, head.Kind == .function, head.Value.hasPrefix("--") else { return }
+    var params: [(name: string, fallback: [css.Token]?)] = []
+    var i = 1
+    var level = 1
+    var part: [css.Token] = []
+    func flush() {
+        guard let name = part.first, name.Kind == .ident, name.Value.hasPrefix("--") else { return }
+        var fallback: [css.Token]? = nil
+        if let colon = part.firstIndex(where: { $0.Kind == .colon }) { fallback = Array(part[(colon + 1)...]) }
+        params.append((name: name.Value, fallback: fallback))
+    }
+    while i < tokens.count && level > 0 {
+        let t = tokens[i]
+        if t.Kind == .function || t.Kind == .openParen { level += 1 }
+        if t.Kind == .closeParen {
+            level -= 1
+            if level == 0 { break }
+        }
+        if t.Kind == .comma && level == 1 {
+            flush()
+            part = []
+        } else {
+            part.append(t)
+        }
+        i += 1
+    }
+    flush()
+    for d in at.Declarations where d.Property == "result" {
+        customFunctions[head.Value] = CustomFunction(params: params, result: d.Tokens)
+    }
+}
+
+/// Tokens as text, near enough to compare two values or read a query.
+func tokensText(tokens: [css.Token]) -> string {
+    var out = ""
+    for t in tokens {
+        if t.SpaceBefore && !out.isEmpty { out += " " }
+        switch t.Kind {
+        case .ident, .string, .hash, .delim, .atKeyword: out += t.Value
+        case .function: out += t.Value + "("
+        case .number: out += "\(t.NumberVal)"
+        case .dimension: out += "\(t.NumberVal)\(t.Unit)"
+        case .percentage: out += "\(t.NumberVal)%"
+        case .colon: out += ":"
+        case .comma: out += ","
+        case .openParen: out += "("
+        case .closeParen: out += ")"
+        default: break
+        }
+    }
+    return out
+}
+
+/// The tokens between a function's parenthesis and the one that closes it,
+/// and where it closes.
+func functionArgs(tokens: [css.Token], from start: int) -> (args: [css.Token], end: int) {
+    var level = 1
+    var j = start
+    var out: [css.Token] = []
+    while j < tokens.count {
+        let t = tokens[j]
+        if t.Kind == .function || t.Kind == .openParen { level += 1 }
+        if t.Kind == .closeParen {
+            level -= 1
+            if level == 0 { break }
+        }
+        out.append(t)
+        j += 1
+    }
+    return (args: out, end: j)
+}
+
+/// Whether one test of an if() holds: style(--x: y), media(...),
+/// supports(...), or else.
+func ifTestHolds(test: [css.Token], scope: CustomScope?, depth: int, node: html.Node?) -> bool {
+    guard let head = test.first else { return false }
+    if head.Kind == .ident && css.lower(head.Value) == "else" { return true }
+    if head.Kind != .function { return false }
+    let inner = functionArgs(test, from: 1).args
+    switch css.lower(head.Value) {
+    case "style":
+        guard let name = inner.first, name.Value.hasPrefix("--") else { return false }
+        let actual = scope?.lookup(name.Value)
+        guard let colon = inner.firstIndex(where: { $0.Kind == .colon }) else { return actual != nil }
+        guard let have = actual else { return false }
+        let wanted = substitute(Array(inner[(colon + 1)...]), scope: scope, depth: depth + 1, node: node) ?? []
+        return trimSpaces(tokensText(have)) == trimSpaces(tokensText(wanted))
+    case "media":
+        return mediaMatches("(" + tokensText(inner) + ")", width: conditionWidth, height: conditionHeight, dark: conditionDark)
+    case "supports":
+        return SupportsCondition("(" + tokensText(inner) + ")")
+    default:
+        return false
+    }
 }
 
 /// Whether a declaration calls attr() where it is substituted like var()
@@ -192,6 +308,76 @@ func substitute(tokens: [css.Token], scope: CustomScope?, depth: int = 0, node: 
     while i < tokens.count {
         let t = tokens[i]
         let fname = t.Kind == .function ? css.lower(t.Value) : ""
+        if fname == "if" {
+            // The first branch whose test holds; none, and nothing is there.
+            let call = functionArgs(tokens, from: i + 1)
+            var branch: [css.Token] = []
+            var branches: [[css.Token]] = []
+            var level = 0
+            for a in call.args {
+                if a.Kind == .function || a.Kind == .openParen { level += 1 }
+                if a.Kind == .closeParen { level -= 1 }
+                if a.Kind == .semicolon && level == 0 {
+                    branches.append(branch)
+                    branch = []
+                } else {
+                    branch.append(a)
+                }
+            }
+            if !branch.isEmpty { branches.append(branch) }
+            for b in branches {
+                var colon = -1
+                var l = 0
+                var k = 0
+                while k < b.count {
+                    if b[k].Kind == .function || b[k].Kind == .openParen { l += 1 }
+                    if b[k].Kind == .closeParen { l -= 1 }
+                    if b[k].Kind == .colon && l == 0 {
+                        colon = k
+                        break
+                    }
+                    k += 1
+                }
+                if colon < 0 { continue }
+                if ifTestHolds(Array(b[0..<colon]), scope: scope, depth: depth, node: node) {
+                    guard let value = substitute(Array(b[(colon + 1)...]), scope: scope, depth: depth + 1, node: node) else { return nil }
+                    out.append(contentsOf: value)
+                    break
+                }
+            }
+            i = call.end + 1
+            continue
+        }
+        if t.Kind == .function && t.Value.hasPrefix("--"), let f = customFunctions[t.Value] {
+            // The call's arguments are the result's custom properties.
+            let call = functionArgs(tokens, from: i + 1)
+            var args: [[css.Token]] = []
+            var part: [css.Token] = []
+            var level = 0
+            for a in call.args {
+                if a.Kind == .function || a.Kind == .openParen { level += 1 }
+                if a.Kind == .closeParen { level -= 1 }
+                if a.Kind == .comma && level == 0 {
+                    args.append(part)
+                    part = []
+                } else {
+                    part.append(a)
+                }
+            }
+            if !part.isEmpty { args.append(part) }
+            let inner = CustomScope(parent: scope)
+            var k = 0
+            while k < f.params.count {
+                let given = k < args.count ? args[k] : f.params[k].fallback
+                guard let g = given, let value = substitute(g, scope: scope, depth: depth + 1, node: node) else { return nil }
+                inner.own[f.params[k].name] = value
+                k += 1
+            }
+            guard let value = substitute(f.result, scope: inner, depth: depth + 1, node: node) else { return nil }
+            out.append(contentsOf: value)
+            i = call.end + 1
+            continue
+        }
         if fname == "sibling-index" || fname == "sibling-count", let n = node {
             var j = i + 1
             while j < tokens.count && tokens[j].Kind != .closeParen { j += 1 }

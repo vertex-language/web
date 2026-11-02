@@ -63,6 +63,7 @@ func roman(n: int, upper: bool) -> string {
 
 /// A counter's number as counter() writes it in a list-style-type.
 func counterText(n: int, style: string) -> string {
+    if let custom = cascade.CounterStyleText(style, n: n, marker: false) { return custom }
     switch style {
     case "none": return ""
     case "disc": return "•"

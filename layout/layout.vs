@@ -191,7 +191,7 @@ public final class Layout {
         var inner = box.IsFormattingRoot ? flow.root(box) : (s.IsPositioned ? flow.positionedBy(box) : flow)
         // A transform, a filter or containment makes the box what its
         // fixed descendants are placed against, instead of the viewport.
-        if s.HasTransform || !s.Filters.isEmpty || s.ContainPaint || s.LayoutContained { inner.fixed = box }
+        if s.HasTransform || s.Perspective > 0 || s.Preserve3D || !s.Filters.isEmpty || s.ContainPaint || s.LayoutContained { inner.fixed = box }
         let contentHeight = layoutContent(box, flow: inner)
 
         // Height: given, or the content's, or the ratio's where the

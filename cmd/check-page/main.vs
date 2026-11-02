@@ -28,6 +28,7 @@ func pixelAt(pixels: [uint8], w: int32, x: int32, y: int32) -> draw.Color {
     return draw.Color(pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3])
 }
 
+
 func countDark(pixels: [uint8], w: int32, r: draw.IRect) -> int {
     var n = 0
     var y = r.Y
@@ -1502,6 +1503,238 @@ func testCompositing() {
     check(left.R > 40 && left.R < 200 && right.R > 60 && right.R < 215 && at(110, 80).R < 40 && at(130, 80).R > 215,
           "backdrop-filter: blur() blurs what is behind, inside the box (got \(left) \(right) \(at(110, 80)) \(at(130, 80)))")
     check(at(170, 80) == draw.Color(0, 255, 255), "isolation: isolate keeps a blend inside its group (got \(at(170, 80)))")
+
+    // ::first-line's font is laid out, and only on the first line.
+    let fl = web.Page()
+    fl.SetViewportSize(draw.Size(200, 300))
+    fl.LoadHTML("""
+    <style>body { margin: 0; font-size: 10px; line-height: 1 } p { margin: 0; width: 200px } .big::first-line { font-size: 40px }</style>
+    <p id=plain>word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word</p>
+    <p id=big class=big>word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word</p>
+    """)
+    let plainBox = fl.BoxFor(fl.QuerySelector("#plain")!)!
+    let bigBox = fl.BoxFor(fl.QuerySelector("#big")!)!
+    let plainLines = plainBox.Lines
+    let bigLines = bigBox.Lines
+    check(plainLines.count >= 2 && bigLines.count > plainLines.count, "a larger first line holds fewer words (\(plainLines.count) lines, then \(bigLines.count))")
+    check(bigLines[0].Height == 40 && bigLines[1].Height == 10, "the first line is as tall as its font, the next as the block's (\(bigLines[0].Height) \(bigLines[1].Height))")
+    check(bigLines[0].Fragments[0].Width <= 200 && bigLines[1].Fragments[0].Width > bigLines[0].Fragments[0].Width / 2,
+          "and each line's words are set in its own font (\(bigLines[0].Fragments[0].Width) \(bigLines[1].Fragments[0].Width))")
+
+    // Scroll anchoring, and a page that stretches at its end.
+    let ah = web.Page()
+    ah.SetViewportSize(draw.Size(100, 100))
+    ah.LoadHTML("<style>body { margin: 0; background: rgb(0,255,0) } div { height: 100px } #top { background: rgb(255,0,0) }</style><div id=top></div><div id=a></div><div id=b></div><div id=c></div><div id=d></div><div id=e></div>")
+    _ = ah.BoundsOf(ah.QuerySelector("#a")!)
+    ah.SetScrollOffset(draw.Point(0, 250))
+    let topBox = ah.QuerySelector("#top")!
+    ah.Document?.SetAttribute(topBox, "style", "height: 150px")
+    _ = ah.BoundsOf(topBox)
+    check(ah.ScrollOffset().Y == 300, "content growing above the view keeps the place being read (got \(ah.ScrollOffset().Y))")
+    ah.Document?.SetAttribute(ah.QuerySelector("#top")!, "style", "height: 100px")
+    _ = ah.BoundsOf(topBox)
+    check(ah.ScrollOffset().Y == 250, "and shrinking does too (got \(ah.ScrollOffset().Y))")
+    ah.SetScrollOffset(draw.Point(0, 0))
+    ah.Bounces = true
+    _ = ah.Handle(.pointerMoved(draw.Point(50, 50)))
+    _ = ah.Handle(.wheel(web.Wheel(draw.Point(0, 100), precise: true)))
+    check(ah.NeedsAnimation(), "a scroll past the top stretches the page, and asks for frames")
+    var ahp = [uint8](repeating: 0, count: 100 * 100 * 4)
+    ah.Draw(into: &ahp, width: 100, height: 100, scale: 1)
+    check(pixelAt(ahp, 100, 50, 10) != draw.Color(255, 0, 0) && pixelAt(ahp, 100, 50, 60) == draw.Color(255, 0, 0), "drawn moved down (got \(pixelAt(ahp, 100, 50, 10)) \(pixelAt(ahp, 100, 50, 60)))")
+    var when: float64 = 0
+    while when < 2 {
+        _ = ah.Advance(time: when)
+        when += 0.05
+    }
+    check(!ah.NeedsAnimation(), "and it eases back")
+    ah.Draw(into: &ahp, width: 100, height: 100, scale: 1)
+    check(pixelAt(ahp, 100, 50, 10) == draw.Color(255, 0, 0), "to where it was (got \(pixelAt(ahp, 100, 50, 10)))")
+
+    // The smaller properties and at-rules.
+    let sm = web.Page()
+    sm.SetViewportSize(draw.Size(300, 300))
+    sm.LoadHTML("""
+    <style>
+    body { margin: 0; background: white; font-size: 10px; line-height: 20px }
+    @function --double(--x, --y: 1px) { result: calc(var(--x) * 2 + var(--y)); }
+    @counter-style thumbs { system: cyclic; symbols: "A" "B"; suffix: ") "; }
+    :root { --mode: dark }
+    #fn { width: --double(10px); height: 5px }
+    #cond { width: if(style(--mode: light): 1px; style(--mode: dark): 22px; else: 3px); height: 5px }
+    #mq { width: if(media(max-width: 10px): 1px; else: 33px); height: 5px }
+    #clip { overflow: clip; overflow-clip-margin: 10px; width: 10px; height: 10px; margin: 20px } #clip div { width: 15px; height: 10px; background: rgb(255,0,0) }
+    #trim { text-box: trim-both text; height: auto } #plainline { }
+    #field { field-sizing: content }
+    #drop::first-letter { initial-letter: 3 }
+    </style>
+    <div id=fn></div><div id=cond></div><div id=mq></div>
+    <div id=clip><div></div></div>
+    <p id=plainline style="margin: 0">x</p><p id=trim style="margin: 0">x</p>
+    <textarea id=field>one
+    two lines long enough</textarea>
+    <ol style="list-style-type: thumbs"><li id=one>x</li><li id=two>y</li><li id=three>z</li></ol>
+    <p id=drop style="margin: 0; width: 100px">Drop cap text that goes on for some lines at least</p>
+    """)
+    func smBox(id: string) -> layout.Box { return sm.BoxFor(sm.QuerySelector("#" + id)!)! }
+    check(smBox("fn").Width == 21, "@function: a call with a default (got \(smBox("fn").Width))")
+    check(smBox("cond").Width == 22, "if(style()) takes the first branch that holds (got \(smBox("cond").Width))")
+    check(smBox("mq").Width == 33, "if(media()) and else (got \(smBox("mq").Width))")
+    check(smBox("plainline").Height == 20 && smBox("trim").Height < 20, "text-box-trim cuts the half-leading (got \(smBox("plainline").Height) \(smBox("trim").Height))")
+    check(smBox("field").Width > 60 && smBox("field").Height >= 40, "field-sizing: content fits what it holds (got \(smBox("field").Width) \(smBox("field").Height))")
+    check(smBox("one").Marker == "A) " && smBox("two").Marker == "B) " && smBox("three").Marker == "A) ", "@counter-style markers (got \(smBox("one").Marker) \(smBox("two").Marker) \(smBox("three").Marker))")
+    var smp = [uint8](repeating: 0, count: 300 * 300 * 4)
+    sm.Draw(into: &smp, width: 300, height: 300, scale: 1)
+    let clipAt = sm.BoundsOf(sm.QuerySelector("#clip")!)!
+    check(pixelAt(smp, 300, int32(clipAt.X) + 13, int32(clipAt.Y) + 5) == draw.Color(255, 0, 0), "overflow-clip-margin shows what overflows by it")
+    if let dropLetter = smBox("drop").Children.first {
+        let left = dropLetter.Kind == .block
+        check(left && dropLetter.Style.FontSize > 50, "initial-letter makes a letter lines tall, beside them (got \(dropLetter.Style.FontSize))")
+    } else {
+        check(false, "initial-letter makes a box for its letter")
+    }
+
+    // image-rendering.
+    let ir = web.Page()
+    ir.SetViewportSize(draw.Size(100, 40))
+    ir.LoadHTML("<style>body { margin: 0 } img { display: block; width: 100px; height: 40px; image-rendering: pixelated }</style><img src=two.png>")
+    ir.SetImage(url: "two.png", image: draw.Image(width: 2, height: 1, pixels: [255, 0, 0, 255, 0, 0, 255, 255]))
+    var irp = [uint8](repeating: 0, count: 100 * 40 * 4)
+    ir.Draw(into: &irp, width: 100, height: 40, scale: 1)
+    check(pixelAt(irp, 100, 49, 20) == draw.Color(255, 0, 0) && pixelAt(irp, 100, 50, 20) == draw.Color(0, 0, 255), "image-rendering: pixelated keeps pixels hard (got \(pixelAt(irp, 100, 49, 20)) \(pixelAt(irp, 100, 50, 20)))")
+
+    // @starting-style.
+    let st = web.Page()
+    st.SetViewportSize(draw.Size(100, 100))
+    st.LoadHTML("""
+    <style>body { margin: 0; background: white } #s { width: 50px; height: 50px; background: rgb(0,0,0); opacity: 1; transition: opacity 1s linear } @starting-style { #s { opacity: 0 } }</style><div id=s></div>
+    """)
+    _ = st.BoundsOf(st.QuerySelector("#s")!)
+    _ = st.Advance(time: 10)
+    _ = st.Advance(time: 10.5)
+    var stp = [uint8](repeating: 0, count: 100 * 100 * 4)
+    st.Draw(into: &stp, width: 100, height: 100, scale: 1)
+    let mid = pixelAt(stp, 100, 20, 20)
+    check(mid.R > 60 && mid.R < 200, "@starting-style: a first style transitions from it (got \(mid))")
+
+    // scroll-snap-stop.
+    let ss = web.Page()
+    ss.SetViewportSize(draw.Size(100, 100))
+    ss.LoadHTML("""
+    <style>html { scroll-snap-type: y mandatory } body { margin: 0 } div { height: 100px; scroll-snap-align: start } #stop { scroll-snap-stop: always }</style>
+    <div></div><div id=stop></div><div></div><div></div><div></div>
+    """)
+    _ = ss.BoundsOf(ss.QuerySelector("#stop")!)
+    _ = ss.Handle(.pointerMoved(draw.Point(50, 50)))
+    _ = ss.Handle(.wheel(web.Wheel(draw.Point(0, -300), precise: true)))
+    var clock: float64 = 0
+    while clock < 3 {
+        _ = ss.Advance(time: clock)
+        clock += 0.05
+    }
+    check(ss.ScrollOffset().Y == 100, "scroll-snap-stop: always stops a scroll that would pass it (got \(ss.ScrollOffset().Y))")
+
+    // Links and images drag by default, with a drag image.
+    let dg = web.Page()
+    dg.SetViewportSize(draw.Size(200, 100))
+    dg.LoadHTML("<style>body { margin: 0; background: white } a { display: block; width: 40px; height: 20px; background: rgb(255,0,0) }</style><a id=l href='http://x.test/p'></a><a id=off href='#' draggable=false style='margin-top: 20px'></a>")
+    guard let dl = dg.QuerySelector("#l"), let off = dg.QuerySelector("#off"), let dgDoc = dg.Document else { return }
+    var dragged = ""
+    var starts = 0
+    _ = dgDoc.AddEventListener(dgDoc.Tree.Root, "dragstart", handler: { e in
+        starts += 1
+        if let d = e as? dom.DragEvent { dragged = d.Data.GetData("text/uri-list") }
+    })
+    _ = dg.BoundsOf(dl)
+    _ = dg.Handle(.pointerDown(web.Pointer(draw.Point(10, 10))))
+    _ = dg.Handle(.pointerMoved(draw.Point(100, 60)))
+    check(starts == 1 && dragged == "http://x.test/p", "a link drags by default, carrying its URL (got \(starts), \(dragged))")
+    var gp = [uint8](repeating: 0, count: 200 * 100 * 4)
+    dg.Draw(into: &gp, width: 200, height: 100, scale: 1)
+    let ghost = pixelAt(gp, 200, 110, 60)
+    check(ghost.R == 255 && ghost.G > 60 && ghost.G < 150, "and shows a faint image under the pointer (got \(ghost))")
+    _ = dg.Handle(.pointerUp(web.Pointer(draw.Point(100, 60))))
+    _ = dg.Handle(.pointerDown(web.Pointer(draw.Point(10, 50))))
+    _ = dg.Handle(.pointerMoved(draw.Point(100, 80)))
+    check(starts == 1, "draggable=false turns it off (got \(starts), \(off.TagName))")
+    _ = dg.Handle(.pointerUp(web.Pointer(draw.Point(100, 80))))
+
+    // ::highlight(), ::target-text and ::file-selector-button.
+    let hl = web.Page()
+    hl.SetViewportSize(draw.Size(300, 120))
+    hl.LoadHTML("""
+    <style>body { margin: 0; background: white; font-size: 20px } p { margin: 0 } ::highlight(found) { background-color: rgb(0,255,0) } ::target-text { background-color: rgb(255,0,255) }
+    input::file-selector-button { background-color: rgb(0,0,255) } input { display: block; width: 200px; height: 30px }</style>
+    <p id=a>aaaaaaaaaa</p><p id=b>find this word</p><input type=file id=f>
+    """)
+    guard let hp = hl.QuerySelector("#a")?.Children.first, let hpb = hl.QuerySelector("#a") else { return }
+    hl.SetHighlight(name: "found", ranges: [(start: dom.TextPosition(Node: hp, Offset: 0), end: dom.TextPosition(Node: hp, Offset: 3))])
+    var hx = [uint8](repeating: 0, count: 300 * 120 * 4)
+    hl.Draw(into: &hx, width: 300, height: 120, scale: 1)
+    func hc(x: int32, y: int32) -> draw.Color { return pixelAt(hx, 300, x, y) }
+    let hb = hl.BoundsOf(hpb)!
+    check(hc(1, int32(hb.Y) + 1) == draw.Color(0, 255, 0), "::highlight(name) styles its ranges (got \(hc(1, int32(hb.Y) + 1)))")
+    check(hc(100, int32(hb.Y) + 1) == draw.Color.white, "and only them (got \(hc(100, int32(hb.Y) + 1)))")
+    let fb = hl.BoundsOf(hl.QuerySelector("#f")!)!
+    var blue = 0
+    var by = int32(fb.Y)
+    while by < int32(fb.Y + fb.Height) {
+        var bx = int32(fb.X)
+        while bx < int32(fb.X + fb.Width) {
+            if hc(bx, by) == draw.Color(0, 0, 255) { blue += 1 }
+            bx += 1
+        }
+        by += 1
+    }
+    check(blue > 100, "::file-selector-button restyles the button (\(blue) pixels)")
+    hl.GoToFragment("#:~:text=this%20word")
+    hl.Draw(into: &hx, width: 300, height: 120, scale: 1)
+    let bb = hl.BoundsOf(hl.QuerySelector("#b")!)!
+    var magenta = 0
+    var mx: int32 = 0
+    while mx < 300 {
+        if hc(mx, int32(bb.Y) + 1) == draw.Color(255, 0, 255) { magenta += 1 }
+        mx += 1
+    }
+    check(magenta > 40, "a text fragment is found and shown by ::target-text (\(magenta) pixels)")
+
+    // 3D.
+    let d3 = web.Page()
+    d3.SetViewportSize(draw.Size(400, 120))
+    d3.LoadHTML("""
+    <style>body { margin: 0; background: white } .s { position: absolute; top: 0; width: 100px; height: 100px } .f { width: 100px; height: 100px; background: rgb(255,0,0) }</style>
+    <div class=s style="left: 0; perspective: 200px"><div class=f id=near style="transform: translateZ(100px)"></div></div>
+    <div class=s style="left: 200px"><div class=f id=turned style="transform: rotateY(180deg); backface-visibility: hidden"></div></div>
+    <div class=s id=cube style="left: 300px; transform-style: preserve-3d"><div class=f style="position: absolute; background: rgb(0,255,0); transform: translateZ(-10px)"></div><div class=f style="position: absolute; background: rgb(0,0,255); transform: translateZ(10px)"></div><div class=f style="position: absolute; background: rgb(255,255,0); transform: translateZ(-20px)"></div></div>
+    """)
+    var dp = [uint8](repeating: 0, count: 400 * 120 * 4)
+    d3.Draw(into: &dp, width: 400, height: 120, scale: 1)
+    func dat(x: int32, y: int32) -> draw.Color { return pixelAt(dp, 400, x, y) }
+    // At perspective 200 a plane 100 nearer is scaled 2: 100px becomes 200.
+    check(dat(120, 50) == draw.Color(255, 0, 0) && dat(160, 50) == draw.Color.white, "translateZ under perspective draws larger (got \(dat(120, 50)) \(dat(160, 50)))")
+    check(dat(250, 50) == draw.Color.white, "backface-visibility: hidden hides a turned box (got \(dat(250, 50)))")
+    check(dat(350, 50) == draw.Color(0, 0, 255), "preserve-3d draws the nearest plane last, whatever the order (got \(dat(350, 50)))")
+    if let n = d3.QuerySelector("#near") { check(d3.ElementAt(draw.Point(120, 50)) === n, "a 3D plane is hit where it's drawn") }
+    check(d3.ElementAt(draw.Point(250, 50))?.TagName != "div" || d3.ElementAt(draw.Point(250, 50))?.GetAttribute("id") != "turned", "and a hidden back isn't hit")
+    // A plane's context ends with it: a sibling after a preserve-3d box
+    // isn't drawn inside it.
+    let after = web.Page()
+    after.SetViewportSize(draw.Size(200, 60))
+    after.LoadHTML("""
+    <style>body { margin: 0; background: white } div { width: 20px; height: 20px }</style>
+    <div style="transform-style: preserve-3d; transform: translateX(100px)"><div style="background: rgb(255,0,0); transform: translateZ(1px)"></div></div>
+    <div style="background: rgb(0,0,255); transform: translateZ(1px)"></div>
+    """)
+    var ap = [uint8](repeating: 0, count: 200 * 60 * 4)
+    after.Draw(into: &ap, width: 200, height: 60, scale: 1)
+    check(pixelAt(ap, 200, 110, 10) == draw.Color(255, 0, 0) && pixelAt(ap, 200, 10, 30) == draw.Color(0, 0, 255),
+          "a sibling after a 3D context stands alone (got \(pixelAt(ap, 200, 110, 10)) \(pixelAt(ap, 200, 10, 30)))")
+    let fixedIn = web.Page()
+    fixedIn.SetViewportSize(draw.Size(200, 200))
+    fixedIn.LoadHTML("<style>body { margin: 0; background: white }</style><div style='margin: 50px; width: 50px; height: 50px; transform: translateX(0)'><div id=fx style='position: fixed; left: 10px; top: 10px; width: 5px; height: 5px'></div></div>")
+    if let fx = fixedIn.QuerySelector("#fx"), let b = fixedIn.BoundsOf(fx) {
+        check(b.X == 60 && b.Y == 60, "a transformed box holds its fixed descendants (got \(b.X) \(b.Y))")
+    }
 
     // Media, through a player of the test's own.
     final class FakePlayer: web.MediaPlayer {

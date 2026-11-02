@@ -99,11 +99,56 @@ extension Page {
 
     /// A wheel scroll moved the page (nil) or a container: once it has
     /// been still a moment, it snaps.
-    func noteWheelScroll(container: layout.Box?) {
+    func noteWheelScroll(container: layout.Box?, from: draw.Point) {
         let id = container?.Node?.Id ?? 0
         let style = container?.Style ?? root?.Style
         guard let s = style, s.SnapType != "none" else { return }
+        // Where this run of scrolling began: scroll-snap-stop stops it at
+        // the first always box it passed.
+        if pendingSnap == nil { snapFrom = from }
         pendingSnap = (node: id, at: animator.now)
+    }
+
+    /// A stretched page easing back. Answers whether it moved.
+    func easeOverscroll(time: float64) -> bool {
+        if overscroll == 0 { return false }
+        let dt = overscrollAt < 0 ? 0 : time - overscrollAt
+        overscrollAt = time
+        overscroll *= float32(math.Exp(-dt * 10))
+        if math.Abs(overscroll) < 0.25 { overscroll = 0 }
+        needsRepaint = true
+        return true
+    }
+
+    /// The element the scroll keeps its place by: the first deepest one
+    /// that shows at the viewport's top. Nil at the top of the page, where
+    /// there is no place to keep.
+    func scrollAnchor() -> (node: int64, y: float32)? {
+        guard let r = root, scroll.Y > 0 else { return nil }
+        func find(b: layout.Box) -> layout.Box? {
+            for c in b.Children {
+                if c.Style.NoScrollAnchor || c.FixedToViewport || c.Kind == .text { continue }
+                let bottom = layout.PagePosition(c).y + c.Height
+                if bottom <= scroll.Y { continue }
+                return find(c) ?? (c.Node != nil && !c.IsAnonymous ? c : nil)
+            }
+            return nil
+        }
+        guard let b = find(r), let n = b.Node else { return nil }
+        return (node: n.Id, y: layout.PagePosition(b).y)
+    }
+
+    /// Layout moved the anchor: the scroll moves with it, so what was being
+    /// read stays where it was.
+    func keepScrollAnchor(anchor: (node: int64, y: float32)?) {
+        guard let a = anchor, let b = builder.byNode[a.node] else { return }
+        let moved = layout.PagePosition(b).y - a.y
+        if moved != 0 {
+            scroll.Y += moved
+            clampScroll()
+            needsRepaint = true
+            root?.ViewportScrollY = scroll.Y
+        }
     }
 
     /// Moves a smooth scroll, and snaps a wheel scroll that has come to
@@ -172,6 +217,14 @@ extension Page {
         }
         var bestX: float32? = nil
         var bestY: float32? = nil
+        var stopX: float32? = nil
+        var stopY: float32? = nil
+        let from = snapFrom ?? current
+        // Strictly past where the scroll began, up to where it has got.
+        func passed(target: float32, start: float32, end: float32) -> bool {
+            if start < end { return target > start + 0.5 && target <= end + 0.5 }
+            return target < start - 0.5 && target >= end - 0.5
+        }
         func consider(b: layout.Box) {
             let align = b.Style.SnapAlign.split(separator: " ").map { string($0) }
             if align.isEmpty || align[0] == "none" { return }
@@ -186,12 +239,14 @@ extension Page {
                 if blockAlign == "end" { target = y + b.Height + (m[2].Resolve(viewH) ?? 0) - (viewH - padBottom) }
                 if blockAlign == "center" { target = y + b.Height / 2 - (padTop + (viewH - padTop - padBottom) / 2) }
                 if bestY == nil || math.Abs(target - current.Y) < math.Abs(bestY! - current.Y) { bestY = target }
+                if b.Style.SnapStop == "always" && passed(target, from.Y, current.Y) && (stopY == nil || math.Abs(target - from.Y) < math.Abs(stopY! - from.Y)) { stopY = target }
             }
             if snapX && inlineAlign != "none" {
                 var target = x - (m[3].Resolve(viewW) ?? 0) - padLeft
                 if inlineAlign == "end" { target = x + b.Width + (m[1].Resolve(viewW) ?? 0) - (viewW - padRight) }
                 if inlineAlign == "center" { target = x + b.Width / 2 - (padLeft + (viewW - padLeft - padRight) / 2) }
                 if bestX == nil || math.Abs(target - current.X) < math.Abs(bestX! - current.X) { bestX = target }
+                if b.Style.SnapStop == "always" && passed(target, from.X, current.X) && (stopX == nil || math.Abs(target - from.X) < math.Abs(stopX! - from.X)) { stopX = target }
             }
         }
         // The boxes the container scrolls, not into scroll containers of
@@ -203,6 +258,9 @@ extension Page {
             }
         }
         walk(container ?? r)
+        if let s = stopY { bestY = s }
+        if let s = stopX { bestX = s }
+        snapFrom = nil
         var to = current
         if let y = bestY, mandatory || math.Abs(y - current.Y) <= viewH * 0.3 { to.Y = y }
         if let x = bestX, mandatory || math.Abs(x - current.X) <= viewW * 0.3 { to.X = x }

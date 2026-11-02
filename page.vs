@@ -285,6 +285,14 @@ public final class Page {
     var mediaOpener: ((string) -> (any MediaPlayer)?)? = nil
     var media: [int64: MediaState] = [:]
     var mediaFrames: [int64: draw.Image] = [:]
+    var snapFrom: draw.Point? = nil
+    /// Whether a precise scroll past the page's end stretches it, and how
+    /// far it is stretched now, in CSS pixels; when it last eased back.
+    public var Bounces: bool = false
+    var overscroll: float32 = 0
+    var overscrollAt: float64 = -1
+    /// Named ranges of text ::highlight() styles, and ::target-text's.
+    var highlights: [string: [(start: dom.TextPosition, end: dom.TextPosition)]] = [:]
     /// The URLs an opener turned down, and whom to tell.
     var mediaRefused: [int64: string] = [:]
     var mediaErrors: [html.Node] = []
@@ -312,6 +320,7 @@ public final class Page {
         baseURL = Configuration.BaseURL ?? ""
         let a = animator
         resolver.Animate = { node, style, parent in a.apply(node, style, parent) }
+        a.startingStyle = { node, style, parent in self.resolver.ResolveStarting(node, style: style, parent: parent, context: self.context) }
         context.Interacted = { node in self.userEdited.contains(node.Id) }
         context.ValueOf = { node in self.valueOf(node) }
     }
@@ -343,6 +352,7 @@ public final class Page {
 
     func load(doc: html.Document) {
         layoutTold = [:]
+        highlights = [:]
         frames = [:]
         files = [:]
         target = nil
@@ -495,6 +505,66 @@ public final class Page {
     /// fragments are left alone.
     public func Resolve(url: string) -> string {
         return fetch.Resolve(url, against: baseURL)
+    }
+
+    /// Names ranges of text, as CSS.highlights does: ::highlight(name)
+    /// styles them. No ranges takes the name away.
+    public func SetHighlight(name: string, ranges: [(start: dom.TextPosition, end: dom.TextPosition)]) {
+        highlights[name] = ranges.isEmpty ? nil : ranges
+        needsPaint = true
+        needsRepaint = true
+    }
+
+    /// The highlights with the style each name's rules give it, where a rule
+    /// does: a highlight with none draws nothing, as CSS's does.
+    func paintHighlights() -> [paint.Highlight] {
+        var out: [paint.Highlight] = []
+        for (name, ranges) in highlights {
+            let which = name == "target-text" ? name : "highlight(\(name))"
+            guard let first = ranges.first else { continue }
+            let owner = first.start.Node.Kind == html.NodeKind.element ? first.start.Node : first.start.Node.Parent
+            guard let node = owner, let box = builder.byNode[node.Id],
+                  let style = resolver.ResolvePseudo(node, which, parent: box.Style, context: context) else { continue }
+            out.append(paint.Highlight(ranges: ranges, background: style.BackgroundColor, color: style.Color, inherited: box.Style.Color))
+        }
+        return out
+    }
+
+    /// A fragment directive's text (#:~:text=word), found and named for
+    /// ::target-text: its first place in the document, scrolled to. Answers
+    /// whether it was there.
+    @discardableResult
+    func goToTextFragment(text: string) -> bool {
+        guard let doc = Document else { return false }
+        highlights["target-text"] = nil
+        guard let hit = findText(text, in: doc.Tree.Root) else { return false }
+        highlights["target-text"] = [hit]
+        needsPaint = true
+        needsRepaint = true
+        if let p = hit.start.Node.Parent { ScrollIntoViewIfNeeded(p) }
+        return true
+    }
+
+    func findText(text: string, in node: html.Node) -> (start: dom.TextPosition, end: dom.TextPosition)? {
+        if node.Kind == html.NodeKind.text {
+            let hay = [uint8](node.Text.utf8)
+            let needle = [uint8](text.utf8)
+            if needle.isEmpty || hay.count < needle.count { return nil }
+            var i = 0
+            while i + needle.count <= hay.count {
+                var k = 0
+                while k < needle.count && hay[i + k] == needle[k] { k += 1 }
+                if k == needle.count {
+                    return (start: dom.TextPosition(Node: node, Offset: i), end: dom.TextPosition(Node: node, Offset: i + k))
+                }
+                i += 1
+            }
+            return nil
+        }
+        for c in node.Children {
+            if let r = findText(text, in: c) { return r }
+        }
+        return nil
     }
 
     /// The page's title, from <title>.
@@ -655,7 +725,7 @@ public final class Page {
         if animator.Active || !animator.events.isEmpty { return true }
         if bubbleNode != nil { return true }
         if scrollAnimation != nil || pendingSnap != nil { return true }
-        if mediaPlaying { return true }
+        if mediaPlaying || overscroll != 0 { return true }
         // Only what someone is listening for is worth a frame.
         if let doc = Document, doc.HasEventListeners {
             if !pendingImageEvents.isEmpty { return true }
@@ -690,6 +760,7 @@ public final class Page {
         dispatchAnimationEvents()
         dispatchImageEvents()
         dispatchLayoutEvents()
+        if easeOverscroll(time) { repaint = true }
         if advanceMedia() { repaint = true }
         if advanceScroll(time) { repaint = true }
         for (_, frame) in frames where frame.page.NeedsAnimation() {
@@ -787,6 +858,10 @@ public final class Page {
     /// whichever are stale.
     func update() {
         takeJournal()
+        // Layout is coming: what the scroll keeps its place by, where it is.
+        var anchor: (node: int64, y: float32)? = nil
+        if needsStyle || needsLayout { anchor = scrollAnchor() }
+        defer { keepScrollAnchor(anchor) }
         root?.ViewportScrollX = scroll.X
         root?.ViewportScrollY = scroll.Y
         if needsStyle {
@@ -874,6 +949,13 @@ public final class Page {
                 }
                 state.Images = images
                 state.MediaFrames = mediaFrames
+                if let d = dragging, d.started, let b = builder.byNode[d.source.Id] {
+                    state.DragImage = paint.DragImage(box: b, dx: d.at.X - d.start.X, dy: d.at.Y - d.start.Y)
+                }
+                if !highlights.isEmpty {
+                    state.Highlights = paintHighlights()
+                    state.TextOrder = builder.textOrder
+                }
                 for (id, m) in media {
                     state.MediaBars[id] = paint.MediaProgress(time: m.player.CurrentTime, duration: m.player.Duration, paused: m.player.Paused)
                 }
@@ -954,7 +1036,7 @@ public final class Page {
             var canvas = c
             canvas.ClipTo(viewRect)
             canvas.ClipTo(clip)
-            paint.Rasterize(rest, on: canvas, scale: scale, originX: float32(viewRect.X), originY: float32(viewRect.Y), scrollX: sx, scrollY: sy)
+            paint.Rasterize(rest, on: canvas, scale: scale, originX: float32(viewRect.X), originY: float32(viewRect.Y) - overscroll * scale, scrollX: sx, scrollY: sy)
         }
         return true
     }
@@ -968,6 +1050,7 @@ public final class Page {
         let list = displayList
         let sx = scroll.X
         let sy = scroll.Y
+        let stretch = overscroll
         let bg = Configuration.BackgroundColor
         let showBar = contentHeight > size.Height
         let barHeight = size.Height * size.Height / (contentHeight > 0 ? contentHeight : 1)
@@ -977,7 +1060,7 @@ public final class Page {
             var canvas = c
             canvas.ClipTo(viewRect)
             if bg.A > 0 { canvas.Fill(viewRect, bg) }
-            paint.Rasterize(list, on: canvas, scale: scale, originX: float32(viewRect.X), originY: float32(viewRect.Y), scrollX: sx, scrollY: sy)
+            paint.Rasterize(list, on: canvas, scale: scale, originX: float32(viewRect.X), originY: float32(viewRect.Y) - stretch * scale, scrollX: sx, scrollY: sy)
             if showBar {
                 let track = draw.Rect(origin.X + viewWidth - 10, origin.Y + barY + 2, 6, barHeight - 4).Snapped(scale: scale)
                 canvas.FillRounded(track, radii: draw.Radii(all: 3 * scale), draw.Color(0, 0, 0, 90))

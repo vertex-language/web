@@ -277,6 +277,7 @@ public final class BoxTreeBuilder {
                 box.IntrinsicHeight = 27
             case "file":
                 box.Replaced = .fileInput
+                box.FileButtonStyle = resolver.ResolvePseudo(node, "file-selector-button", parent: style, context: context)
                 let chosen = Values[node.Id] ?? ""
                 box.Text = chosen.isEmpty ? (node.HasAttribute("multiple") ? "No files chosen" : "No file chosen") : chosen
                 let face = style.Face
@@ -302,6 +303,14 @@ public final class BoxTreeBuilder {
             }
             box.IntrinsicWidth = 200
             box.IntrinsicHeight = 60
+            // field-sizing: content: as big as what it holds.
+            if style.FieldSizing == "content" {
+                let lines = box.Text.split(separator: "\n", omittingEmptySubsequences: false)
+                var widest: float32 = 0
+                for l in lines { widest = widest > style.Face.Measure(string(l)) ? widest : style.Face.Measure(string(l)) }
+                box.IntrinsicWidth = widest + 4
+                box.IntrinsicHeight = style.LineHeightPx * float32(lines.count > 0 ? lines.count : 1)
+            }
         case "select":
             box = Box(kind: .replaced, style: style, node: node)
             box.Replaced = .select
@@ -741,6 +750,7 @@ func markerText(type: cascade.ListStyleType, index: int, node: html.Node) -> str
     case .upperAlpha: return alpha(index, upper: true) + "."
     case .lowerRoman: return roman(index, upper: false) + "."
     case .upperRoman: return roman(index, upper: true) + "."
+    case .custom(let name): return cascade.CounterStyleText(name, n: index, marker: true) ?? "\(index)."
     }
 }
 

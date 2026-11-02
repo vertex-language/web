@@ -82,6 +82,9 @@ public final class RuleSet {
     /// Custom properties registered with @property, and the value each
     /// has where nothing sets it (its initial-value).
     var registered: [string: [css.Token]] = [:]
+    /// @starting-style's rules, and whether they are being read.
+    let starting = Buckets()
+    var inStarting = false
     /// @keyframes by name: a later rule of a name replaces an earlier.
     var keyframes: [string: [Keyframe]] = [:]
     /// The @container preludes around the rules being added.
@@ -165,6 +168,15 @@ public final class RuleSet {
                 let full = layer.isEmpty ? name : layer + "." + name
                 _ = layerRank(full)
                 addBlock(at.Rules, at.AtRules, media: media, layer: full, scope: scope)
+            case "starting-style":
+                // Rules a transition starts from when an element first shows.
+                inStarting = true
+                addBlock(at.Rules, at.AtRules, media: media, layer: layer, scope: scope)
+                inStarting = false
+            case "counter-style":
+                DefineCounterStyle(at)
+            case "function":
+                DefineCustomFunction(at)
             case "property":
                 // `@property --kit-accent { syntax: "<color>"; inherits:
                 // true; initial-value: blue }`: the value --kit-accent has
@@ -256,6 +268,10 @@ public final class RuleSet {
     }
 
     func bucket(r: StyleRule) {
+        if inStarting {
+            starting.add(r)
+            return
+        }
         all.append(r)
         let last = r.Selector.Compounds[r.Selector.Compounds.count - 1].Part
         if let pe = last.PseudoElement {
@@ -282,6 +298,9 @@ public final class RuleSet {
 
     /// Re-evaluates every @media rule for a viewport.
     func setViewport(width: float32, height: float32, dark: bool = false) {
+        conditionWidth = width
+        conditionHeight = height
+        conditionDark = dark
         if width == mediaWidth && height == mediaHeight && dark == mediaDark && PrefersReducedMotion == mediaMotion { return }
         mediaWidth = width
         mediaHeight = height
@@ -764,20 +783,25 @@ public final class StyleResolver {
         var authorList: [StyleRule] = []
         authorBuckets.candidates(node, into: &authorList)
         if uaList.isEmpty && authorList.isEmpty { return nil }
+        // Each origin sorted alone: the page's rules beat the user agent's
+        // whatever their specificity or the order inside each sheet.
         var matched: [StyleRule] = []
         for r in uaList where r.enabled {
             let m = selector.MatchComplexIn(r.Selector, node, context, pseudoElement: which)
             if r.usesState { StateTrace.append(StateEntry(node: node, rule: r, pseudo: which, matched: m)) }
             if m { matched.append(r) }
         }
+        var authored: [StyleRule] = []
         for r in authorList where r.enabled {
             var m = selector.MatchComplexIn(r.Selector, node, context, pseudoElement: which)
             if m && !r.containers.isEmpty { m = containersHold(r.containers, node) }
             if r.usesState { StateTrace.append(StateEntry(node: node, rule: r, pseudo: which, matched: m)) }
-            if m { matched.append(r) }
+            if m { authored.append(r) }
         }
-        if matched.isEmpty { return nil }
+        if matched.isEmpty && authored.isEmpty { return nil }
         sortRules(&matched)
+        sortRules(&authored)
+        matched.append(contentsOf: authored)
         let style = ComputedStyle(inheriting: parent)
         var ctx = ApplyContext(parent: parent, rootFontSize: RootFontSize, viewportWidth: ViewportWidth, viewportHeight: ViewportHeight, dark: Dark)
         ctx.rootLineHeight = RootLineHeight
@@ -806,11 +830,44 @@ public final class StyleResolver {
         ctx.dark = style.UsesDark(pageDark: Dark)
         for d in declarations where d.Prop == .fontSize { apply(d, style, ctx) }
         for d in declarations where d.Prop != .fontSize && d.Prop != .zoom && d.Prop != .colorScheme && d.Prop != .direction { apply(d, style, ctx) }
+        // initial-letter: a letter as tall as so many lines, beside them.
+        if which == "first-letter" && style.InitialLetter >= 1 {
+            let lh = parent.LineHeightPx
+            style.FontSize = ((style.InitialLetter - 1) * lh + parent.FontSize * 0.7) / 0.7
+            style.Float = .left
+            style.LineHeight = .px(style.InitialLetter * lh)
+        }
         // ::before and ::after exist only with content; ::placeholder
         // is the field's own.
         if (which == "before" || which == "after") && style.Content == nil { return nil }
         finish(style, node: node, root: false)
         return style
+    }
+
+    /// What a transition starts from when an element first shows, where
+    /// @starting-style rules match it: its style with their declarations
+    /// over it. Nil where none do.
+    public func ResolveStarting(node: html.Node, style: ComputedStyle, parent: ComputedStyle?, context: selector.MatchContext) -> ComputedStyle? {
+        if Author.starting.isEmpty { return nil }
+        var list: [StyleRule] = []
+        Author.starting.candidates(node, into: &list)
+        var matched: [StyleRule] = []
+        for r in list where r.enabled && selector.MatchComplexIn(r.Selector, node, context, pseudoElement: nil) { matched.append(r) }
+        if matched.isEmpty { return nil }
+        sortRules(&matched)
+        let base = parent ?? defaultStyle
+        let out = ComputedStyle(inheriting: base)
+        var ctx = ApplyContext(parent: base, rootFontSize: RootFontSize, viewportWidth: ViewportWidth, viewportHeight: ViewportHeight, dark: Dark)
+        ctx.rootLineHeight = RootLineHeight
+        var declared = Set<string>()
+        for r in matched {
+            for d in r.Declarations {
+                apply(d, out, ctx)
+                for p in AnimatableProperties where p.Prop == d.Prop { declared.insert(p.Name) }
+            }
+        }
+        for p in AnimatableProperties where !declared.contains(p.Name) { copyProperty(p.Prop, from: style, to: out) }
+        return out
     }
 
     /// The style of an element, given its parent's.
@@ -1391,6 +1448,25 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
         s.BlendMode = blendModeOf(keywordOf(v) ?? "normal")
     case .isolation:
         s.Isolated = keywordOf(v) == "isolate"
+    case .imageRendering: if let k = keywordOf(v) { s.ImageRendering = k }
+    case .overflowClipMargin: if let p = pixels(v, s, ctx) { s.OverflowClipMargin = p }
+    case .fieldSizing: if let k = keywordOf(v) { s.FieldSizing = k }
+    case .textBoxTrim: if let k = keywordOf(v) { s.TextBoxTrim = k }
+    case .textBoxEdge: if let k = keywordOf(v) { s.TextBoxEdge = k }
+    case .initialLetter: if case .number(let n) = v { s.InitialLetter = n }
+    case .overflowAnchor: s.NoScrollAnchor = keywordOf(v) == "none"
+    case .perspective:
+        if case .none = v { s.Perspective = 0 } else if let d = pixels(v, s, ctx) { s.Perspective = math.Max(d, 0) }
+    case .perspectiveOrigin:
+        let ops = transformOps(v, s, ctx)
+        if ops.count == 1 && ops[0].Lengths.count == 2 {
+            s.PerspectiveOriginX = ops[0].Lengths[0]
+            s.PerspectiveOriginY = ops[0].Lengths[1]
+        }
+    case .backfaceVisibility:
+        s.BackfaceHidden = keywordOf(v) == "hidden"
+    case .transformStyle:
+        s.Preserve3D = keywordOf(v) == "preserve-3d"
     case .filter:
         s.Filters = filtersOf(v, s, ctx)
     case .overflowX: if let k = keywordOf(v) { s.OverflowX = overflowOf(k) }
@@ -1636,7 +1712,7 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
             case "upper-alpha", "upper-latin": s.ListStyleType = .upperAlpha
             case "lower-roman": s.ListStyleType = .lowerRoman
             case "upper-roman": s.ListStyleType = .upperRoman
-            default: s.ListStyleType = .disc
+            default: s.ListStyleType = CounterStyles[k] != nil ? .custom(k) : .disc
             }
         }
     case .listStylePosition:
@@ -2210,6 +2286,19 @@ func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .boxDecorationBreak: b.DecorationClone = a.DecorationClone
     case .mixBlendMode: b.BlendMode = a.BlendMode
     case .isolation: b.Isolated = a.Isolated
+    case .imageRendering: b.ImageRendering = a.ImageRendering
+    case .overflowClipMargin: b.OverflowClipMargin = a.OverflowClipMargin
+    case .fieldSizing: b.FieldSizing = a.FieldSizing
+    case .textBoxTrim: b.TextBoxTrim = a.TextBoxTrim
+    case .textBoxEdge: b.TextBoxEdge = a.TextBoxEdge
+    case .initialLetter: b.InitialLetter = a.InitialLetter
+    case .overflowAnchor: b.NoScrollAnchor = a.NoScrollAnchor
+    case .perspective: b.Perspective = a.Perspective
+    case .perspectiveOrigin:
+        b.PerspectiveOriginX = a.PerspectiveOriginX
+        b.PerspectiveOriginY = a.PerspectiveOriginY
+    case .backfaceVisibility: b.BackfaceHidden = a.BackfaceHidden
+    case .transformStyle: b.Preserve3D = a.Preserve3D
     case .borderImageSource: b.BorderImageURL = a.BorderImageURL; b.BorderImageGradient = a.BorderImageGradient
     case .borderImageSlice: b.BorderImageSlice = a.BorderImageSlice; b.BorderImageFill = a.BorderImageFill
     case .borderImageWidth: b.BorderImageWidths = a.BorderImageWidths

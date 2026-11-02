@@ -60,6 +60,17 @@ public enum Prop: int32 {
     case maskImage
     case mixBlendMode
     case isolation
+    case overflowAnchor
+    case perspective
+    case imageRendering
+    case overflowClipMargin
+    case fieldSizing
+    case textBoxTrim
+    case textBoxEdge
+    case initialLetter
+    case perspectiveOrigin
+    case backfaceVisibility
+    case transformStyle
     case borderImageSource
     case borderImageSlice
     case borderImageWidth
@@ -355,6 +366,11 @@ let propNames: [string: Prop] = [
     "clip-path": .clipPath, "-webkit-clip-path": .clipPath,
     "mask-image": .maskImage, "-webkit-mask-image": .maskImage,
     "mix-blend-mode": .mixBlendMode, "isolation": .isolation,
+    "image-rendering": .imageRendering, "overflow-clip-margin": .overflowClipMargin, "field-sizing": .fieldSizing,
+    "text-box-trim": .textBoxTrim, "text-box-edge": .textBoxEdge, "initial-letter": .initialLetter,
+    "overflow-anchor": .overflowAnchor,
+    "perspective": .perspective, "perspective-origin": .perspectiveOrigin, "backface-visibility": .backfaceVisibility,
+    "transform-style": .transformStyle,
     "border-image-source": .borderImageSource, "border-image-slice": .borderImageSlice,
     "border-image-width": .borderImageWidth, "border-image-outset": .borderImageOutset,
     "border-image-repeat": .borderImageRepeat,
@@ -773,11 +789,24 @@ func longhands(d: Declaration) -> [Longhand] {
     case "animation", "-webkit-animation":
         guard let parts = parseAnimationShorthand(tokens) else { return [] }
         for (p, v) in parts { set(p, v) }
+    case "text-box":
+        // normal, or how far to trim and to what.
+        if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) == "normal" {
+            set(.textBoxTrim, .keyword("none"))
+        } else {
+            var trim = "trim-both"
+            var edges: [string] = []
+            for t in tokens where t.Kind == .ident {
+                let w = lower(t.Value)
+                if w.hasPrefix("trim-") || w == "none" { trim = w } else { edges.append(w) }
+            }
+            set(.textBoxTrim, .keyword(trim))
+            if !edges.isEmpty { set(.textBoxEdge, .keyword(joinWords(edges))) }
+        }
     case "place-items":
         if let v = parseValue(.alignItems, [tokens[0]]) { set(.alignItems, v) }
         if let j = parseValue(.justifyItems, [tokens.count > 1 ? tokens[1] : tokens[0]]) { set(.justifyItems, j) }
-    case "perspective", "perspective-origin", "backface-visibility",
-         "transform-style", "transform-box",
+    case "transform-box",
          "font-variant", "font-stretch", "font-feature-settings", "src", "unicode-range",
          "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
          "writing-mode",
@@ -2142,6 +2171,38 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
         }
     case .isolation:
         return kw == "auto" || kw == "isolate" ? .keyword(kw) : nil
+    case .imageRendering:
+        switch kw {
+        case "auto", "smooth", "high-quality", "crisp-edges", "pixelated": return .keyword(kw)
+        default: return nil
+        }
+    case .overflowClipMargin:
+        return parseLengthValue(t, allowAuto: false)
+    case .fieldSizing:
+        return kw == "fixed" || kw == "content" ? .keyword(kw) : nil
+    case .textBoxTrim:
+        switch kw {
+        case "none", "trim-start", "trim-end", "trim-both": return .keyword(kw)
+        default: return nil
+        }
+    case .textBoxEdge:
+        var words: [string] = []
+        for tok in tokens where tok.Kind == .ident { words.append(lower(tok.Value)) }
+        return words.isEmpty ? nil : .keyword(joinWords(words))
+    case .initialLetter:
+        if kw == "normal" { return .number(0) }
+        return t.Kind == .number && t.NumberVal >= 1 ? .number(t.NumberVal) : nil
+    case .overflowAnchor:
+        return kw == "auto" || kw == "none" ? .keyword(kw) : nil
+    case .perspective:
+        if kw == "none" { return Value.none }
+        return parseLengthValue(t, allowAuto: false)
+    case .perspectiveOrigin:
+        return parseTransformOrigin(tokens)
+    case .backfaceVisibility:
+        return kw == "visible" || kw == "hidden" ? .keyword(kw) : nil
+    case .transformStyle:
+        return kw == "flat" || kw == "preserve-3d" ? .keyword(kw) : nil
     case .filter, .backdropFilter:
         if kw == "none" { return Value.none }
         return parseFilters(tokens)
@@ -2270,7 +2331,9 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
         case "none", "disc", "circle", "square", "decimal", "decimal-leading-zero", "lower-alpha", "upper-alpha",
              "lower-latin", "upper-latin", "lower-roman", "upper-roman":
             return .keyword(kw)
-        default: return nil
+        default:
+            // A name @counter-style may give.
+            return t.Kind == .ident && tokens.count == 1 ? .keyword(kw) : nil
         }
     case .listStylePosition:
         if kw == "inside" || kw == "outside" { return .keyword(kw) }

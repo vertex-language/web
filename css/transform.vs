@@ -15,9 +15,7 @@ public struct TransformFunction {
     }
 }
 
-/// `transform`: none, or a list of transform functions. The 3D ones are
-/// read in their 2D projection: z is dropped, rotateX/Y and perspective
-/// are taken as nothing.
+/// `transform`: none, or a list of transform functions, 3D ones among them.
 func parseTransformList(tokens: [Token]) -> Value? {
     if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) == "none" { return Value.none }
     var out: [TransformFunction] = []
@@ -117,11 +115,12 @@ func transformFunction(name: string, args: [[Token]]) -> TransformFunction? {
             y = a
         case "translate3d":
             if args.count != 3 { return nil }
-            guard let a = transformLength(args[0]), let b = transformLength(args[1]) else { return nil }
-            x = a
-            y = b
+            guard let a = transformLength(args[0]), let b = transformLength(args[1]), let c = transformLength(args[2]) else { return nil }
+            return TransformFunction("translate3d", [a, b, c])
         default:
-            return TransformFunction("", [])
+            if args.count != 1 { return nil }
+            guard let c = transformLength(args[0]) else { return nil }
+            return TransformFunction("translate3d", [zero, zero, c])
         }
         return TransformFunction("translate", [x, y])
     case "scale", "scalex", "scaley", "scale3d", "scalez":
@@ -142,24 +141,29 @@ func transformFunction(name: string, args: [[Token]]) -> TransformFunction? {
             return TransformFunction("scale", [.number(1), .number(nums[0])])
         case "scale3d":
             if nums.count != 3 { return nil }
-            return TransformFunction("scale", [.number(nums[0]), .number(nums[1])])
+            return TransformFunction("scale3d", [.number(nums[0]), .number(nums[1]), .number(nums[2])])
         default:
-            return nums.count == 1 ? TransformFunction("", []) : nil
+            return nums.count == 1 ? TransformFunction("scale3d", [.number(1), .number(1), .number(nums[0])]) : nil
         }
     case "rotate", "rotatez":
         if args.count != 1 { return nil }
         guard let a = transformAngle(args[0]) else { return nil }
         return TransformFunction("rotate", [.number(a)])
     case "rotate3d":
-        // Only a turn about z shows in 2D.
         if args.count != 4 { return nil }
         guard let x = transformNumber(args[0]), let y = transformNumber(args[1]), let z = transformNumber(args[2]),
               let a = transformAngle(args[3]) else { return nil }
         if x == 0 && y == 0 && z != 0 { return TransformFunction("rotate", [.number(z > 0 ? a : -a)]) }
-        return TransformFunction("", [])
-    case "rotatex", "rotatey", "perspective":
+        return TransformFunction("rotate3d", [.number(x), .number(y), .number(z), .number(a)])
+    case "rotatex", "rotatey":
         if args.count != 1 { return nil }
-        return TransformFunction("", [])
+        guard let a = transformAngle(args[0]) else { return nil }
+        return TransformFunction("rotate3d", [.number(name == "rotatex" ? 1 : 0), .number(name == "rotatey" ? 1 : 0), .number(0), .number(a)])
+    case "perspective":
+        if args.count != 1 { return nil }
+        if args[0].count == 1 && args[0][0].Kind == .ident && lower(args[0][0].Value) == "none" { return TransformFunction("", []) }
+        guard let d = transformLength(args[0]) else { return nil }
+        return TransformFunction("perspective", [d])
     case "skew", "skewx", "skewy":
         var angles: [float32] = []
         for a in args {
@@ -183,8 +187,7 @@ func transformFunction(name: string, args: [[Token]]) -> TransformFunction? {
             return TransformFunction("matrix", nums.map { Value.number($0) })
         }
         if nums.count != 16 { return nil }
-        // Column-major: the 2D part is m11 m12 m21 m22 m41 m42.
-        return TransformFunction("matrix", [nums[0], nums[1], nums[4], nums[5], nums[12], nums[13]].map { Value.number($0) })
+        return TransformFunction("matrix3d", nums.map { Value.number($0) })
     default:
         return nil
     }

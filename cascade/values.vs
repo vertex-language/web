@@ -168,6 +168,8 @@ public enum ListStyleType: Equatable {
     case upperAlpha
     case lowerRoman
     case upperRoman
+    /// A name @counter-style gave.
+    case custom(string)
 }
 
 public enum ListStylePosition: Equatable {
