@@ -76,7 +76,7 @@ dialog::backdrop { background-color: rgba(0, 0, 0, 0.1); }
 video { object-fit: contain; }
 input::file-selector-button { background-color: rgb(239, 239, 239); border: 1px solid rgb(118, 118, 118); border-radius: 3px; color: black; }
 ::target-text { background-color: rgb(255, 235, 59); }
-select::picker(select) { display: block; position: absolute; top: 100%; left: 0; z-index: 2147483647; min-width: 100%; box-sizing: border-box; background-color: #ffffff; border: 1px solid #767676; border-radius: 4px; padding: 2px; color: black; }
+select::picker(select) { display: block; position: fixed; top: anchor(bottom); left: anchor(left); position-try-fallbacks: flip-block, flip-inline, flip-block flip-inline; z-index: 2147483647; min-width: anchor-size(width); box-sizing: border-box; background-color: #ffffff; border: 1px solid #767676; border-radius: 4px; padding: 2px; color: black; }
 select::picker-icon { content: "▾"; margin-left: 6px; }
 br { display: inline; }
 table { display: table; box-sizing: border-box; border-spacing: 2px; border-collapse: separate; text-indent: 0; }

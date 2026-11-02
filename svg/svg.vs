@@ -94,6 +94,9 @@ struct Shape {
     var filters: [draw.Filter] = []
     /// A <text> run instead of an outline.
     var text: TextRun? = nil
+    /// A group instead of an outline: its shapes, drawn apart and taking the
+    /// effects as one.
+    var group: Drawing? = nil
 }
 
 /// An <svg> element's shapes, ready to draw into a box.
@@ -145,22 +148,40 @@ public final class Drawing {
     func drawShapes(on canvas: draw.Canvas, view: Matrix, currentColor: draw.Color, fill: draw.Color?, fillNone: bool, solid: bool) {
         for s in shapes {
             let m = view.Times(s.matrix)
-            if s.clips.isEmpty && s.masks.isEmpty && s.filters.isEmpty {
+            if s.group == nil && s.clips.isEmpty && s.masks.isEmpty && s.filters.isEmpty {
                 drawShape(s, m, on: canvas, currentColor: currentColor, fill: fill, fillNone: fillNone, solid: solid)
                 continue
             }
             // Apart, then filtered and cut, then put back.
-            var spread: float32 = 0
             let unit = math.Sqrt(math.Abs(m.A * m.D - m.B * m.C))
-            for f in s.filters { spread += f.Scaled(unit).Reach }
             var area = reach(s, m)
-            if spread > 0 { area = draw.IRect(area.X - int32(spread) - 1, area.Y - int32(spread) - 1, area.Width + 2 * int32(spread) + 2, area.Height + 2 * int32(spread) + 2) }
+            let box = boundingBox(s)
+            let start = m.Apply(0, 0)
+            // What a filter's region is reckoned from: the fill's box.
+            var filterBox = area
+            if s.text == nil {
+                let f = m.Times(box)
+                let c0 = f.Apply(0, 0)
+                let c1 = f.Apply(1, 1)
+                let x0 = math.Min(c0.x, c1.x)
+                let y0 = math.Min(c0.y, c1.y)
+                filterBox = draw.IRect(int32(math.Floor(x0)), int32(math.Floor(y0)), int32(math.Ceil(math.Abs(c1.x - c0.x))), int32(math.Ceil(math.Abs(c1.y - c0.y))))
+            }
+            var spread: float32 = 0
+            for f in s.filters { spread += f.Scaled(unit).ReachOver(box: filterBox, originX: start.x, originY: start.y) }
+            if spread > 0 {
+                let grow = int32(math.Ceil(spread)) + 1
+                area = area.Union(draw.IRect(filterBox.X - grow, filterBox.Y - grow, filterBox.Width + 2 * grow, filterBox.Height + 2 * grow))
+            }
             area = area.Intersect(canvas.Clip)
             if area.IsEmpty { continue }
             let layer = draw.Layer(area)
-            drawShape(s, m, on: layer.Canvas, currentColor: currentColor, fill: fill, fillNone: fillNone, solid: solid)
-            if !s.filters.isEmpty { layer.Apply(s.filters.map { $0.Scaled(unit) }) }
-            let box = boundingBox(s)
+            if let g = s.group {
+                g.drawShapes(on: layer.Canvas, view: view, currentColor: currentColor, fill: fill, fillNone: fillNone, solid: solid)
+            } else {
+                drawShape(s, m, on: layer.Canvas, currentColor: currentColor, fill: fill, fillNone: fillNone, solid: solid)
+            }
+            if !s.filters.isEmpty { layer.Apply(s.filters.map { $0.Scaled(unit) }, box: filterBox, originX: start.x, originY: start.y) }
             for c in s.clips {
                 let alpha = draw.Layer(area)
                 c.drawShapes(on: alpha.Canvas, view: c.boundingBoxUnits ? m.Times(box) : m, currentColor: currentColor, fill: nil, fillNone: false, solid: true)
@@ -173,6 +194,7 @@ public final class Drawing {
                 layer.MaskByLuminance(lum)
                 lum.Free()
             }
+            if s.group != nil && s.opacity < 1 { layer.Apply([.opacity(s.opacity)]) }
             layer.Composite(onto: canvas)
             layer.Free()
         }
@@ -252,6 +274,12 @@ public final class Drawing {
 
     /// Where a shape can paint, in device pixels.
     func reach(s: Shape, m: Matrix) -> draw.IRect {
+        if let g = s.group, let back = s.matrix.Inverted() {
+            let view = m.Times(back)
+            var out = draw.IRect.zero
+            for c in g.shapes { out = out.Union(reach(c, view.Times(c.matrix))) }
+            return out
+        }
         if s.text != nil { return draw.IRect(-16384, -16384, 32768, 32768) }
         let b = devicePath(s, m).Bounds
         let det = m.A * m.D - m.B * m.C
@@ -328,54 +356,219 @@ public func ContentOf(target: html.Node) -> Drawing? {
     let root = fromHTML(top)
     var ids: [string: element] = [:]
     collectIds(root, &ids)
-    guard let e = ids[id], let d = contentOf(e, ids) else { return nil }
-    let out = Drawing(viewBox: d.boundingBoxUnits ? draw.Rect(0, 0, 1, 1) : nil, stretch: d.boundingBoxUnits)
-    out.shapes = d.shapes
-    return out
+    return readingIn(target, read: {
+        guard let e = ids[id], let d = contentOf(e, ids) else { return nil }
+        let out = Drawing(viewBox: d.boundingBoxUnits ? draw.Rect(0, 0, 1, 1) : nil, stretch: d.boundingBoxUnits)
+        out.shapes = d.shapes
+        return out
+    })
 }
 
-/// What an SVG <filter> does, as CSS's filters, its primitives in order.
+/// What an SVG <filter> does: a graph of its primitives.
 public func FiltersOf(target: html.Node) -> [draw.Filter] {
     return filtersIn(fromHTML(target))
 }
 
-func filtersIn(e: element) -> [draw.Filter] {
-    var out: [draw.Filter] = []
-    func number(n: element, name: string) -> float32 {
-        return coordinate(n.GetAttribute(name)) ?? 0
-    }
-    for c in e.Children {
-        switch c.TagName {
-        case "fegaussianblur":
-            let v = (c.GetAttribute("stddeviation") ?? "0").split(whereSeparator: { $0 == " " || $0 == "," }).first.map { string($0) } ?? "0"
-            out.append(.blur(coordinate(v) ?? 0))
-        case "feoffset":
-            out.append(.offset(number(c, name: "dx"), number(c, name: "dy")))
-        case "fedropshadow":
-            var color = draw.Color(0, 0, 0)
-            if let flood = c.GetAttribute("flood-color"), let parsed = css.ParseColor(trim(flood)) { color = parsed }
-            if let o = coordinate(c.GetAttribute("flood-opacity")) { color = color.Faded(o) }
-            let v = (c.GetAttribute("stddeviation") ?? "0").split(whereSeparator: { $0 == " " || $0 == "," }).first.map { string($0) } ?? "0"
-            out.append(.dropShadow(c.GetAttribute("dx") != nil ? number(c, name: "dx") : 2, c.GetAttribute("dy") != nil ? number(c, name: "dy") : 2, coordinate(v) ?? 2, color))
-        case "fecolormatrix":
-            let kind = css.lower(c.GetAttribute("type") ?? "matrix")
-            var values: [float32] = []
-            for part in (c.GetAttribute("values") ?? "").split(whereSeparator: { $0 == " " || $0 == "," || $0 == "\n" }) {
-                values.append(coordinate(string(part)) ?? 0)
-            }
-            switch kind {
-            case "saturate": out.append(.saturate(values.first ?? 1))
-            case "huerotate": out.append(.hueRotate(values.first ?? 0))
-            case "luminancetoalpha":
-                out.append(.matrix([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.2125, 0.7154, 0.0721, 0, 0]))
-            default:
-                if values.count == 20 { out.append(.matrix(values)) }
-            }
-        default:
-            break
-        }
+/// A list of numbers, however they're written apart.
+func numbersIn(v: string?) -> [float32] {
+    var out: [float32] = []
+    for part in (v ?? "").split(whereSeparator: { $0 == " " || $0 == "," || $0 == "\n" || $0 == "\t" }) {
+        out.append(coordinate(string(part)) ?? 0)
     }
     return out
+}
+
+/// A length of a filter's region: a percentage, or a fraction or user units.
+func regionLength(v: string?, fallback: float32) -> float32 {
+    guard let t = v else { return fallback }
+    if t.hasSuffix("%"), let n = coordinate(string(t.dropLast())) { return n / 100 }
+    return coordinate(t) ?? fallback
+}
+
+func filterInput(v: string?) -> draw.FilterInput {
+    guard let name = v else { return .previous }
+    switch name {
+    case "SourceGraphic": return .source
+    case "SourceAlpha": return .sourceAlpha
+    // Nothing paints these here: what's filtered stands in.
+    case "FillPaint", "StrokePaint", "BackgroundImage", "BackgroundAlpha": return .source
+    default: return .named(name)
+    }
+}
+
+func colorAttribute(c: element, name: string, opacity: string, fallback: draw.Color) -> draw.Color {
+    var color = fallback
+    if let v = c.GetAttribute(name), let parsed = css.ParseColor(trim(v)) { color = parsed }
+    if let o = coordinate(c.GetAttribute(opacity)) { color = color.Faded(o) }
+    return color
+}
+
+func channelTransfer(e: element?) -> draw.ChannelTransfer {
+    guard let f = e else { return .identity }
+    switch css.lower(f.GetAttribute("type") ?? "identity") {
+    case "table": return .table(numbersIn(f.GetAttribute("tablevalues")))
+    case "discrete": return .discrete(numbersIn(f.GetAttribute("tablevalues")))
+    case "linear": return .linear(coordinate(f.GetAttribute("slope")) ?? 1, coordinate(f.GetAttribute("intercept")) ?? 0)
+    case "gamma": return .gamma(coordinate(f.GetAttribute("amplitude")) ?? 1, coordinate(f.GetAttribute("exponent")) ?? 1, coordinate(f.GetAttribute("offset")) ?? 0)
+    default: return .identity
+    }
+}
+
+func blendModeNamed(v: string?) -> draw.BlendMode {
+    switch css.lower(v ?? "normal") {
+    case "multiply": return .multiply
+    case "screen": return .screen
+    case "overlay": return .overlay
+    case "darken": return .darken
+    case "lighten": return .lighten
+    case "color-dodge": return .colorDodge
+    case "color-burn": return .colorBurn
+    case "hard-light": return .hardLight
+    case "soft-light": return .softLight
+    case "difference": return .difference
+    case "exclusion": return .exclusion
+    case "hue": return .hue
+    case "saturation": return .saturation
+    case "color": return .color
+    case "luminosity": return .luminosity
+    default: return .normal
+    }
+}
+
+func channelNamed(v: string?) -> int32 {
+    switch v ?? "A" {
+    case "R": return 0
+    case "G": return 1
+    case "B": return 2
+    default: return 3
+    }
+}
+
+/// A primitive's operation; nil for what isn't one.
+func filterOp(c: element, width: float32, height: float32) -> draw.FilterOp? {
+    func number(name: string, fallback: float32 = 0) -> float32 {
+        return coordinate(c.GetAttribute(name)) ?? fallback
+    }
+    /// A number that can be one or two: a pair's second is the first's copy.
+    func pair(name: string, fallback: float32 = 0) -> (x: float32, y: float32) {
+        let v = numbersIn(c.GetAttribute(name))
+        if v.isEmpty { return (x: fallback, y: fallback) }
+        return (x: v[0], y: v.count > 1 ? v[1] : v[0])
+    }
+    switch c.TagName {
+    case "fegaussianblur":
+        let d = pair("stddeviation")
+        return .blur(d.x, d.y)
+    case "feoffset":
+        return .simple(.offset(number("dx"), number("dy")))
+    case "fedropshadow":
+        let d = pair("stddeviation", fallback: 2)
+        return .simple(.dropShadow(number("dx", fallback: 2), number("dy", fallback: 2), d.x, colorAttribute(c, "flood-color", "flood-opacity", draw.Color(0, 0, 0))))
+    case "fecolormatrix":
+        let values = numbersIn(c.GetAttribute("values"))
+        switch css.lower(c.GetAttribute("type") ?? "matrix") {
+        case "saturate": return .simple(.saturate(values.first ?? 1))
+        case "huerotate": return .simple(.hueRotate(values.first ?? 0))
+        case "luminancetoalpha":
+            return .simple(.matrix([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.2125, 0.7154, 0.0721, 0, 0]))
+        default:
+            if values.count == 20 { return .simple(.matrix(values)) }
+            return .simple(.matrix([1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0]))
+        }
+    case "feflood":
+        return .flood(colorAttribute(c, "flood-color", "flood-opacity", draw.Color(0, 0, 0)))
+    case "feblend":
+        return .blend(blendModeNamed(c.GetAttribute("mode")))
+    case "fecomposite":
+        switch css.lower(c.GetAttribute("operator") ?? "over") {
+        case "in": return .composite(.in_)
+        case "out": return .composite(.out)
+        case "atop": return .composite(.atop)
+        case "xor": return .composite(.xor)
+        case "lighter": return .composite(.lighter)
+        case "arithmetic": return .composite(.arithmetic(number("k1"), number("k2"), number("k3"), number("k4")))
+        default: return .composite(.over)
+        }
+    case "femerge":
+        var inputs: [draw.FilterInput] = []
+        for n in c.Children where n.TagName == "femergenode" { inputs.append(filterInput(n.GetAttribute("in"))) }
+        return .merge(inputs)
+    case "fecomponenttransfer":
+        func channel(name: string) -> draw.ChannelTransfer {
+            var found: element? = nil
+            for n in c.Children where n.TagName == name { found = n }
+            return channelTransfer(found)
+        }
+        return .transfer(channel("fefuncr"), channel("fefuncg"), channel("fefuncb"), channel("fefunca"))
+    case "femorphology":
+        let r = pair("radius")
+        return .morphology(r.x, r.y, css.lower(c.GetAttribute("operator") ?? "erode") == "dilate")
+    case "fetile":
+        return .tile
+    case "feturbulence":
+        let f = pair("basefrequency")
+        return .turbulence(f.x, f.y, int32(number("numoctaves", fallback: 1)), int32(number("seed")), css.lower(c.GetAttribute("type") ?? "turbulence") == "fractalnoise")
+    case "fedisplacementmap":
+        return .displacement(number("scale"), channelNamed(c.GetAttribute("xchannelselector")), channelNamed(c.GetAttribute("ychannelselector")))
+    case "feconvolvematrix":
+        let order = pair("order", fallback: 3)
+        let columns = int32(order.x)
+        let rows = int32(order.y)
+        let kernel = numbersIn(c.GetAttribute("kernelmatrix"))
+        var total: float32 = 0
+        for v in kernel { total += v }
+        return .convolve(columns, rows, kernel, number("divisor", fallback: total == 0 ? 1 : total), number("bias"), int32(number("targetx", fallback: float32(columns / 2))), int32(number("targety", fallback: float32(rows / 2))), css.lower(c.GetAttribute("preservealpha") ?? "false") == "true")
+    case "fediffuselighting", "fespecularlighting":
+        var light = draw.LightSource.distant(0, 0)
+        let radian = float32(math.Pi) / 180
+        for n in c.Children {
+            func at(name: string) -> float32 { return coordinate(n.GetAttribute(name)) ?? 0 }
+            switch n.TagName {
+            case "fedistantlight": light = .distant(at("azimuth") * radian, at("elevation") * radian)
+            case "fepointlight": light = .point(at("x"), at("y"), at("z"))
+            case "fespotlight":
+                let cone = n.GetAttribute("limitingconeangle") != nil ? at("limitingconeangle") * radian : -1
+                light = .spot(at("x"), at("y"), at("z"), at("pointsatx"), at("pointsaty"), at("pointsatz"), coordinate(n.GetAttribute("specularexponent")) ?? 1, cone)
+            default: break
+            }
+        }
+        let color = colorAttribute(c, "lighting-color", "lighting-opacity", draw.Color(255, 255, 255))
+        if c.TagName == "fediffuselighting" { return .lighting(number("surfacescale", fallback: 1), number("diffuseconstant", fallback: 1), color, light, -1) }
+        return .lighting(number("surfacescale", fallback: 1), number("specularconstant", fallback: 1), color, light, number("specularexponent", fallback: 1))
+    case "feimage":
+        // What it would show isn't drawn: as for an image that didn't load.
+        return .flood(draw.Color.transparent)
+    default:
+        return nil
+    }
+}
+
+func filtersIn(e: element) -> [draw.Filter] {
+    var g = draw.FilterGraph()
+    g.RegionInBox = css.lower(e.GetAttribute("filterunits") ?? "objectboundingbox") != "userspaceonuse"
+    g.StepsInBox = css.lower(e.GetAttribute("primitiveunits") ?? "userspaceonuse") == "objectboundingbox"
+    g.X = regionLength(e.GetAttribute("x"), fallback: g.RegionInBox ? -0.1 : 0)
+    g.Y = regionLength(e.GetAttribute("y"), fallback: g.RegionInBox ? -0.1 : 0)
+    g.Width = regionLength(e.GetAttribute("width"), fallback: g.RegionInBox ? 1.2 : 0)
+    g.Height = regionLength(e.GetAttribute("height"), fallback: g.RegionInBox ? 1.2 : 0)
+    let linear = css.lower(e.GetAttribute("color-interpolation-filters") ?? "linearrgb") != "srgb"
+    for c in e.Children {
+        guard let op = filterOp(c, width: g.Width, height: g.Height) else { continue }
+        var step = draw.FilterStep(op: op)
+        step.In = filterInput(c.GetAttribute("in"))
+        // The first primitive's input is the source, as is a missing in2.
+        if g.Steps.isEmpty, case .previous = step.In { step.In = .source }
+        step.In2 = filterInput(c.GetAttribute("in2"))
+        if g.Steps.isEmpty, case .previous = step.In2 { step.In2 = .source }
+        step.Result = c.GetAttribute("result") ?? ""
+        step.X = coordinate(c.GetAttribute("x"))
+        step.Y = coordinate(c.GetAttribute("y"))
+        step.Width = coordinate(c.GetAttribute("width"))
+        step.Height = coordinate(c.GetAttribute("height"))
+        if let v = c.GetAttribute("color-interpolation-filters") { step.Linear = css.lower(v) != "srgb" } else { step.Linear = linear }
+        g.Steps.append(step)
+    }
+    return [.graph(g)]
 }
 
 /// Where a path's corners are, in its own units, and which way it goes there.
@@ -473,7 +666,7 @@ func placeMarker(m: element, at v: (x: float32, y: float32, angle: float32), rev
 
 /// What an <svg> element draws.
 public func Parse(root: html.Node) -> Drawing {
-    return parse(fromHTML(root))
+    return readingIn(root, read: { parse(fromHTML(root)) })!
 }
 
 func parse(root: element) -> Drawing {
@@ -685,7 +878,14 @@ func walk(n: element, ctx: Context, d: Drawing, ids: [string: element]) {
             walkUse(c, ctx, d, ids)
         case "g", "a", "switch":
             if isHidden(c) { continue }
-            walk(c, ctx.with(c, ids: ids), d, ids)
+            let inner = ctx.with(c, ids: ids)
+            if hasGroupEffects(ctx, inner) {
+                let group = Drawing(viewBox: nil, stretch: false)
+                walk(c, withoutEffects(inner), group, ids)
+                d.shapes.append(groupShape(group, inner))
+            } else {
+                walk(c, inner, d, ids)
+            }
         case "svg":
             var inner = ctx.with(c, ids: ids)
             inner.matrix = inner.matrix.Times(viewportOf(c, width: lengthAttribute(c.GetAttribute("width")), height: lengthAttribute(c.GetAttribute("height"))))

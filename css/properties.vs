@@ -67,6 +67,8 @@ public enum Prop: int32 {
     case transformBox
     case timelineScope
     case positionVisibility
+    case positionTryOrder
+    case anchorScope
     case shapeOutside
     case shapeMargin
     case cornerShape
@@ -436,7 +438,7 @@ let propNames: [string: Prop] = [
     "shape-outside": .shapeOutside, "shape-margin": .shapeMargin, "corner-shape": .cornerShape, "interpolate-size": .interpolateSize,
     "mask-origin": .maskOrigin, "mask-clip": .maskClip, "-webkit-mask-origin": .maskOrigin, "-webkit-mask-clip": .maskClip,
     "-webkit-text-stroke-width": .textStrokeWidth, "-webkit-text-stroke-color": .textStrokeColor, "paint-order": .paintOrder,
-    "transform-box": .transformBox, "timeline-scope": .timelineScope, "position-visibility": .positionVisibility,
+    "transform-box": .transformBox, "timeline-scope": .timelineScope, "position-visibility": .positionVisibility, "position-try-order": .positionTryOrder, "anchor-scope": .anchorScope,
     "overflow-anchor": .overflowAnchor, "writing-mode": .writingMode, "text-orientation": .textOrientation,
     "perspective": .perspective, "perspective-origin": .perspectiveOrigin, "backface-visibility": .backfaceVisibility,
     "transform-style": .transformStyle,
@@ -1994,6 +1996,7 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
         return parseLengthValue(t, allowAuto: true)
     case .minWidth, .minHeight:
         if kw == "auto" { return .auto }
+        if let a = ParseAnchorFunction(tokens) { return .anchor(a) }
         if let c = calcValue(tokens) { return c }
         return parseLengthValue(t, allowAuto: false)
     case .maxWidth, .maxHeight:
@@ -2492,7 +2495,7 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
     case .textStrokeColor:
         if kw == "currentcolor" { return .currentColor }
         return parseColorAt(tokens, 0)?.0
-    case .paintOrder, .timelineScope, .positionVisibility:
+    case .paintOrder, .timelineScope, .positionVisibility, .positionTryOrder, .anchorScope:
         var words: [string] = []
         for tok in tokens where tok.Kind == .ident { words.append(tok.Value) }
         return words.isEmpty ? nil : .keyword(joinWords(words))

@@ -297,6 +297,7 @@ public final class BoxTreeBuilder {
         }
         if !PickersOpen.contains(node.Id) { return }
         guard let ps = resolver.ResolvePseudo(node, "picker(select)", parent: parentStyle, context: context) else { return }
+        ps.PositionAnchor = "#select:\(node.Id)"
         let picker = Box(kind: .block, style: ps, node: nil)
         picker.IsAnonymous = true
         var inside: [Box] = []

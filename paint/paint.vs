@@ -2386,7 +2386,8 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
             // The box and as far as its blur reaches, within reach of
             // what shows.
             var reach: float32 = 0
-            for f in item.Filters { reach += f.Reach * scale }
+            let filtered = device(item.Rect)
+            for f in item.Filters { reach += f.Scaled(scale).ReachOver(box: filtered, originX: float32(filtered.X), originY: float32(filtered.Y)) }
             var shows = canvas.Clip
             var bounds = item.Unbounded ? shows : inflate(device(item.Rect), reach)
             if item.Matrix != nil {
@@ -2439,7 +2440,8 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
                 var blend = draw.BlendMode.normal
                 let inside = layerPlanes.popLast() ?? []
                 if let effects = layerItems.popLast() {
-                    layer.Apply(effects.Filters.map { $0.Scaled(scale) })
+                    let filtered = device(effects.Rect)
+                    layer.Apply(effects.Filters.map { $0.Scaled(scale) }, box: filtered, originX: float32(filtered.X), originY: float32(filtered.Y))
                     applyClipAndMask(layer, effects, scale: scale, dx: dx, dy: dy)
                     blend = effects.Blend
                     if let m = effects.Matrix {
@@ -2464,10 +2466,12 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
                             }
                             i += 1
                         }
-                        for p in planes {
-                            if !p.hidden || p.matrix.FacesViewer { p.layer.Composite(onto: canvas, matrix: p.matrix, blend: p.blend) }
-                            p.layer.Free()
+                        var shown: [draw.DepthPlane] = []
+                        for p in planes where !p.hidden || p.matrix.FacesViewer {
+                            shown.append(draw.DepthPlane(plane: p.layer, matrix: p.matrix, blend: p.blend))
                         }
+                        draw.CompositePlanes(shown, onto: canvas)
+                        for p in planes { p.layer.Free() }
                         continue
                     }
                 }
@@ -2516,14 +2520,14 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
             let box = device(item.Rect)
             let filters = item.Filters.map { $0.Scaled(scale) }
             var reach: float32 = 0
-            for f in filters { reach += f.Reach }
+            for f in filters { reach += f.ReachOver(box: box, originX: float32(box.X), originY: float32(box.Y)) }
             // What shows under the box, and as far round it as the blur
             // reaches, so its edges blur with what is beside them.
             let area = inflate(box, reach).Intersect(canvas.Clip)
             if area.IsEmpty || box.Intersect(canvas.Clip).IsEmpty { continue }
             let under = draw.Layer(area)
             under.CopyFrom(canvas)
-            under.Apply(filters)
+            under.Apply(filters, box: box, originX: float32(box.X), originY: float32(box.Y))
             under.MaskRounded(box, radii: item.Radii.Scaled(scale))
             under.Composite(onto: canvas, transform: draw.Affine.identity)
             under.Free()

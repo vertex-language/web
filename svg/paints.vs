@@ -50,7 +50,59 @@ func referenced(v: string, ids: [string: element]) -> element? {
     if i >= b.count { return nil }
     var j = i + 1
     while j < b.count && b[j] != 41 && b[j] != 34 && b[j] != 39 { j += 1 }
-    return ids[css.stringOf(b, i + 1, j)]
+    let id = css.stringOf(b, i + 1, j)
+    if let e = ids[id] { return e }
+    return inDocument(id)
+}
+
+/// The document of the <svg> being read: a reference can name something in
+/// another <svg> of it, like a hidden one that only holds filters.
+var readingDocument: html.Node? = nil
+
+func inDocument(id: string) -> element? {
+    guard let top = readingDocument else { return nil }
+    func find(n: html.Node) -> html.Node? {
+        if n.Kind == html.NodeKind.element && n.GetAttribute("id") == id { return n }
+        for c in n.Children {
+            if let f = find(c) { return f }
+        }
+        return nil
+    }
+    guard let found = find(top) else { return nil }
+    return fromHTML(found)
+}
+
+/// Reads an element of a document, what it names found across all of it.
+func readingIn(n: html.Node, read: () -> Drawing?) -> Drawing? {
+    var top = n
+    while let up = top.Parent { top = up }
+    let saved = readingDocument
+    readingDocument = top
+    let out = read()
+    readingDocument = saved
+    return out
+}
+
+/// Whether an element's own effects apply to what's in it as one: its opacity,
+/// filter, clip or mask, which inside would each apply on their own.
+func hasGroupEffects(outer: Context, inner: Context) -> bool {
+    return inner.opacity != outer.opacity || inner.filters.count != outer.filters.count || inner.clips.count != outer.clips.count || inner.masks.count != outer.masks.count
+}
+
+/// The context for what's in a group: nothing of the group's effects.
+func withoutEffects(c: Context) -> Context {
+    var out = c
+    out.opacity = 1
+    out.filters = []
+    out.clips = []
+    out.masks = []
+    return out
+}
+
+/// A shape that's a group of them, with the effects it takes as one.
+func groupShape(group: Drawing, c: Context) -> Shape {
+    return Shape(ops: [], coords: [], matrix: c.matrix, fill: noFill, rule: c.rule, opacity: c.opacity, fillInherited: false,
+                 stroke: noFill, strokeStyle: c.strokeStyle, strokeOpacity: 1, clips: c.clips, masks: c.masks, filters: c.filters, group: group)
 }
 
 /// A url(#id) paint: a gradient, or nil for anything else.
@@ -172,6 +224,25 @@ extension Gradient {
 
 /// A shape's bounding box, as a matrix from the unit square onto it.
 func boundingBox(s: Shape) -> Matrix {
+    if let g = s.group, let back = s.matrix.Inverted() {
+        // What's in it, in the group's own units.
+        var x0: float32 = 1e9
+        var y0: float32 = 1e9
+        var x1: float32 = -1e9
+        var y1: float32 = -1e9
+        for c in g.shapes {
+            let b = back.Times(c.matrix).Times(boundingBox(c))
+            for corner in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let p = b.Apply(float32(corner.0), float32(corner.1))
+                x0 = math.Min(x0, p.x)
+                y0 = math.Min(y0, p.y)
+                x1 = math.Max(x1, p.x)
+                y1 = math.Max(y1, p.y)
+            }
+        }
+        if x1 < x0 { return Matrix.identity }
+        return Matrix(x1 - x0, 0, 0, y1 - y0, x0, y0)
+    }
     if s.coords.count < 2 { return Matrix.identity }
     var x0 = s.coords[0]
     var x1 = s.coords[0]
@@ -386,18 +457,26 @@ func walkUse(n: element, ctx: Context, d: Drawing, ids: [string: element]) {
     if nesting >= deepestNesting { return }
     guard let href = n.GetAttribute("href") ?? n.GetAttribute("xlink:href"), let target = referenced(href, ids) else { return }
     nesting += 1
-    var inner = ctx.with(n, ids: ids)
+    let effects = ctx.with(n, ids: ids)
+    var inner = effects
+    var into = d
+    let grouped = hasGroupEffects(ctx, effects)
+    if grouped {
+        inner = withoutEffects(effects)
+        into = Drawing(viewBox: nil, stretch: false)
+    }
     inner.matrix = inner.matrix.Times(Matrix(1, 0, 0, 1, lengthAttribute(n.GetAttribute("x")) ?? 0, lengthAttribute(n.GetAttribute("y")) ?? 0))
     if target.TagName == "symbol" || target.TagName == "svg" {
         let box = inner.with(target, ids: ids)
         var fitted = box
         fitted.matrix = box.matrix.Times(viewportOf(target, width: lengthAttribute(n.GetAttribute("width")), height: lengthAttribute(n.GetAttribute("height"))))
-        walk(target, fitted, d, ids)
+        walk(target, fitted, into, ids)
     } else {
         // One element: walked as the only child of a holder.
         let holder = element("g")
         holder.Children = [target]
-        walk(holder, inner, d, ids)
+        walk(holder, inner, into, ids)
     }
+    if grouped { d.shapes.append(groupShape(into, effects)) }
     nesting -= 1
 }

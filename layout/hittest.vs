@@ -23,6 +23,9 @@ public struct Hit {
 /// matrix of the plane whose children are being asked.
 var hitContext: (screen: (x: float32, y: float32), matrix: draw.Matrix4)? = nil
 
+/// How near the viewer the plane of the last hit in a 3D context is.
+var hitDepth: float32? = nil
+
 /// A box's rectangle on the page as it shows: through the turns of any
 /// vertical text it's in, whose layout it's in unturned.
 public func VisualBounds(box: Box) -> draw.Rect {
@@ -116,8 +119,14 @@ public func HitTest(box: Box, px: float32, py: float32, originX: float32, origin
         guard let p = full.Unproject(screen.x, screen.y) else { return nil }
         let saved = hitContext
         if box.Style.UsedPreserve3D { hitContext = (screen: screen, matrix: full) }
+        hitDepth = nil
         let hit = hitTestBox(box, p.x, p.y, originX: originX, originY: originY)
         hitContext = saved
+        // Its own plane's depth, unless a plane in its context was what's hit.
+        if hit != nil && (hitDepth == nil || !box.Style.UsedPreserve3D) {
+            let q = full.Apply(p.x, p.y)
+            hitDepth = q.w != 0 ? q.z / q.w : 0
+        }
         return hit
     }
     if box.AnchorHidden { return nil }
@@ -140,6 +149,47 @@ func hitTestBox(box: Box, px: float32, py: float32, originX: float32, originY: f
     let inside = px >= x && py >= y && px < x + box.Width && py < y + box.Height
     let sx = x - box.ScrollX
     let sy = y - box.ScrollY
+
+    // In a 3D context, what's nearest the viewer at the point.
+    if box.Style.UsedPreserve3D, let c = hitContext {
+        var best: Hit? = nil
+        var bestDepth: float32 = -1e9
+        func ask(p: Box, fx: float32, fy: float32) {
+            hitDepth = nil
+            guard let h = HitTest(p, px, py, originX: fx, originY: fy) else { return }
+            // A plane with no 3D of its own is in this one.
+            var depth = hitDepth
+            if depth == nil {
+                let q = c.matrix.Apply(px, py)
+                depth = q.w != 0 ? q.z / q.w : 0
+            }
+            // On top where they tie: asked first, painted last.
+            if best == nil || depth! > bestDepth + 0.001 {
+                best = h
+                bestDepth = depth!
+            }
+        }
+        for p in box.Positioned.reversed() {
+            ask(p, fx: p.FixedToViewport ? sx + box.ViewportScrollX : sx, fy: p.FixedToViewport ? sy + box.ViewportScrollY : sy)
+        }
+        if box.Lines.isEmpty {
+            for child in box.Children.reversed() where child.Kind != .text && child.Kind != .inline && child.Kind != .lineBreak && child.Style.Position != .absolute && child.Style.Position != .fixed {
+                ask(child, fx: sx, fy: sy)
+            }
+        }
+        if let h = best {
+            // Its own plane can be in front of them.
+            let own = c.matrix.Apply(px, py)
+            let ownDepth = own.w != 0 ? own.z / own.w : 0
+            if inside && box.Style.PointerEvents != .none && ownDepth > bestDepth + 0.001 {
+                hitDepth = ownDepth
+                return Hit(Box: box, Node: box.Element, TextBox: nil, TextOffset: 0, PageX: x, PageY: y)
+            }
+            hitDepth = bestDepth
+            return h
+        }
+        hitDepth = nil
+    }
 
     // Positioned boxes are on top, the highest z-index first.
     if !box.Positioned.isEmpty {

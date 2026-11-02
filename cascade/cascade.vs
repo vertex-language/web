@@ -1540,6 +1540,10 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
     case .transformBox: if let k = keywordOf(v) { s.TransformBox = k }
     case .timelineScope: s.TimelineScope = (keywordOf(v) ?? "").split(separator: " ").map { string($0) }
     case .positionVisibility: s.PositionVisibility = css.lower(keywordOf(v) ?? "always")
+    case .positionTryOrder: s.PositionTryOrder = css.lower(keywordOf(v) ?? "normal")
+    case .anchorScope:
+        let names = (keywordOf(v) ?? "none").split(separator: " ").map { string($0) }
+        s.AnchorScope = names == ["none"] ? [] : names
     case .shapeOutside:
         // A shape as clip-path reads one, its box the margin box unless said.
         s.ShapeOutside = nil
@@ -2136,6 +2140,8 @@ func applyAnchor(prop: css.Prop, f: css.AnchorFunction, s: ComputedStyle, ctx: A
     case .left: name = "left"
     case .width: name = "width"
     case .height: name = "height"
+    case .minWidth: name = "min-width"
+    case .minHeight: name = "min-height"
     default: return
     }
     var offset: float32 = 0
@@ -2574,6 +2580,8 @@ func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .transformBox: b.TransformBox = a.TransformBox
     case .timelineScope: b.TimelineScope = a.TimelineScope
     case .positionVisibility: b.PositionVisibility = a.PositionVisibility
+    case .positionTryOrder: b.PositionTryOrder = a.PositionTryOrder
+    case .anchorScope: b.AnchorScope = a.AnchorScope
     case .shapeOutside: b.ShapeOutside = a.ShapeOutside
     case .shapeMargin: b.ShapeMargin = a.ShapeMargin
     case .cornerShape: b.CornerShapes = a.CornerShapes

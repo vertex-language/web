@@ -645,6 +645,7 @@ func identityFilter(like f: draw.Filter) -> draw.Filter {
     case .dropShadow(_, _, _, let c): return .dropShadow(0, 0, 0, c.Faded(0))
     case .matrix(_): return .matrix([1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0])
     case .offset(_, _): return .offset(0, 0)
+    case .graph(let g): return .graph(g)
     }
 }
 

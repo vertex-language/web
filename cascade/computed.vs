@@ -114,6 +114,10 @@ public final class ComputedStyle {
     public var TransformBox: string = "border-box"
     public var TimelineScope: [string] = []
     public var PositionVisibility: string = "always"
+    /// position-try-order, and the names anchor-scope keeps in its subtree
+    /// ("all" for every one).
+    public var PositionTryOrder: string = "normal"
+    public var AnchorScope: [string] = []
     /// align-self: anchor-center, which AlignItems has no word for.
     public var AlignSelfWord: string = ""
     /// shape-outside as a clip shape, and shape-margin in pixels.

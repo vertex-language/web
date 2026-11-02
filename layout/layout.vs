@@ -81,35 +81,124 @@ public final class Layout {
     /// tried in turn, and the first that stays in the viewport used.
     func resolveAnchors(root: Box) {
         var named: [string: Box] = [:]
+        var entries: [(name: string, box: Box)] = []
+        var scopes: [(node: html.Node, names: [string])] = []
         func walk(b: Box) {
             // Text shares its element's style; it's the element that's named.
             if b.Kind != .text {
-                for n in b.Style.AnchorNames { named[n] = b }
-                // A popover's invoker is what it's anchored to by default.
+                if !b.Style.AnchorScope.isEmpty, let n = b.Node { scopes.append((node: n, names: b.Style.AnchorScope)) }
+                for n in b.Style.AnchorNames {
+                    entries.append((name: n, box: b))
+                    named[n] = b
+                }
+                // A popover's invoker is what it's anchored to by default,
+                // and a select is what its picker hangs from.
                 if let t = b.Node?.GetAttribute("popovertarget") { named["#invoker:" + t] = b }
+                if let n = b.Node, n.TagName == "select" { named["#select:\(n.Id)"] = b }
             }
             for c in b.Children { walk(c) }
             for p in b.Positioned { walk(p) }
         }
         walk(root)
-        for child in anchored { place(child, among: named, root: root) }
+        if scopes.isEmpty {
+            for child in anchored { place(child, among: named, root: root) }
+            return
+        }
+        // anchor-scope: a name held in a subtree is seen only from in it. It
+        // goes by the document, since a positioned box's box parent is its
+        // containing block.
+        func scope(of node: html.Node?, name: string) -> html.Node? {
+            var up = node
+            while let at = up {
+                for sc in scopes where sc.node === at && (sc.names.contains("all") || sc.names.contains(name)) { return at }
+                up = at.Parent
+            }
+            return nil
+        }
+        func within(node: html.Node?, of: html.Node) -> bool {
+            var up = node
+            while let at = up {
+                if at === of { return true }
+                up = at.Parent
+            }
+            return false
+        }
+        let held = entries.map { (name: $0.name, box: $0.box, scope: scope(of: $0.box.Node, name: $0.name)) }
+        for child in anchored {
+            var visible = named
+            for e in held { visible[e.name] = nil }
+            for e in held {
+                if let sc = e.scope, !within(child.Node, of: sc) { continue }
+                visible[e.name] = e.box
+            }
+            place(child, among: visible, root: root)
+        }
+    }
+
+    /// A position-area word as a side of the page: the logical ones by the
+    /// containing block's writing mode, or with self-, the box's own.
+    func physicalArea(word: string, box: Box) -> string {
+        var w = word
+        var style = box.Parent?.Style ?? box.Style
+        var prefix = ""
+        if w.hasPrefix("span-") {
+            prefix = "span-"
+            w = string(w.dropFirst(5))
+        }
+        if w.hasPrefix("self-") {
+            style = box.Style
+            w = string(w.dropFirst(5))
+        }
+        let vertical = style.IsVertical
+        // Where a vertical line starts and which way its lines go.
+        let linesLeft = style.WritingMode == "vertical-rl" || style.WritingMode == "sideways-rl"
+        let upward = style.WritingMode == "sideways-lr"
+        let backward = (style.Direction == .rtl) != upward
+        switch w {
+        case "block-start":
+            if !vertical { return prefix + "top" }
+            return prefix + (linesLeft ? "right" : "left")
+        case "block-end":
+            if !vertical { return prefix + "bottom" }
+            return prefix + (linesLeft ? "left" : "right")
+        case "inline-start":
+            if !vertical { return prefix + (backward ? "right" : "left") }
+            return prefix + (backward ? "bottom" : "top")
+        case "inline-end":
+            if !vertical { return prefix + (backward ? "left" : "right") }
+            return prefix + (backward ? "top" : "bottom")
+        case "x-start":
+            return prefix + (!vertical && backward ? "right" : "left")
+        case "x-end":
+            return prefix + (!vertical && backward ? "left" : "right")
+        case "y-start":
+            return prefix + (vertical && backward ? "bottom" : "top")
+        case "y-end":
+            return prefix + (vertical && backward ? "top" : "bottom")
+        default:
+            return word
+        }
     }
 
     func place(child: Box, among named: [string: Box], root: Box) {
         let s = child.Style
-        var tries: [(uses: [cascade.AnchorUse], area: [string])] = [(uses: s.AnchorUses, area: s.PositionArea)]
+        func physical(words: [string]) -> [string] { return words.map { physicalArea($0, box: child) } }
+        let baseArea = physical(s.PositionArea)
+        var tries: [(uses: [cascade.AnchorUse], area: [string])] = [(uses: s.AnchorUses, area: baseArea)]
+        // Which way a flip goes turns with the writing mode.
+        let sideways = s.IsVertical
         for t in s.PositionTries {
             if let rule = cascade.PositionTryRules[t] {
-                tries.append((uses: rule.Uses, area: rule.Area))
+                tries.append((uses: rule.Uses, area: physical(rule.Area)))
                 continue
             }
             var uses = s.AnchorUses
-            var area = s.PositionArea
+            var area = baseArea
             for word in t.split(separator: " ").map({ string($0) }) {
-                if word == "flip-block" {
+                if (word == "flip-block") != sideways && (word == "flip-block" || word == "flip-inline") {
                     uses = uses.map { flippedUse($0, a: "top", b: "bottom") }
                     area = area.map { flippedWord($0, a: "top", b: "bottom") }
-                } else if word == "flip-inline" {
+                } else if word == "flip-inline" || word == "flip-block" {
                     uses = uses.map { flippedUse($0, a: "left", b: "right") }
                     area = area.map { flippedWord($0, a: "left", b: "right") }
                 }
@@ -118,6 +207,22 @@ public final class Layout {
         }
         let viewX = root.ViewportScrollX
         let viewY = root.ViewportScrollY
+        // position-try-order: the one with the most room first; those with as
+        // much stay in order.
+        if s.PositionTryOrder != "normal" {
+            var byRoom: [(room: float32, try: (uses: [cascade.AnchorUse], area: [string]))] = []
+            for t in tries {
+                var room: float32 = 0
+                if let spot = anchoredSpot(child, uses: t.uses, area: t.area, named: named) {
+                    let wantsWidth = s.PositionTryOrder == "most-width" || (s.PositionTryOrder == "most-inline-size") != s.IsVertical && s.PositionTryOrder != "most-height"
+                    room = roomAround(spot, uses: t.uses, area: t.area, wantsWidth: wantsWidth, viewX: viewX, viewY: viewY)
+                }
+                var at = byRoom.count
+                while at > 0 && byRoom[at - 1].room < room { at -= 1 }
+                byRoom.insert((room: room, try: t), at: at)
+            }
+            tries = byRoom.map { $0.try }
+        }
         var first: (x: float32, y: float32, w: float32, h: float32)? = nil
         var chosen: (x: float32, y: float32, w: float32, h: float32)? = nil
         for t in tries {
@@ -150,6 +255,28 @@ public final class Layout {
         child.Y += at.y - now.y
     }
 
+    /// How much of the viewport a try leaves its box along one axis: from the
+    /// edge it's hung from to the viewport's far edge.
+    func roomAround(spot: (x: float32, y: float32, w: float32, h: float32), uses: [cascade.AnchorUse], area: [string], wantsWidth: bool, viewX: float32, viewY: float32) -> float32 {
+        var startSide = false
+        var endSide = false
+        for u in uses {
+            if u.Property == (wantsWidth ? "left" : "top") { startSide = true }
+            if u.Property == (wantsWidth ? "right" : "bottom") { endSide = true }
+        }
+        for word in area {
+            if word == (wantsWidth ? "right" : "bottom") || word == (wantsWidth ? "span-right" : "span-bottom") { startSide = true }
+            if word == (wantsWidth ? "left" : "top") || word == (wantsWidth ? "span-left" : "span-top") { endSide = true }
+        }
+        let low = wantsWidth ? viewX : viewY
+        let size = wantsWidth ? ViewportWidth : ViewportHeight
+        let at = wantsWidth ? spot.x : spot.y
+        let along = wantsWidth ? spot.w : spot.h
+        if startSide && !endSide { return low + size - at }
+        if endSide && !startSide { return at + along - low }
+        return size
+    }
+
     /// Where a box goes by these uses and this area, on the page; nil where
     /// it names an anchor there isn't.
     func anchoredSpot(child: Box, uses: [cascade.AnchorUse], area: [string], named: [string: Box]) -> (x: float32, y: float32, w: float32, h: float32)? {
@@ -163,10 +290,16 @@ public final class Layout {
         }
         var w = child.Width
         var h = child.Height
-        for u in uses where u.Property == "width" || u.Property == "height" {
+        for u in uses where u.Property == "width" || u.Property == "height" || u.Property == "min-width" || u.Property == "min-height" {
             guard let a = rect(u.Name) else { return nil }
-            let size = u.Edge == "height" || u.Edge == "block" ? a.h : (u.Edge == "width" || u.Edge == "inline" ? a.w : (u.Property == "width" ? a.w : a.h))
-            if u.Property == "width" { w = size + u.Offset } else { h = size + u.Offset }
+            let across = u.Property == "width" || u.Property == "min-width"
+            let size = u.Edge == "height" || u.Edge == "block" ? a.h : (u.Edge == "width" || u.Edge == "inline" ? a.w : (across ? a.w : a.h))
+            switch u.Property {
+            case "width": w = size + u.Offset
+            case "height": h = size + u.Offset
+            case "min-width": w = w > size + u.Offset ? w : size + u.Offset
+            default: h = h > size + u.Offset ? h : size + u.Offset
+            }
         }
         let start = PagePosition(child)
         var x = start.x
@@ -922,12 +1055,16 @@ public final class Layout {
     /// have been where it has none.
     func layoutPositioned(box: Box, cb: ContainingBlock) {
         if box.Positioned.isEmpty { return }
-        let list = box.Positioned
         let padX = box.Kind == .block && box.Parent != nil ? box.PaddingBoxX : 0
         let padY = box.Kind == .block && box.Parent != nil ? box.PaddingBoxY : 0
         let cbWidth = cb.Width
         let cbHeight = cb.Height ?? 0
-        for child in list {
+        // A fixed box deeper down joins the root's list while it's laid out,
+        // so this goes by index to the end as it is then.
+        var next = 0
+        while next < box.Positioned.count {
+            let child = box.Positioned[next]
+            next += 1
             let s = child.Style
             if s.IsAnchored { anchored.append(child) }
             // The static position was written into X and Y by the flow

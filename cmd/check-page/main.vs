@@ -2463,6 +2463,81 @@ func testCompositing() {
     check(dat(350, 50) == draw.Color(0, 0, 255), "preserve-3d draws the nearest plane last, whatever the order (got \(dat(350, 50)))")
     if let n = d3.QuerySelector("#near") { check(d3.ElementAt(draw.Point(120, 50)) === n, "a 3D plane is hit where it's drawn") }
     check(d3.ElementAt(draw.Point(250, 50))?.TagName != "div" || d3.ElementAt(draw.Point(250, 50))?.GetAttribute("id") != "turned", "and a hidden back isn't hit")
+    // Hit by depth, and planes that cross.
+    let d3b = web.Page()
+    d3b.SetViewportSize(draw.Size(300, 200))
+    d3b.LoadHTML("""
+    <!doctype html><style>body { margin: 0 } #ctx { position: absolute; left: 50px; top: 50px; width: 200px; height: 100px; transform-style: preserve-3d; transform: translateZ(0) }
+    #ctx div { position: absolute; left: 0; top: 0; width: 200px; height: 100px }</style>
+    <div id=ctx><div id=front style="background: rgb(255,0,0); transform: translateZ(10px)"></div><div id=back style="background: rgb(0,0,255); transform: translateZ(-10px)"></div></div>
+    """)
+    if let n = d3b.QuerySelector("#front") { check(d3b.ElementAt(draw.Point(150, 100)) === n, "the nearest plane is hit, not the one painted in order") }
+    let d3c = web.Page()
+    d3c.SetViewportSize(draw.Size(300, 200))
+    d3c.LoadHTML("""
+    <!doctype html><style>body { margin: 0 } #ctx { position: absolute; left: 50px; top: 50px; width: 200px; height: 100px; transform-style: preserve-3d; transform: translateZ(0) }
+    #ctx div { position: absolute; left: 0; top: 0; width: 200px; height: 100px }</style>
+    <div id=ctx><div id=a style="background: rgb(255,0,0); transform: rotateY(40deg)"></div><div id=b style="background: rgb(0,0,255); transform: rotateY(-40deg)"></div></div>
+    """)
+    if let a = d3c.QuerySelector("#a"), let b = d3c.QuerySelector("#b") {
+        check(d3c.ElementAt(draw.Point(100, 100)) === (d3c.ElementAt(draw.Point(200, 100)) === a ? b : a), "planes that cross are hit on the nearer side of the line")
+    }
+    var d3cp = [uint8](repeating: 0, count: 300 * 200 * 4)
+    d3c.Draw(into: &d3cp, width: 300, height: 200, scale: 1)
+    let crossL = pixelAt(d3cp, 300, 110, 100)
+    let crossR = pixelAt(d3cp, 300, 190, 100)
+    check(crossL != crossR && crossL.A == 255 && crossR.A == 255, "planes that cross each show on their nearer side (got \(crossL) \(crossR))")
+
+    // A base-select's picker: out of a clipping box, and flipped at the edge.
+    let bf = web.Page()
+    bf.SetViewportSize(draw.Size(300, 200))
+    bf.LoadHTML("""
+    <style>body { margin: 0 } select, ::picker(select) { appearance: base-select } select { width: 100px; height: 20px } option { height: 30px } #clip { overflow: hidden; width: 110px; height: 30px; position: absolute; top: 0; left: 0 } #low { position: absolute; top: 170px; left: 150px }</style>
+    <div id=clip><select id=a><option id=a1>One</option><option id=a2>Two</option></select></div>
+    <select id=low><option id=b1>One</option><option id=b2>Two</option></select>
+    """)
+    func openSelect(at: draw.Rect) {
+        _ = bf.Handle(.pointerDown(web.Pointer(draw.Point(at.X + 4, at.Y + 4))))
+        _ = bf.Handle(.pointerUp(web.Pointer(draw.Point(at.X + 4, at.Y + 4))))
+    }
+    openSelect(bf.BoundsOf(bf.QuerySelector("#a")!)!)
+    if let o = bf.BoundsOf(bf.QuerySelector("#a2")!), let el = bf.QuerySelector("#a2") {
+        check(o.Y >= 30, "a picker hangs past its clipping box (got \(o.Y))")
+        check(bf.ElementAt(draw.Point(o.X + 4, o.Y + 4)) === el, "and is hit there")
+        var cp = [uint8](repeating: 0, count: 300 * 200 * 4)
+        bf.Draw(into: &cp, width: 300, height: 200, scale: 1)
+        check(pixelAt(cp, 300, int32(o.X) + 50, int32(o.Y) + 15) == draw.Color.white, "and shows there (got \(pixelAt(cp, 300, int32(o.X) + 50, int32(o.Y) + 15)))")
+    } else { check(false, "a picker opens in a clipping box") }
+    _ = bf.Handle(.pointerDown(web.Pointer(draw.Point(290, 5))))
+    _ = bf.Handle(.pointerUp(web.Pointer(draw.Point(290, 5))))
+    let lowAt = bf.BoundsOf(bf.QuerySelector("#low")!)!
+    openSelect(lowAt)
+    if let o = bf.BoundsOf(bf.QuerySelector("#b2")!) {
+        check(o.Y + o.Height <= lowAt.Y, "a picker with no room below flips above (option at \(o.Y), select at \(lowAt.Y))")
+    } else { check(false, "the low picker opens") }
+
+    // anchor-scope, position-try-order, logical position-area.
+    let anq = web.Page()
+    anq.SetViewportSize(draw.Size(400, 300))
+    anq.LoadHTML("""
+    <style>body { margin: 0 } .a { anchor-name: --x; position: absolute; width: 10px; height: 10px } .t { position: absolute; position-anchor: --x; top: anchor(bottom); left: anchor(left); width: 10px; height: 10px }
+    #s1, #s2 { anchor-scope: --x } #s1 .a { left: 10px; top: 10px } #s2 .a { left: 100px; top: 10px }
+    #o { position: absolute; left: 100px; top: 200px; width: 20px; height: 20px; anchor-name: --o }
+    #ot { position: absolute; position-anchor: --o; width: 10px; height: 10px; position-area: bottom; position-try-fallbacks: flip-block; position-try-order: most-height }
+    #r { position: absolute; left: 200px; top: 100px; width: 20px; height: 20px; anchor-name: --r }
+    #rt { position: absolute; position-anchor: --r; width: 10px; height: 10px; position-area: block-end inline-start; }
+    #v { direction: rtl; position: relative } #rv { position: absolute; left: 300px; top: 100px; width: 20px; height: 20px; anchor-name: --v }
+    #vt { position: absolute; position-anchor: --v; width: 10px; height: 10px; position-area: block-end inline-start; }</style>
+    <div id=s1><div class=a></div><div class=t id=t1></div></div><div id=s2><div class=a></div><div class=t id=t2></div></div>
+    <div id=o></div><div id=ot></div><div id=r></div><div id=rt></div>
+    <div id=v><div id=rv></div><div id=vt></div></div>
+    """)
+    func anAt(q: string) -> draw.Rect { return anq.BoundsOf(anq.QuerySelector(q)!)! }
+    check(anAt("#t1").X == 10 && anAt("#t2").X == 100, "anchor-scope keeps a name to its subtree (got \(anAt("#t1").X) \(anAt("#t2").X))")
+    check(anAt("#ot").Y < 200, "position-try-order goes where there's most room, above here (got \(anAt("#ot").Y))")
+    check(anAt("#rt").X == 190 && anAt("#rt").Y == 120, "a logical position-area in left to right (got \(anAt("#rt")))")
+    check(anAt("#vt").X == 320 && anAt("#vt").Y == 120, "a logical position-area in right to left (got \(anAt("#vt")))")
+
     // A plane's context ends with it: a sibling after a preserve-3d box
     // isn't drawn inside it.
     let after = web.Page()
