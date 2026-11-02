@@ -2,6 +2,7 @@ package selector
 
 import (
     "text/bidi"
+    "text/regexp"
     "web/css"
     "web/html"
 )
@@ -633,9 +634,9 @@ func isValidatable(_ node: html.Node) -> bool {
     return true
 }
 
-/// Whether a control meets its constraints -- required, type, length
-/// and range -- or, for a form or fieldset, whether everything in it
-/// does. `pattern` isn't checked: there is no regular-expression engine.
+/// Whether a control meets its constraints -- required, type, length,
+/// range and pattern -- or, for a form or fieldset, whether everything
+/// in it does.
 func isValid(_ node: html.Node, _ ctx: MatchContext) -> bool {
     if node.TagName == "form" || node.TagName == "fieldset" {
         for c in node.Children where c.Kind == html.NodeKind.element {
@@ -644,40 +645,85 @@ func isValid(_ node: html.Node, _ ctx: MatchContext) -> bool {
         }
         return true
     }
-    if !isValidatable(node) { return true }
+    return ValidationMessage(node, ctx).isEmpty
+}
+
+/// What a control that fails its constraints says about it, as a
+/// browser's validation bubble does; empty where it meets them (or
+/// isn't validated).
+public func ValidationMessage(_ node: html.Node, _ ctx: MatchContext) -> string {
+    if !isValidatable(node) { return "" }
     let type = node.TagName == "input" ? inputType(node) : node.TagName
     let required = node.HasAttribute("required")
-    if type == "checkbox" { return !required || node.HasAttribute("checked") }
+    if type == "checkbox" { return !required || node.HasAttribute("checked") ? "" : "Please check this box if you want to proceed." }
     if type == "radio" {
-        if !required && !groupRequired(node) { return true }
-        return radioGroupChecked(node)
+        if !required && !groupRequired(node) { return "" }
+        return radioGroupChecked(node) ? "" : "Please select one of these options."
     }
     if type == "select" {
-        if !required { return true }
+        if !required { return "" }
         for o in descendants(node) where o.TagName == "option" && o.HasAttribute("selected") {
-            return !(o.GetAttribute("value") ?? o.InnerText()).isEmpty
+            return !(o.GetAttribute("value") ?? o.InnerText()).isEmpty ? "" : "Please select an item in the list."
         }
-        return false
+        return "Please select an item in the list."
     }
     let value = valueFor(node, ctx)
-    if value.isEmpty { return !required }
+    if value.isEmpty { return required ? "Please fill out this field." : "" }
     let chars = value.count
-    if let n = intAttr(node, "minlength"), chars < n { return false }
-    if let n = intAttr(node, "maxlength"), chars > n { return false }
+    if let n = intAttr(node, "minlength"), chars < n {
+        return "Please lengthen this text to \(n) characters or more (you are currently using \(chars) characters)."
+    }
+    if let n = intAttr(node, "maxlength"), chars > n {
+        return "Please shorten this text to \(n) characters or less (you are currently using \(chars) characters)."
+    }
     switch type {
     case "email":
         let list = node.HasAttribute("multiple") ? value.split(separator: ",").map { trimSpace(string($0)) } : [value]
-        for e in list where !looksLikeEmail(e) { return false }
+        for e in list where !looksLikeEmail(e) {
+            return e.contains("@") ? "Please enter an email address." : "Please include an '@' in the email address. '\(e)' is missing an '@'."
+        }
     case "url":
-        if !value.contains(":") { return false }
+        if !value.contains(":") { return "Please enter a URL." }
     case "number", "range":
-        guard let n = numberOf(value) else { return false }
-        if let lo = numberAttr(node, "min"), n < lo { return false }
-        if let hi = numberAttr(node, "max"), n > hi { return false }
+        guard let n = numberOf(value) else { return "Please enter a number." }
+        if let lo = numberAttr(node, "min"), n < lo { return "Value must be greater than or equal to \(node.GetAttribute("min") ?? "")." }
+        if let hi = numberAttr(node, "max"), n > hi { return "Value must be less than or equal to \(node.GetAttribute("max") ?? "")." }
     default:
         break
     }
-    return true
+    // pattern: the whole value (each address of a multiple email)
+    // matches it, compiled with the v flag; a pattern that doesn't
+    // compile is ignored.
+    if let pattern = node.GetAttribute("pattern"), takesPattern(type), let re = compiledPattern(pattern) {
+        let list = type == "email" && node.HasAttribute("multiple") ? value.split(separator: ",").map { trimSpace(string($0)) } : [value]
+        for v in list where !re.MatchesWhole(v) {
+            if let title = node.GetAttribute("title"), !title.isEmpty { return "Please match the requested format.\n" + title }
+            return "Please match the requested format."
+        }
+    }
+    return ""
+}
+
+func takesPattern(_ type: string) -> bool {
+    switch type {
+    case "text", "search", "url", "tel", "email", "password": return true
+    default: return false
+    }
+}
+
+// Compiled patterns by their text, and the texts that don't compile.
+var patterns: [string: regexp.Regexp] = [:]
+var badPatterns: [string: bool] = [:]
+
+func compiledPattern(_ p: string) -> regexp.Regexp? {
+    if let re = patterns[p] { return re }
+    if badPatterns[p] != nil { return nil }
+    if let re = regexp.Regexp.Compile(p, flags: "v") {
+        patterns[p] = re
+        return re
+    }
+    badPatterns[p] = true
+    return nil
 }
 
 func looksLikeEmail(_ s: string) -> bool {

@@ -172,6 +172,11 @@ public final class Page {
     /// Images styles name that loading was tried for, found or not:
     /// what loadStyleImages doesn't ask for again.
     var triedImages: [string: bool] = [:]
+    /// The validation bubble a stopped submit shows: the control, what
+    /// it says, and when it went up (-1 until a frame's time is known).
+    var bubbleNode: html.Node? = nil
+    var bubbleText: string = ""
+    var bubbleSince: float64 = -1
     var fontFaces: [string] = []
 
     var size: draw.Size
@@ -628,6 +633,7 @@ public final class Page {
     /// calls `Advance` with each frame's time and keeps requesting frames.
     public func NeedsAnimation() -> bool {
         if animator.Active || !animator.events.isEmpty { return true }
+        if bubbleNode != nil { return true }
         if scrollAnimation != nil || pendingSnap != nil { return true }
         for (_, f) in frames where f.page.NeedsAnimation() { return true }
         if let f = focused { return dom.IsTextControl(f) }
@@ -639,6 +645,14 @@ public final class Page {
     /// second per cycle. Answers whether a repaint is needed.
     public func Advance(time: float64) -> bool {
         var repaint = false
+        // The validation bubble goes after five seconds.
+        if bubbleNode != nil {
+            if bubbleSince < 0 { bubbleSince = time }
+            if time - bubbleSince > 5 {
+                hideValidationBubble()
+                repaint = true
+            }
+        }
         let running = animator.Active
         _ = animator.advance(time)
         if running {
@@ -778,6 +792,11 @@ public final class Page {
                     state.FieldSelectionEnd = r.end
                 }
                 state.Images = images
+                // Looked up directly: BoundsOf would update again.
+                if let b = bubbleNode, let box = builder.byNode[b.Id] {
+                    let p = layout.PagePosition(box)
+                    state.Bubble = (rect: draw.Rect(p.x, p.y, box.Width, box.Height), text: bubbleText)
+                }
                 state.Vectors = vectors
                 if !frames.isEmpty || builder.HasFrames { state.Subpages = syncFrames() }
                 if let range = selectionRange() {
@@ -1303,5 +1322,30 @@ extension Page {
                 images[src] = decoded
             }
         }
+    }
+}
+
+extension Page {
+    /// What a control's validation would say, as a browser's bubble
+    /// does: "Please fill out this field.", and the like; empty where it
+    /// meets its constraints.
+    public func ValidationMessage(_ node: html.Node) -> string {
+        return selector.ValidationMessage(node, context)
+    }
+
+    func showValidationBubble(_ node: html.Node) {
+        bubbleNode = node
+        bubbleText = selector.ValidationMessage(node, context)
+        bubbleSince = -1
+        needsPaint = true
+        needsRepaint = true
+    }
+
+    func hideValidationBubble() {
+        if bubbleNode == nil { return }
+        bubbleNode = nil
+        bubbleText = ""
+        needsPaint = true
+        needsRepaint = true
     }
 }

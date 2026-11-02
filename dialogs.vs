@@ -239,6 +239,7 @@ extension Page {
         }
         if let f = first {
             Focus(f)
+            showValidationBubble(f)
             return false
         }
         return true

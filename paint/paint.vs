@@ -268,6 +268,9 @@ public struct State {
     public var TextOrder: [int64: int] = [:]
     /// The nested documents of <iframe>s and the like, by element id.
     public var Subpages: [int64: Subpage] = [:]
+    /// A validation bubble: the control's border box on the page and
+    /// what the bubble says.
+    public var Bubble: (rect: draw.Rect, text: string)? = nil
 
     public init() {}
 }
@@ -296,6 +299,7 @@ public func Build(_ root: layout.Box, state: State, viewportWidth: float32, view
     b.fieldSelectionStart = state.FieldSelectionStart
     b.fieldSelectionEnd = state.FieldSelectionEnd
     b.images = state.Images
+    b.bubble = state.Bubble
     b.vectors = state.Vectors
     b.selectionStart = state.SelectionStart
     b.selectionEnd = state.SelectionEnd
@@ -316,6 +320,7 @@ final class DisplayListBuilder {
     var fieldSelectionStart: int = -1
     var fieldSelectionEnd: int = -1
     var opacity: float32 = 1
+    var bubble: (rect: draw.Rect, text: string)? = nil
     var viewportWidth: float32 = 0
     var viewportHeight: float32 = 0
     /// The current stacking context's positioned boxes, waiting to paint,
@@ -356,6 +361,7 @@ final class DisplayListBuilder {
             items.append(.fill(draw.Rect(0, 0, viewportWidth, h), canvasColor, draw.Radii.zero))
         }
         paintBox(root, x: 0, y: 0, skipBackground: skipBackgroundOf)
+        if let b = bubble { paintBubble(b.rect, b.text) }
         return items
     }
 
@@ -397,6 +403,44 @@ final class DisplayListBuilder {
         layer.RepeatX = m.RepeatX
         layer.RepeatY = m.RepeatY
         layer.MaskLuminance = s.MaskMode == "luminance"
+    }
+
+    /// The validation bubble under a control: a white card with a
+    /// warning mark and the message, a line at a time, over everything.
+    func paintBubble(_ control: draw.Rect, _ text: string) {
+        let face = font.Load(font.Spec(families: ["system-ui"], size: 13, weight: 400))
+        let lines = text.split(separator: "\n").map { string($0) }
+        var width: float32 = 0
+        var runs: [font.Run] = []
+        for l in lines {
+            let r = face.Shape(l)
+            runs.append(r)
+            if r.Width > width { width = r.Width }
+        }
+        let lineHeight: float32 = 18
+        let pad: float32 = 10
+        let mark: float32 = 16
+        let w = width + pad * 3 + mark
+        let h = float32(lines.count) * lineHeight + pad * 2 - 4
+        var x = control.X
+        if x + w > viewportWidth && viewportWidth > w { x = viewportWidth - w - 4 }
+        let y = control.Y + control.Height + 6
+        let card = draw.Rect(x, y, w, h)
+        // A soft shadow, the card, its edge.
+        items.append(.fill(draw.Rect(x + 1, y + 2, w, h), draw.Color(0, 0, 0, 40), draw.Radii(all: 5)))
+        items.append(.fill(card, draw.Color(255, 255, 255), draw.Radii(all: 5)))
+        styledRing(card, draw.Edges(all: 1), [draw.Color(190, 190, 190), draw.Color(190, 190, 190), draw.Color(190, 190, 190), draw.Color(190, 190, 190)],
+                   draw.Radii(all: 5), ["solid", "solid", "solid", "solid"])
+        // The warning mark: an orange square with a white "!".
+        let m = draw.Rect(x + pad, y + pad - 1, mark, mark)
+        items.append(.fill(m, draw.Color(242, 140, 0), draw.Radii(all: 3)))
+        let bang = font.Load(font.Spec(families: ["system-ui"], size: 13, weight: 700)).Shape("!")
+        items.append(.text(m.X + (mark - bang.Width) / 2, m.Y + 12.5, bang, draw.Color(255, 255, 255), 0))
+        var i = 0
+        while i < runs.count {
+            items.append(.text(x + pad * 2 + mark, y + pad + 10 + float32(i) * lineHeight, runs[i], draw.Color(30, 30, 30), 0))
+            i += 1
+        }
     }
 
     /// The text a box paints, black and opaque, for masking: what

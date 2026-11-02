@@ -122,6 +122,11 @@ extension Page {
     /// keys while something in the page has focus are handled; the rest
     /// is ignored and left to the host.
     public func Handle(_ input: Input) -> EventResult {
+        // A key, typing or a press puts the validation bubble away.
+        switch input {
+        case .keyDown(_), .text(_), .pointerDown(_): hideValidationBubble()
+        default: break
+        }
         let before = scroll
         let r = handleInput(input)
         // The page scrolled -- by the wheel, a key, a jump to a fragment:

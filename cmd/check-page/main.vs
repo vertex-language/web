@@ -1038,9 +1038,38 @@ func testDialogsAndPopovers() {
     events = []
     click("go")
     check(submitted == 0 && events == ["invalid"] && view.FocusedElement === node("req"), "a required field left empty stops the submit, fires invalid and takes focus")
+    check(view.ValidationMessage(node("req")) == "Please fill out this field.", "and says why (got \(view.ValidationMessage(node("req"))))")
+    func orangeUnder(_ id: string) -> bool {
+        var bp = [uint8](repeating: 0, count: 400 * 300 * 4)
+        view.Draw(into: &bp, width: 400, height: 300, scale: 1)
+        let r = view.BoundsOf(node(id))!
+        var y = int32(r.Y + r.Height)
+        while y < int32(r.Y + r.Height) + 40 && y < 300 {
+            var x = int32(r.X)
+            while x < int32(r.X) + 40 {
+                let c = pixelAt(bp, 400, x, y)
+                if c.R > 220 && c.G > 120 && c.G < 160 && c.B < 40 { return true }
+                x += 1
+            }
+            y += 1
+        }
+        return false
+    }
+    check(orangeUnder("req"), "a validation bubble shows under the field")
     _ = view.Handle(.text("x"))
+    check(!orangeUnder("req"), "and goes when the user types")
     click("go")
     check(submitted == 1, "filled in, the form is sent")
+
+    // pattern, checked by text/regexp.
+    let pv = web.Page()
+    pv.SetViewportSize(draw.Size(300, 100))
+    pv.LoadHTML("<form><input id=zip pattern='\\d{5}(-\\d{4})?' value='12a45' title='Five digits'><input id=ok pattern='[a-z]+' value='abc'></form>")
+    let zip = pv.QuerySelector("#zip")!
+    check(pv.QuerySelector("input:invalid")?.GetAttribute("id") == "zip" && pv.QuerySelector("#ok:valid") != nil, "pattern makes a value that doesn't match it :invalid")
+    check(pv.ValidationMessage(zip) == "Please match the requested format.\nFive digits", "and says so, with the title (got \(pv.ValidationMessage(zip)))")
+    pv.Document!.ElementFor(zip).SetAttribute("value", "12345-6789")
+    check(pv.ValidationMessage(zip).isEmpty && pv.QuerySelector("input:invalid") == nil, "a value that matches is valid")
 }
 
 @MainActor
