@@ -113,6 +113,11 @@ public final class Box {
     public var FirstLineStyle: cascade.ComputedStyle? = nil
     /// An <input type=file>'s ::file-selector-button, where rules give one.
     public var FileButtonStyle: cascade.ComputedStyle? = nil
+    /// A subgrid's parent's tracks over its span, and gaps.
+    public var ParentColumnTracks: [float32]? = nil
+    public var ParentRowTracks: [float32]? = nil
+    public var ParentColumnGap: float32 = 0
+    public var ParentRowGap: float32 = 0
     /// A box that turns to vertical: the anonymous box its content is laid
     /// out in, as if horizontal. That box's turn: 1 a quarter clockwise,
     /// -1 anticlockwise, and how long it is across its lines.
@@ -215,7 +220,7 @@ public final class Box {
     public var IsFormattingRoot: bool {
         if Kind != .block { return true }
         if Style.IsOutOfFlow || Style.ClipsOverflow || Style.IsFlexContainer || Style.IsGridContainer || Style.LayoutContained || Style.IsMultiColumn { return true }
-        if Style.Display == .table || Style.Display == .tableCell || Style.Display == .inlineBlock { return true }
+        if Style.FlowRoot || Style.Display == .table || Style.Display == .tableCell || Style.Display == .inlineBlock { return true }
         return false
     }
 

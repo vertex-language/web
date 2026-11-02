@@ -16,10 +16,85 @@ extension Layout {
     /// made as items need them, items placed where they ask or in the
     /// next free cell row by row, then sized to their cells. Answers the
     /// content height.
+    /// Masonry: the column tracks as a grid sizes them; each item in turn in
+    /// the shortest, straight under what's there.
+    func layoutMasonry(box: Box, contentWidth: float32, flow: Flow) -> float32 {
+        let s = box.Style
+        let gap = s.ColumnGap.Or(0, base: contentWidth)
+        let rowGap = s.RowGap.Or(0, base: contentWidth)
+        let tracks = expandAutoFill(s.GridColumns, available: contentWidth, gap: gap)
+        var sizes: [float32] = []
+        var shares: [float32] = []
+        var left = contentWidth - gap * float32(tracks.count > 0 ? tracks.count - 1 : 0)
+        for t in tracks {
+            switch t {
+            case .length(let l):
+                let w = l.Or(0, base: contentWidth)
+                sizes.append(w)
+                shares.append(0)
+                left -= w
+            case .fr(let f):
+                sizes.append(0)
+                shares.append(f)
+            case .minmax(let low, _, let f):
+                sizes.append(low)
+                shares.append(f > 0 ? f : 1)
+                left -= low
+            default:
+                sizes.append(0)
+                shares.append(1)
+            }
+        }
+        var total: float32 = 0
+        for f in shares { total += f }
+        if total > 0 && left > 0 {
+            var i = 0
+            while i < sizes.count {
+                sizes[i] += left * shares[i] / total
+                i += 1
+            }
+        }
+        if sizes.isEmpty { sizes = [contentWidth] }
+        var heights = [float32](repeating: 0, count: sizes.count)
+        var xs: [float32] = []
+        var x = box.ContentX
+        for w in sizes {
+            xs.append(x)
+            x += w + gap
+        }
+        for child in box.Children {
+            if child.Style.Position == .absolute || child.Style.Position == .fixed {
+                child.X = box.ContentX
+                child.Y = box.ContentY
+                attachPositioned(child, flow)
+                continue
+            }
+            resolveEdges(child, cbWidth: contentWidth)
+            var at = 0
+            var i = 1
+            while i < heights.count {
+                if heights[i] < heights[at] - 0.01 { at = i }
+                i += 1
+            }
+            let cell = sizes[at]
+            layoutFixed(child, width: cell - child.Margin.Horizontal, height: nil, cb: ContainingBlock(width: cell, height: nil), flow: flow.root(child))
+            child.X = xs[at] + child.Margin.Left
+            child.Y = box.ContentY + heights[at] + child.Margin.Top
+            heights[at] += child.OuterHeight + rowGap
+        }
+        var most: float32 = 0
+        for h in heights where h - rowGap > most { most = h - rowGap }
+        return most
+    }
+
     func layoutGrid(box: Box, contentWidth: float32, flow: Flow) -> float32 {
         let s = box.Style
-        let columnGap = s.ColumnGap.Or(0, base: contentWidth)
-        let rowGap = s.RowGap.Or(0, base: contentWidth)
+        if s.Masonry { return layoutMasonry(box, contentWidth: contentWidth, flow: flow) }
+        var columnGap = s.ColumnGap.Or(0, base: contentWidth)
+        var rowGap = s.RowGap.Or(0, base: contentWidth)
+        // A subgrid's lines are its parent's, and so its gaps.
+        if s.SubgridColumns, box.ParentColumnTracks != nil { columnGap = box.ParentColumnGap }
+        if s.SubgridRows, box.ParentRowTracks != nil { rowGap = box.ParentRowGap }
         let cb = ContainingBlock(width: contentWidth, height: definiteInnerHeight(box))
 
         // The items, in order.
@@ -38,6 +113,7 @@ extension Layout {
         // Column tracks: the template's, with auto-fill repeats counted
         // to fit, or one auto column for a grid without a template.
         var columns = expandAutoFill(s.GridColumns, available: contentWidth, gap: columnGap)
+        if s.SubgridColumns, let t = box.ParentColumnTracks { columns = t.map { css.GridTrack.length(.px($0)) } }
         // Each item's lines, end lines made spans against the explicit
         // tracks (-1 being the last line).
         var columnOf: [int: css.GridPlacement] = [:]
@@ -379,6 +455,16 @@ extension Layout {
                 let widths = intrinsicWidths(child)
                 itemWidth = clampWidth(child, widths.max < w ? widths.max : w, cbWidth: w)
             }
+            if child.Style.SubgridColumns {
+                var tracks: [float32] = []
+                var c = it.column
+                while c < it.column + it.columnSpan {
+                    tracks.append(columnEnd[c] - columnX[c])
+                    c += 1
+                }
+                child.ParentColumnTracks = tracks
+                child.ParentColumnGap = columnGap
+            }
             layoutFixed(child, width: itemWidth, height: nil, cb: ContainingBlock(width: w, height: nil), flow: flow.root(child))
             if it.rowSpan == 1 {
                 let track: css.GridTrack = it.row < s.GridRows.count ? s.GridRows[it.row] : s.GridAutoRows
@@ -413,6 +499,18 @@ extension Layout {
             let cellW = columnEnd[it.column + it.columnSpan - 1] - cellX
             let cellH = rowEnd[it.row + it.rowSpan - 1] - cellY
             let align = alignFor(child, container: s)
+            // A subgrid's rows are known only now: it is set again on them.
+            if child.Style.SubgridRows {
+                var tracks: [float32] = []
+                var r = it.row
+                while r < it.row + it.rowSpan {
+                    tracks.append(rowEnd[r] - rowY[r])
+                    r += 1
+                }
+                child.ParentRowTracks = tracks
+                child.ParentRowGap = rowGap
+                layoutFixed(child, width: child.Width, height: cellH - child.Margin.Vertical, cb: ContainingBlock(width: cellW, height: cellH), flow: flow.root(child))
+            }
             // Stretching fills the cell; an item that clips its overflow may
             // also shrink to it, its automatic minimum being zero.
             if align == .stretch && child.Style.Height.IsAuto && (child.OuterHeight < cellH || (child.Style.ClipsOverflow && child.OuterHeight > cellH)) {

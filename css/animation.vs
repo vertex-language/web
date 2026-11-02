@@ -67,6 +67,8 @@ func parseAnimationLonghand(prop: Prop, tokens: [Token]) -> Value? {
     for item in commaItems(tokens) {
         if item.isEmpty { return nil }
         switch prop {
+        case .animationTimeline, .animationRange:
+            items.append(lower(Serialize(item)))
         case .transitionDuration, .transitionDelay, .animationDuration, .animationDelay:
             guard item.count == 1, let s = timeOf(item[0]) else { return nil }
             if s < 0 && (prop == .transitionDuration || prop == .animationDuration) { return nil }

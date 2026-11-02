@@ -191,6 +191,71 @@ func clockOf(seconds: float64) -> string {
     return "\(t / 60):\(s < 10 ? "0" : "")\(s)"
 }
 
+/// A rectangle's outline by its corners' radii and shapes, from the top
+/// left round clockwise.
+func cornerOutline(r: draw.Rect, radii: draw.Radii, shapes: [string]) -> [draw.Point] {
+    func shapeOf(i: int) -> string {
+        if shapes.isEmpty { return "1" }
+        // As border-radius takes one to four.
+        switch shapes.count {
+        case 1: return shapes[0]
+        case 2: return shapes[i % 2]
+        case 3: return i == 3 ? shapes[1] : shapes[i]
+        default: return shapes[i]
+        }
+    }
+    var out: [draw.Point] = []
+    // Each corner: its center, which way its two ends lie, and its radius.
+    func corner(i: int, cx: float32, cy: float32, sx: float32, sy: float32, rad: float32, fromSide: bool) {
+        if rad <= 0 {
+            out.append(draw.Point(cx, cy))
+            return
+        }
+        let word = shapeOf(i)
+        if word == "square" {
+            out.append(draw.Point(cx + sx * rad, cy + sy * rad))
+            return
+        }
+        if word == "notch" {
+            out.append(fromSide ? draw.Point(cx + sx * rad, cy) : draw.Point(cx, cy + sy * rad))
+            out.append(draw.Point(cx, cy))
+            out.append(fromSide ? draw.Point(cx, cy + sy * rad) : draw.Point(cx + sx * rad, cy))
+            return
+        }
+        let k = float32(word) ?? 1
+        let exponent = math.Pow(2, k)
+        var n = 0
+        while n <= 24 {
+            let t = float32(n) / 24 * 1.5707964
+            let angle = fromSide ? t : 1.5707964 - t
+            let u = math.Pow(math.Abs(math.Cos(angle)), 2 / exponent)
+            let v = math.Pow(math.Abs(math.Sin(angle)), 2 / exponent)
+            out.append(draw.Point(cx + sx * rad * u, cy + sy * rad * v))
+            n += 1
+        }
+    }
+    let tl = radii.TopLeft
+    let tr = radii.TopRight
+    let br = radii.BottomRight
+    let bl = radii.BottomLeft
+    corner(0, cx: r.X + tl, cy: r.Y + tl, sx: -1, sy: -1, rad: tl, fromSide: true)
+    corner(1, cx: r.Right - tr, cy: r.Y + tr, sx: 1, sy: -1, rad: tr, fromSide: false)
+    corner(2, cx: r.Right - br, cy: r.Bottom - br, sx: 1, sy: 1, rad: br, fromSide: true)
+    corner(3, cx: r.X + bl, cy: r.Bottom - bl, sx: -1, sy: 1, rad: bl, fromSide: false)
+    return out
+}
+
+func pathOf(points: [draw.Point]) -> draw.Path {
+    var p = draw.Path()
+    var i = 0
+    while i < points.count {
+        if i == 0 { p.MoveTo(points[i].X, points[i].Y) } else { p.LineTo(points[i].X, points[i].Y) }
+        i += 1
+    }
+    p.Close()
+    return p
+}
+
 /// Whether a character stands upright in vertical text, as CJK does; a
 /// bracket among them turns with the line, to open along it.
 func standsUpright(c: uint32) -> bool {
@@ -263,6 +328,8 @@ public struct PaintItem {
     public var MaskVectorWidth: float32 = 0
     public var MaskLuminance: bool = false
     public var MaskRect: draw.Rect = draw.Rect.zero
+    /// mask-clip's rectangle: nothing of the layer shows past it.
+    public var MaskClip: draw.Rect? = nil
     public var Blend: draw.BlendMode = .normal
     public var Unbounded: bool = false
     /// A layer kept only where these items -- a box's text -- draw:
@@ -562,6 +629,20 @@ final class DisplayListBuilder {
     /// A mask layer's source and tiling: mask-image over the border box
     /// (mask-origin's default), sized by mask-size, placed by
     /// mask-position, repeated by mask-repeat.
+    /// A box's own rectangle by a mask-origin or mask-clip word.
+    func maskArea(box: draw.Rect, border: draw.Edges, padding: draw.Edges, word: string) -> draw.Rect {
+        switch word {
+        case "padding-box":
+            return draw.Rect(box.X + border.Left, box.Y + border.Top, box.Width - border.Left - border.Right, box.Height - border.Top - border.Bottom)
+        case "content-box":
+            return draw.Rect(box.X + border.Left + padding.Left, box.Y + border.Top + padding.Top,
+                             box.Width - border.Left - border.Right - padding.Left - padding.Right,
+                             box.Height - border.Top - border.Bottom - padding.Top - padding.Bottom)
+        default:
+            return box
+        }
+    }
+
     func maskTiles(layer: inout PaintItem, s: cascade.ComputedStyle) {
         let area = layer.MaskRect
         var iw = area.Width
@@ -777,8 +858,13 @@ final class DisplayListBuilder {
             layer.JoinsContext = joins
             layer.BackfaceHidden = s.BackfaceHidden
             if s.ClipPath != nil { layer.Shape = layout.ClipRegionOf(box, x: x, y: y) }
-            layer.MaskRect = layer.Rect
-            if s.MaskGradient != nil || !s.MaskURL.isEmpty { maskTiles(&layer, s) }
+            layer.MaskRect = maskArea(box: layer.Rect, border: box.Border, padding: box.Padding, word: s.MaskOrigin)
+            if s.MaskGradient != nil || !s.MaskURL.isEmpty {
+                maskTiles(&layer, s)
+                if s.MaskClip != "no-clip" {
+                    layer.MaskClip = maskArea(box: layer.Rect, border: box.Border, padding: box.Padding, word: s.MaskClip)
+                }
+            }
             layer.Blend = s.BlendMode
             layer.Unbounded = s.BlendMode != .normal || s.Isolated
             items.append(layer)
@@ -999,6 +1085,33 @@ final class DisplayListBuilder {
         let rect = draw.Rect(x, y, box.Width, box.Height)
         var radii = s.Radii(width: box.Width, height: box.Height)
         if !radii.IsZero { radii = radii.Fitted(box.Width, box.Height) }
+        // corner-shape: the box drawn as the outline its corners make.
+        if !s.CornerShapes.isEmpty && !radii.IsZero && s.BackgroundImage == nil {
+            let outer = cornerOutline(rect, radii, s.CornerShapes)
+            if s.BackgroundColor.A > 0 {
+                var fill = PaintItem(.path)
+                fill.Outline = pathOf(outer)
+                fill.Color = color(s.BackgroundColor)
+                items.append(fill)
+            }
+            let b = box.Border
+            if b.Top > 0 || b.Right > 0 || b.Bottom > 0 || b.Left > 0 {
+                let inner = cornerOutline(draw.Rect(x + b.Left, y + b.Top, box.Width - b.Left - b.Right, box.Height - b.Top - b.Bottom),
+                                          radii.Inset(b), s.CornerShapes)
+                var ring = pathOf(outer)
+                var i = inner.count - 1
+                while i >= 0 {
+                    if i == inner.count - 1 { ring.MoveTo(inner[i].X, inner[i].Y) } else { ring.LineTo(inner[i].X, inner[i].Y) }
+                    i -= 1
+                }
+                ring.Close()
+                var edge = PaintItem(.path)
+                edge.Outline = ring
+                edge.Color = color(borderSideColor(s, 0))
+                items.append(edge)
+            }
+            return
+        }
         // Shadows go under the box: each drawn as rings from the blur's
         // outer edge inward, which fades like a blur near enough.
         for sh in s.Shadows where !sh.Inset && sh.Color.A > 0 {
@@ -1574,6 +1687,24 @@ final class DisplayListBuilder {
                         appendVerticalText(f, x: x + f.X, baseline: y + f.Y + f.Ascent, c: textColor, spacing: f.Owner.Style.LetterSpacing)
                     } else {
                         items.append(.text(x + f.X, y + f.Y + f.Ascent, f.Run, textColor, f.Owner.Style.LetterSpacing))
+                    }
+                }
+                // text-emphasis: a mark over each character, half its size.
+                if f.Kind == .text && !f.Owner.Style.TextEmphasisMark.isEmpty {
+                    let st = f.Owner.Style
+                    let markFace = font.Load(font.Spec(families: st.FontFamilies, size: st.FontSize / 2, weight: 400))
+                    let mark = markFace.Shape(st.TextEmphasisMark)
+                    let baseline = y + f.Y + f.Ascent
+                    let my = st.TextEmphasisUnder ? baseline + st.Face.Descent + markFace.Ascent : baseline - st.Face.Ascent - markFace.Descent
+                    var pen = x + f.X
+                    var gi = 0
+                    while gi < f.Run.Glyphs.count {
+                        let adv = f.Run.Advances[gi]
+                        if f.Run.Glyphs[gi] != 0 {
+                            items.append(.text(pen + (adv - mark.Width) / 2, my, mark, color(st.TextEmphasisColor ?? st.Color), 0))
+                        }
+                        pen += adv + st.LetterSpacing
+                        gi += 1
                     }
                 }
                 if !f.Decoration.IsNone {
@@ -2376,6 +2507,10 @@ func applyClipAndMask(layer: draw.Layer, item: PaintItem, scale: float32, dx: fl
         let x0 = draw.RoundToInt(px(r.X, dx))
         let y0 = draw.RoundToInt(px(r.Y, dy))
         return draw.IRect(x0, y0, draw.RoundToInt(px(r.X + r.Width, dx)) - x0, draw.RoundToInt(px(r.Y + r.Height, dy)) - y0)
+    }
+    if let keep = item.MaskClip {
+        let k = device(keep)
+        layer.Mask { x, y in k.Contains(x, y) ? 255 : 0 }
     }
     if let shape = item.Shape {
         switch shape.Kind {

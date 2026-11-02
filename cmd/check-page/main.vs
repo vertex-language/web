@@ -1521,6 +1521,242 @@ func testCompositing() {
     check(bigLines[0].Fragments[0].Width <= 200 && bigLines[1].Fragments[0].Width > bigLines[0].Fragments[0].Width / 2,
           "and each line's words are set in its own font (\(bigLines[0].Fragments[0].Width) \(bigLines[1].Fragments[0].Width))")
 
+    // display: flow-root holds its floats and its children's margins.
+    let fr = web.Page()
+    fr.SetViewportSize(draw.Size(200, 200))
+    fr.LoadHTML("<style>body { margin: 0 } .f { float: left; width: 10px; height: 50px } #kid { margin-top: 20px; height: 5px }</style><div id=root style='display: flow-root'><div class=f></div></div><div id=m style='display: flow-root'><div id=kid></div></div>")
+    check(fr.BoundsOf(fr.QuerySelector("#root")!)!.Height == 50, "display: flow-root holds its floats (got \(fr.BoundsOf(fr.QuerySelector("#root")!)!.Height))")
+    check(fr.BoundsOf(fr.QuerySelector("#m")!)!.Height == 25, "and its child's margin stays inside (got \(fr.BoundsOf(fr.QuerySelector("#m")!)!.Height))")
+
+    // Font features, and the text details.
+    let ff = web.Page()
+    ff.SetViewportSize(draw.Size(600, 900))
+    ff.LoadHTML("""
+    <style>body { margin: 0; font: 40px Times, serif } p { margin: 0; width: fit-content } .sys { font-family: system-ui } </style>
+    <p id=kern>AVAVAV</p><p id=nokern style="font-kerning: none">AVAVAV</p>
+    <p id=light class=sys style='font-variation-settings: "wght" 100'>Wide text</p><p id=heavy class=sys style='font-variation-settings: "wght" 900'>Wide text</p>
+    <p id=narrow class=sys style="font-stretch: 75%">Wide text</p><p id=normal class=sys>Wide text</p>
+    <p id=prop class=sys>1111</p><p id=tab class=sys style="font-variant-numeric: tabular-nums">1111</p><p id=feat class=sys style='font-feature-settings: "tnum"'>1111</p>
+    <div style="width: 200px; font-size: 20px"><p id=j style="width: auto; display: block; text-align: justify; text-align-last: justify; text-justify: inter-character">abcd</p></div>
+    <div style="width: 200px; font-size: 20px"><p id=nj style="width: auto; display: block; text-align: justify; text-align-last: justify; text-justify: none">ab cd</p></div>
+    <p id=hang style="display: block; hanging-punctuation: first; font-size: 20px">\u{201C}quoted</p>
+    <p id=em style="display: block; font-size: 20px; text-emphasis: filled dot rgb(255,0,0); margin-top: 30px; width: 100px">abc</p>
+    <p id=hy lang=en style="display: block; font: 16px Times; width: 60px; hyphens: auto">internationalization</p>
+    <p id=nohy lang=en style="display: block; font: 16px Times; width: 60px; hyphens: manual">internationalization</p>
+    """)
+    func ffw(id: string) -> float32 { return ff.BoxFor(ff.QuerySelector("#" + id)!)!.Width }
+    check(ffw("nokern") > ffw("kern"), "font-kerning: none undoes kerning (\(ffw("kern")) \(ffw("nokern")))")
+    check(ffw("heavy") > ffw("light"), "font-variation-settings reaches a variable font (\(ffw("light")) \(ffw("heavy")))")
+    check(ffw("narrow") < ffw("normal"), "font-stretch narrows one with a width axis (\(ffw("narrow")) \(ffw("normal")))")
+    check(ffw("tab") != ffw("prop"), "font-variant-numeric: tabular-nums changes a 1's width (\(ffw("prop")) \(ffw("tab")))")
+    check(ffw("feat") == ffw("tab"), "font-feature-settings does the same (\(ffw("feat")))")
+    let jLine = ff.BoxFor(ff.QuerySelector("#j")!)!.Lines[0]
+    check(jLine.Fragments[0].Width > 190, "text-justify: inter-character spreads a line with no spaces (\(jLine.Fragments[0].Width))")
+    let njLine = ff.BoxFor(ff.QuerySelector("#nj")!)!.Lines[0]
+    check(njLine.Fragments[0].Width < 100, "text-justify: none leaves it (\(njLine.Fragments[0].Width))")
+    let hangFrag = ff.BoxFor(ff.QuerySelector("#hang")!)!.Lines[0].Fragments[0]
+    check(hangFrag.X < 0, "hanging-punctuation: first puts the quote outside (\(hangFrag.X))")
+    var ffp = [uint8](repeating: 0, count: 600 * 900 * 4)
+    ff.Draw(into: &ffp, width: 600, height: 900, scale: 1)
+    let emAt = ff.BoundsOf(ff.QuerySelector("#em")!)!
+    var marks = 0
+    var ex = int32(emAt.X)
+    while ex < int32(emAt.X) + 60 {
+        var ey = int32(emAt.Y) - 14
+        while ey < int32(emAt.Y) + 6 {
+            let c = pixelAt(ffp, 600, ex, ey)
+            if c.R > 200 && c.G < 120 { marks += 1 }
+            ey += 1
+        }
+        ex += 1
+    }
+    check(marks > 3, "text-emphasis draws marks over the line (\(marks) pixels)")
+    let hyLines = ff.BoxFor(ff.QuerySelector("#hy")!)!.Lines
+    check(hyLines.count > 1 && hyLines[0].Fragments[0].Width <= 60, "hyphens: auto breaks a long word by the dictionary (\(hyLines.count) lines)")
+    check(ff.BoxFor(ff.QuerySelector("#nohy")!)!.Lines.count == 1, "hyphens: manual doesn't")
+
+    // Loose text beside blocks, where its parent is out of the flow.
+    for parentStyle in ["position: absolute", "position: fixed", "float: left"] {
+        let lt = web.Page()
+        lt.SetViewportSize(draw.Size(400, 300))
+        lt.LoadHTML("<div id=c style='\(parentStyle); width: 200px'><h4>head</h4><div style='float: left; width: 10px; height: 10px'></div>Some loose text</div>")
+        func lines(b: layout.Box) -> [string] {
+            var out: [string] = []
+            for l in b.Lines {
+                for f in l.Fragments { out.append(f.Text) }
+            }
+            for k in b.Children { out += lines(k) }
+            return out
+        }
+        let got = lines(lt.BoxFor(lt.QuerySelector("#c")!)!).joined(separator: "")
+        check(got.contains("Some loose text"), "\(parentStyle): text beside a block keeps its place (got \(got))")
+    }
+
+    // Layout's other shapes: shape-outside, subgrid, masonry, table text.
+    let lo = web.Page()
+    lo.SetViewportSize(draw.Size(400, 900))
+    lo.LoadHTML("""
+    <style>body { margin: 0; font-size: 10px; line-height: 10px; background: white }
+    #fl { float: left; width: 100px; height: 100px; shape-outside: circle(50%) }
+    #tx { width: 200px; height: 100px }
+    #g { display: grid; grid-template-columns: 50px 70px 90px; width: 210px }
+    #sub { grid-column: 1 / 4; display: grid; grid-template-columns: subgrid } #sub div { height: 5px }
+    #m { display: masonry; grid-template-columns: 50px 50px; width: 100px; column-gap: 0; row-gap: 0 } #m div { width: auto }
+    #t { display: table }
+    #cs { width: 100px; height: 100px; background: rgb(255,0,0); border-radius: 50px; corner-shape: bevel }
+    #sq { width: 100px; height: 100px; background: rgb(255,0,0); border-radius: 50px; corner-shape: squircle }
+    #mk { width: 100px; height: 40px; padding: 10px; box-sizing: border-box; background: rgb(0,0,255); mask-image: linear-gradient(black, black); mask-clip: content-box }
+    #over { position: relative; height: 10px } #cover { margin-top: -10px; height: 10px }
+    #grow { interpolate-size: allow-keywords; transition: height 1s linear; overflow: hidden; height: 0 } #grow.open { height: auto } #grow div { height: 40px }
+    </style>
+    <div id=tx><div id=fl></div>word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word</div>
+    <div id=g><div id=sub><div id=s1></div><div id=s2></div><div id=s3></div></div></div>
+    <div id=m><div id=m1 style="height: 30px"></div><div id=m2 style="height: 10px"></div><div id=m3 style="height: 10px"></div></div>
+    <div id=t>loose text</div>
+    <div id=cs></div><div id=sq></div><div id=mk></div>
+    <div id=over></div><div id=cover></div>
+    <div id=grow><div></div></div>
+    """)
+    func lob(id: string) -> draw.Rect { return lo.BoundsOf(lo.QuerySelector("#" + id)!)! }
+    let txLines = lo.BoxFor(lo.QuerySelector("#tx")!)!.Lines
+    var shortest: float32 = 1000
+    var longestStart: float32 = 0
+    for line in txLines {
+        if let f = line.Fragments.first {
+            if f.X < shortest { shortest = f.X }
+            if f.X > longestStart { longestStart = f.X }
+        }
+    }
+    check(shortest < 40 && longestStart > 80, "lines wrap round shape-outside's circle (x from \(shortest) to \(longestStart))")
+    check(lob("s1").Width == 50 && lob("s2").Width == 70 && lob("s3").Width == 90, "a subgrid's columns are its parent's (got \(lob("s1").Width) \(lob("s2").Width) \(lob("s3").Width))")
+    check(lob("m1").X == 0 && lob("m2").X == 50 && lob("m3").X == 50 && lob("m3").Y == lob("m2").Y + 10, "masonry puts each item in the shortest column (got \(lob("m3").X) \(lob("m3").Y - lob("m2").Y))")
+    check(lob("t").Width > 10 && lob("t").Height > 5, "text in a display: table gets a cell (got \(lob("t").Width) x \(lob("t").Height))")
+    var lop = [uint8](repeating: 0, count: 400 * 900 * 4)
+    lo.Draw(into: &lop, width: 400, height: 900, scale: 1)
+    func loc(x: float32, y: float32) -> draw.Color { return pixelAt(lop, 400, int32(x), int32(y)) }
+    let csAt = lob("cs")
+    // A bevel's corner is cut straight: (15, 15) is outside it, (30, 30) in.
+    check(loc(csAt.X + 15, csAt.Y + 15) == draw.Color.white && loc(csAt.X + 30, csAt.Y + 30) == draw.Color(255, 0, 0), "corner-shape: bevel cuts straight (got \(loc(csAt.X + 15, csAt.Y + 15)) \(loc(csAt.X + 30, csAt.Y + 30)))")
+    let sqAt = lob("sq")
+    // A round corner would leave (10, 10) outside; a squircle covers (14, 14)
+    // where a circle doesn't.
+    check(loc(sqAt.X + 14, sqAt.Y + 14) == draw.Color(255, 0, 0), "corner-shape: squircle bulges past round (got \(loc(sqAt.X + 14, sqAt.Y + 14)))")
+    let mkAt = lob("mk")
+    check(loc(mkAt.X + 50, mkAt.Y + 20) == draw.Color(0, 0, 255) && loc(mkAt.X + 5, mkAt.Y + 20) == draw.Color.white, "mask-clip: content-box cuts the padding (got \(loc(mkAt.X + 5, mkAt.Y + 20)))")
+    let overAt = lob("over")
+    check(lo.ElementAt(draw.Point(overAt.X + 5, overAt.Y + 5))?.GetAttribute("id") == "over", "a relative box is hit before a later block under it (got \(lo.ElementAt(draw.Point(overAt.X + 5, overAt.Y + 5))?.GetAttribute("id") ?? "none"))")
+    let grower = lo.QuerySelector("#grow")!
+    _ = lo.BoundsOf(grower)
+    _ = lo.Advance(time: 20)
+    lo.Document?.SetAttribute(grower, "class", "open")
+    _ = lo.BoundsOf(grower)
+    _ = lo.Advance(time: 20)
+    _ = lo.Advance(time: 20.5)
+    let midHeight = lo.BoundsOf(grower)!.Height
+    check(midHeight > 10 && midHeight < 30, "interpolate-size: allow-keywords transitions to auto (got \(midHeight))")
+
+    // Anchor positioning.
+    let an = web.Page()
+    an.SetViewportSize(draw.Size(400, 300))
+    an.LoadHTML("""
+    <style>body { margin: 0 } #a { anchor-name: --btn; position: absolute; left: 100px; top: 100px; width: 50px; height: 20px }
+    .tip { position: absolute; position-anchor: --btn; width: 30px; height: 10px }
+    #t1 { top: anchor(bottom); left: anchor(left) }
+    #t2 { bottom: anchor(top); right: anchor(right) }
+    #t3 { left: calc(anchor(right) + 5px); top: anchor(center) }
+    #t4 { width: anchor-size(width); top: anchor(--btn bottom) }
+    #t5 { position-area: bottom }
+    #t6 { position-area: right span-bottom }
+    #flip { anchor-name: --low; position: absolute; left: 10px; top: 280px; width: 40px; height: 10px }
+    #t7 { position-anchor: --low; top: anchor(bottom); left: anchor(left); position-try-fallbacks: flip-block; height: 30px }
+    #t8 { position-anchor: --none; top: anchor(bottom, 7px); left: 3px }
+    @position-try --above { bottom: anchor(top); left: anchor(left) }
+    #t9 { position-anchor: --low; top: anchor(bottom); left: anchor(left); position-try-fallbacks: --above; height: 30px }
+    </style>
+    <div id=a></div><div id=flip></div>
+    <div class=tip id=t1></div><div class=tip id=t2></div><div class=tip id=t3></div><div class=tip id=t4></div><div class=tip id=t5></div><div class=tip id=t6></div><div class=tip id=t7></div><div class=tip id=t8></div><div class=tip id=t9></div>
+    """)
+    func anb(id: string) -> draw.Rect { return an.BoundsOf(an.QuerySelector("#" + id)!)! }
+    check(anb("t1").X == 100 && anb("t1").Y == 120, "top: anchor(bottom), left: anchor(left) (got \(anb("t1")))")
+    check(anb("t2").X == 120 && anb("t2").Y == 90, "bottom: anchor(top), right: anchor(right) (got \(anb("t2")))")
+    check(anb("t3").X == 155 && anb("t3").Y == 110, "calc() on anchor(), and its center (got \(anb("t3")))")
+    check(anb("t4").Width == 50 && anb("t4").Y == 120, "anchor-size(), and an anchor named outright (got \(anb("t4")))")
+    check(anb("t5").Y == 120 && anb("t5").X == 110, "position-area: bottom centers under it (got \(anb("t5")))")
+    check(anb("t6").X == 150 && anb("t6").Y == 100, "position-area with a span (got \(anb("t6")))")
+    check(anb("t7").Y == 250, "flip-block where it would leave the viewport (got \(anb("t7")))")
+    check(anb("t8").Y == 7, "an anchor there isn't takes the fallback (got \(anb("t8")))")
+    check(anb("t9").Y == 250, "an @position-try fallback (got \(anb("t9")))")
+    // An anchor with text in it, inside a positioned box.
+    let an2 = web.Page()
+    an2.SetViewportSize(draw.Size(400, 300))
+    an2.LoadHTML("""
+    <style>body { margin: 0 } .col { position: absolute; left: 12px; top: 12px; width: 190px } #b { anchor-name: --b; width: 80px; padding: 6px } .tip { position: absolute; position-anchor: --b; width: 20px; height: 10px }
+    #u { position-area: bottom } #r { left: anchor(right); top: anchor(top) }</style>
+    <div class=col><div id=b>Button</div><div class=tip id=u></div><div class=tip id=r></div></div>
+    """)
+    let an2b = an2.BoundsOf(an2.QuerySelector("#b")!)!
+    let an2u = an2.BoundsOf(an2.QuerySelector("#u")!)!
+    let an2r = an2.BoundsOf(an2.QuerySelector("#r")!)!
+    check(an2u.Y == an2b.Y + an2b.Height && an2u.X == an2b.X + (an2b.Width - 20) / 2, "an anchor with text: position-area goes under it (got \(an2u), anchor \(an2b))")
+    check(an2r.X == an2b.X + an2b.Width && an2r.Y == an2b.Y, "and anchor() beside it (got \(an2r))")
+    an.Document?.SetAttribute(an.QuerySelector("#a")!, "style", "left: 200px")
+    check(anb("t1").X == 200, "it follows its anchor (got \(anb("t1")))")
+
+    // Scroll-driven animations.
+    let sd = web.Page()
+    sd.SetViewportSize(draw.Size(100, 100))
+    sd.LoadHTML("""
+    <style>body { margin: 0; height: 1100px; padding-top: 1px; box-sizing: border-box } @keyframes grow { from { width: 0px } to { width: 100px } }
+    #bar { position: fixed; top: 0; left: 0; height: 5px; background: red; animation: grow linear both; animation-timeline: scroll(root) }
+    #in { margin-top: 499px; height: 100px; animation: grow linear both; animation-timeline: view() }
+    #ranged { margin-top: 200px; height: 100px; animation: grow linear both; animation-timeline: view(); animation-range: entry 0% entry 100% }</style>
+    <div id=bar></div><div id=in></div><div id=ranged></div>
+    """)
+    func sdw(id: string) -> float32 { return sd.BoundsOf(sd.QuerySelector("#" + id)!)!.Width }
+    check(sdw("bar") == 0, "scroll(): nothing scrolled is the start (got \(sdw("bar")))")
+    check(!sd.NeedsAnimation(), "and it asks for no frames at rest")
+    sd.SetScrollOffset(draw.Point(0, 500))
+    check(sdw("bar") == 50, "half the scroll is half the animation (got \(sdw("bar")))")
+    // #in is 500 to 600 down: cover runs 400 to 600.
+    check(sdw("in") == 50, "view(): halfway through the view (got \(sdw("in")))")
+    sd.SetScrollOffset(draw.Point(0, 750))
+    // #ranged is 800 to 900 down: entry runs 700 to 800.
+    check(sdw("ranged") == 50, "animation-range narrows it to the entry (got \(sdw("ranged")))")
+
+    // View transitions.
+    let vw = web.Page()
+    vw.SetViewportSize(draw.Size(100, 100))
+    vw.LoadHTML("<style>body { margin: 0; background: rgb(255,0,0) }</style><div id=d></div>")
+    var vwp = [uint8](repeating: 0, count: 100 * 100 * 4)
+    vw.Draw(into: &vwp, width: 100, height: 100, scale: 1)
+    vw.StartViewTransition {
+        vw.Document?.SetAttribute(vw.Document!.Tree.ElementsByTagName("body").first!, "style", "background: rgb(0,0,255)")
+    }
+    check(vw.NeedsAnimation(), "a view transition asks for frames")
+    _ = vw.Advance(time: 10)
+    vw.Draw(into: &vwp, width: 100, height: 100, scale: 1)
+    check(pixelAt(vwp, 100, 50, 50).R == 255 && pixelAt(vwp, 100, 50, 50).B == 0, "it starts on the old picture (got \(pixelAt(vwp, 100, 50, 50)))")
+    _ = vw.Advance(time: 10.125)
+    vw.Draw(into: &vwp, width: 100, height: 100, scale: 1)
+    let halfway = pixelAt(vwp, 100, 50, 50)
+    check(halfway.R > 90 && halfway.R < 170 && halfway.B > 90, "and fades (got \(halfway))")
+    _ = vw.Advance(time: 10.3)
+    vw.Draw(into: &vwp, width: 100, height: 100, scale: 1)
+    check(pixelAt(vwp, 100, 50, 50) == draw.Color(0, 0, 255) && !vw.NeedsAnimation(), "to the new (got \(pixelAt(vwp, 100, 50, 50)))")
+    let nav = web.Page()
+    nav.SetViewportSize(draw.Size(100, 100))
+    nav.LoadHTML("<style>body { background: rgb(255,0,0) }</style>")
+    var navp = [uint8](repeating: 0, count: 100 * 100 * 4)
+    nav.Draw(into: &navp, width: 100, height: 100, scale: 1)
+    nav.LoadHTML("<style>@view-transition { navigation: auto } body { background: rgb(0,0,255) }</style>")
+    check(nav.NeedsAnimation(), "@view-transition: a new page that asks fades in")
+    let plain = web.Page()
+    plain.SetViewportSize(draw.Size(100, 100))
+    plain.LoadHTML("<p>a</p>")
+    plain.Draw(into: &navp, width: 100, height: 100, scale: 1)
+    plain.LoadHTML("<p>b</p>")
+    check(!plain.NeedsAnimation(), "and one that doesn't just shows")
+
     // Vertical text.
     let vt = web.Page()
     vt.SetViewportSize(draw.Size(400, 300))

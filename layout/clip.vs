@@ -90,8 +90,8 @@ func windingAt(points: [draw.Point], starts: [int], px: float32, py: float32, ev
 /// page, or nil for none. Percentages are of the reference box (the
 /// border box unless the clip-path names another), a circle's of its
 /// diagonal over root two.
-public func ClipRegionOf(box: Box, x: float32, y: float32) -> ClipRegion? {
-    guard let cp = box.Style.ClipPath else { return nil }
+public func ClipRegionOf(box: Box, x: float32, y: float32, shape: cascade.ClipPath? = nil) -> ClipRegion? {
+    guard let cp = shape ?? box.Style.ClipPath else { return nil }
     // The reference box, and its corners.
     var ref = draw.Rect(x, y, box.Width, box.Height)
     var radii = box.Style.HasBorderRadius ? box.Style.Radii(width: box.Width, height: box.Height) : draw.Radii.zero

@@ -78,6 +78,7 @@ extension Page {
         b.ScrollX = p.X
         b.ScrollY = p.Y
         needsPaint = true
+        scrollMovedThings()
         if let n = b.Node {
             elementScroll[n.Id] = p
             _ = dispatch(dom.Event("scroll", bubbles: false), to: n)

@@ -49,10 +49,11 @@ public struct Matrix {
 
 /// How a shape is filled.
 struct Fill {
-    /// 0 none, 1 the current color, 2 Color, 3 Gradient.
+    /// 0 none, 1 the current color, 2 Color, 3 Gradient, 4 Pattern.
     var kind: int
     var color: draw.Color
     var gradient: Gradient? = nil
+    var pattern: Pattern? = nil
 }
 
 let noFill = Fill(kind: 0, color: draw.Color.transparent)
@@ -86,6 +87,9 @@ struct Shape {
     var clipRule: draw.FillRule = .nonZero
     /// paint-order: the stroke goes down before the fill.
     var strokeFirst: bool = false
+    /// stroke-dasharray and stroke-dashoffset, in user units.
+    var dashes: [float32] = []
+    var dashOffset: float32 = 0
     /// A <text> run instead of an outline.
     var text: TextRun? = nil
 }
@@ -196,8 +200,10 @@ public final class Drawing {
                 // The width scales as the transform does.
                 let det = m.A * m.D - m.B * m.C
                 var st = s.strokeStyle
-                st.Width = st.Width * math.Sqrt(det < 0 ? -det : det)
-                fillPath(path.Stroked(st), rule: .nonZero, paint: s.stroke, opacity: s.opacity * s.strokeOpacity, m: m, box: box, on: canvas, currentColor: currentColor)
+                let unit = math.Sqrt(det < 0 ? -det : det)
+                st.Width = st.Width * unit
+                let line = s.dashes.isEmpty ? path : dashed(path, dashes: s.dashes.map { $0 * unit }, offset: s.dashOffset * unit)
+                fillPath(line.Stroked(st), rule: .nonZero, paint: s.stroke, opacity: s.opacity * s.strokeOpacity, m: m, box: box, on: canvas, currentColor: currentColor)
             }
         }
         if s.strokeFirst {
@@ -340,6 +346,8 @@ struct Context {
     var masks: [Drawing] = []
     var clipRule: draw.FillRule = .nonZero
     var strokeFirst: bool = false
+    var dashes: [float32] = []
+    var dashOffset: float32 = 0
     var spec = font.Spec(families: ["sans-serif"], size: 16)
     var anchor: string = "start"
 
@@ -350,7 +358,7 @@ struct Context {
         if let t = n.GetAttribute("transform") { c.matrix = matrix.Times(parseTransform(t)) }
         var props: [(string, string)] = []
         for name in ["fill", "fill-rule", "fill-opacity", "opacity", "stroke", "stroke-width", "stroke-linecap",
-                     "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "clip-path", "mask", "clip-rule", "paint-order",
+                     "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "clip-path", "mask", "clip-rule", "paint-order", "stroke-dasharray", "stroke-dashoffset",
                      "font-family", "font-size", "font-weight", "font-style", "text-anchor"] {
             if let v = n.GetAttribute(name) { props.append((name, v)) }
         }
@@ -367,7 +375,7 @@ struct Context {
                 } else if v == "currentcolor" {
                     c.fill = currentFill
                 } else if v.hasPrefix("url(") {
-                    c.fill = gradientFill(v, ids) ?? currentFill
+                    c.fill = gradientFill(v, ids) ?? patternFill(v, ids) ?? currentFill
                 } else if let color = css.ParseColor(v) {
                     c.fill = Fill(kind: 2, color: color)
                 } else if v == "inherit" {
@@ -375,6 +383,20 @@ struct Context {
                 }
             case "fill-rule":
                 c.rule = v == "evenodd" ? .evenOdd : .nonZero
+            case "stroke-dasharray":
+                c.dashes = []
+                if v != "none" {
+                    for part in v.split(whereSeparator: { $0 == " " || $0 == "," }) {
+                        if let w = lengthAttribute(string(part)), w >= 0 { c.dashes.append(w) }
+                    }
+                    var total: float32 = 0
+                    for d in c.dashes { total += d }
+                    if total <= 0 { c.dashes = [] }
+                    // An odd list is said twice.
+                    if c.dashes.count % 2 == 1 { c.dashes += c.dashes }
+                }
+            case "stroke-dashoffset":
+                if let w = lengthAttribute(v) { c.dashOffset = w }
             case "paint-order":
                 // Only the first word that puts the stroke before the fill.
                 let words = v.split(separator: " ").map { string($0) }
@@ -476,7 +498,7 @@ func walk(n: element, ctx: Context, d: Drawing, ids: [string: element]) {
             d.shapes.append(Shape(ops: ops, coords: coords, matrix: inner.matrix, fill: fill, rule: inner.rule,
                                   opacity: inner.opacity, fillInherited: inner.fillInherited && c.TagName != "line",
                                   stroke: inner.stroke, strokeStyle: inner.strokeStyle, strokeOpacity: inner.strokeOpacity,
-                                  clips: inner.clips, masks: inner.masks, clipRule: inner.clipRule, strokeFirst: inner.strokeFirst))
+                                  clips: inner.clips, masks: inner.masks, clipRule: inner.clipRule, strokeFirst: inner.strokeFirst, dashes: inner.dashes, dashOffset: inner.dashOffset))
         }
     }
 }

@@ -144,6 +144,11 @@ public class Parser {
         }
     }
 
+    func isBlankText(s: string) -> bool {
+        for b in s.utf8 where b != 32 && b != 10 && b != 9 && b != 13 && b != 12 { return false }
+        return true
+    }
+
     // normalize gives the document its html, head and body where the
     // source left them out.
     func normalize() {
@@ -175,6 +180,30 @@ public class Parser {
             html = made
         }
         guard let h = html else { return }
+        // What came before an explicit <html>, or after it, is inside it: the
+        // tag only says something about the root the document has anyway.
+        var loose: [Node] = []
+        var kept: [Node] = []
+        var seen = false
+        var before: [Node] = []
+        for c in root.Children {
+            if c === h {
+                kept.append(c)
+                seen = true
+            } else if c.Kind == NodeKind.comment || (c.Kind == NodeKind.text && isBlankText(c.Text)) {
+                kept.append(c)
+            } else if seen {
+                loose.append(c)
+            } else {
+                before.append(c)
+            }
+        }
+        if !before.isEmpty || !loose.isEmpty {
+            root.Children = kept
+            for c in before { c.Parent = h }
+            h.Children = before + h.Children
+            for c in loose { h.AppendChild(c) }
+        }
         var head: Node? = nil
         var body: Node? = nil
         i = 0

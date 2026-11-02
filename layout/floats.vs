@@ -11,6 +11,10 @@ struct PlacedFloat {
     var y: float32
     var width: float32
     var height: float32
+    /// shape-outside: what lines wrap round instead of the box, in the
+    /// context's coordinates; and shape-margin.
+    var shape: ClipRegion? = nil
+    var shapeMargin: float32 = 0
 
     var right: float32 { return x + width }
     var bottom: float32 { return y + height }
@@ -31,6 +35,34 @@ final class FloatContext {
         var r = right
         for f in floats {
             if f.y < y + height && f.bottom > y {
+                if let shape = f.shape {
+                    // How far its shape reaches on the rows of the band.
+                    var reach: float32? = nil
+                    var row = y > f.y ? y : f.y
+                    let end = y + height < f.bottom ? y + height : f.bottom
+                    while row < end + 0.5 {
+                        var col = f.x
+                        while col <= f.right {
+                            if shape.Contains(col, row) {
+                                if f.left {
+                                    if reach == nil || col > reach! { reach = col }
+                                } else if reach == nil || col < reach! {
+                                    reach = col
+                                }
+                            }
+                            col += 1
+                        }
+                        row += 2
+                    }
+                    if let at = reach {
+                        if f.left {
+                            if at + 1 + f.shapeMargin > l { l = at + 1 + f.shapeMargin }
+                        } else if at - f.shapeMargin < r {
+                            r = at - f.shapeMargin
+                        }
+                    }
+                    continue
+                }
                 if f.left {
                     if f.right > l { l = f.right }
                 } else {
@@ -88,7 +120,11 @@ final class FloatContext {
             let band = intrusions(y: y, height: h > 0 ? h : 1, left: containerLeft, right: containerRight)
             if band.right - band.left >= w - 0.01 || nextBand(after: y) == nil {
                 let x = isLeft ? band.left : band.right - w
-                let placed = PlacedFloat(box: box, left: isLeft, x: x, y: y, width: w, height: h)
+                var placed = PlacedFloat(box: box, left: isLeft, x: x, y: y, width: w, height: h)
+                if let shape = box.Style.ShapeOutside {
+                    placed.shape = ClipRegionOf(box, x: x + box.Margin.Left, y: y + box.Margin.Top, shape: shape)
+                    placed.shapeMargin = box.Style.ShapeMargin
+                }
                 floats.append(placed)
                 return placed
             }

@@ -54,6 +54,9 @@ final class RunningAnimation {
     var announcedStart = false
     var iteration: int64 = 0
     var ended = false
+    /// animation-timeline, "auto" for time, and animation-range.
+    var timeline: string = "auto"
+    var range: string = "normal"
 
     init(name: string, index: int) {
         self.name = name
@@ -136,7 +139,17 @@ final class ElementAnimations {
     init(node: html.Node) { self.node = node }
 }
 
+func isAutoLength(v: cascade.AnimValue) -> bool {
+    if case .length(let l) = v { return l.IsAuto }
+    return false
+}
+
 final class Animator {
+    /// How big an element's auto height, or width, comes to.
+    var measureAuto: ((html.Node, bool) -> float32?)? = nil
+    /// How far along its timeline an element's animation is, 0 to 1, or
+    /// past either end; nil where there's no such timeline.
+    var timelineProgress: ((html.Node, string, string) -> float32?)? = nil
     /// What a transition starts from where an element first shows.
     var startingStyle: ((html.Node, cascade.ComputedStyle, cascade.ComputedStyle?) -> cascade.ComputedStyle?)? = nil
     /// The page's time, in seconds, as the host last gave it.
@@ -159,7 +172,15 @@ final class Animator {
     var Active: bool {
         for (_, e) in elements {
             if !e.transitions.isEmpty { return true }
-            for a in e.animations where !a.ended && a.pausedAt < 0 { return true }
+            for a in e.animations where !a.ended && a.pausedAt < 0 && a.timeline == "auto" { return true }
+        }
+        return false
+    }
+
+    /// Whether an animation runs on a scroll's progress, not on time.
+    var HasTimelines: bool {
+        for (_, e) in elements {
+            for a in e.animations where a.timeline != "auto" { return true }
         }
         return false
     }
@@ -222,6 +243,7 @@ final class Animator {
             }
             for name in finished { e.transitions[name] = nil }
             for a in e.animations {
+                if a.timeline != "auto" { continue }
                 if a.start < 0 { a.start = time }
                 if a.ended || a.pausedAt >= 0 { continue }
                 let t = a.activeTime(time)
@@ -276,6 +298,19 @@ final class Animator {
             cascade.SetAnimatedValue(t.prop.Prop, t.valueAt(now), on: style)
         }
         for a in e.animations {
+            // On a timeline, the scroll says how far along it is.
+            if a.timeline != "auto" {
+                guard let raw = timelineProgress?(node, a.timeline, a.range) else { continue }
+                if (raw < 0 && a.fill != "backwards" && a.fill != "both") || (raw > 1 && a.fill != "forwards" && a.fill != "both") { continue }
+                var p = raw < 0 ? 0 : (raw > 1 ? 1 : raw)
+                if a.direction == "reverse" { p = 1 - p }
+                for prop in a.properties {
+                    if let base = cascade.AnimatedValue(prop.Prop, of: style) {
+                        cascade.SetAnimatedValue(prop.Prop, a.value(prop, at: p, base: base), on: style)
+                    }
+                }
+                continue
+            }
             if a.start < 0 && a.delay <= 0 && a.fill != "backwards" && a.fill != "both" {
                 // Starting this frame: its 0% shows at once.
                 for prop in a.properties {
@@ -322,11 +357,17 @@ final class Animator {
                 }
                 // A change mid-transition starts from where it had got to.
                 var from = before
+                var to = value
+                // interpolate-size: allow-keywords: auto as the size it is.
+                if style.InterpolateKeywords && (prop.Prop == .width || prop.Prop == .height) {
+                    if isAutoLength(from), let m = measureAuto?(e.node, prop.Prop == .height) { from = .length(.px(m)) }
+                    if isAutoLength(to), let m = measureAuto?(e.node, prop.Prop == .height) { to = .length(.px(m)) }
+                }
                 if let running = e.transitions[prop.Name] {
-                    if cascade.SameValue(running.to, value) { continue }
+                    if cascade.SameValue(running.to, to) { continue }
                     from = running.valueAt(now)
                 }
-                e.transitions[prop.Name] = RunningTransition(prop: prop, from: from, to: value, start: -1,
+                e.transitions[prop.Name] = RunningTransition(prop: prop, from: from, to: to, start: -1,
                                                              delay: delay, duration: duration, easing: easing)
             }
         }
@@ -373,6 +414,8 @@ final class Animator {
             anim.direction = cascade.Cycled(spec.Directions, index)
             anim.fill = cascade.Cycled(spec.FillModes, index)
             anim.easing = cascade.Cycled(spec.Timings, index)
+            anim.timeline = cascade.Cycled(spec.Timelines, index)
+            anim.range = cascade.Cycled(spec.Ranges, index)
             let paused = cascade.Cycled(spec.PlayStates, index) == "paused"
             if paused && anim.pausedAt < 0 {
                 if anim.start < 0 { anim.start = now }

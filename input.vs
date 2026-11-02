@@ -139,6 +139,7 @@ extension Page {
 
     /// scroll, at the root element: the page's viewport moved.
     func pageScrolled() {
+        scrollMovedThings()
         if let doc = Document, doc.HasEventListeners, let root = doc.Tree.ElementsByTagName("html").first {
             _ = dispatch(dom.Event("scroll", bubbles: false), to: root)
         }

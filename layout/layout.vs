@@ -25,6 +25,9 @@ public final class Layout {
     public var ViewportHeight: float32
     /// Boxes with position: sticky, whose offsets follow the scroll.
     public var Sticky: [Box] = []
+    /// Whether something here is placed by an anchor: a scroll moves it.
+    public var HasAnchored: bool = false
+    var anchored: [Box] = []
     /// The root being laid out: what fixed boxes are positioned against.
     var rootBox: Box? = nil
 
@@ -47,6 +50,180 @@ public final class Layout {
         root.X = root.Margin.Left
         root.Y = root.Margin.Top
         layoutPositioned(root, cb: cb)
+        HasAnchored = !anchored.isEmpty
+        if HasAnchored { resolveAnchors(root) }
+        anchored = []
+    }
+
+    /// A box's content size at auto, without keeping that layout's result
+    /// on the box beyond its own size.
+    public func MeasureAuto(box: Box, height: bool) -> float32 {
+        let style = box.Style
+        if !height {
+            let widths = intrinsicWidths(box, ignoringWidth: true)
+            return style.BoxSizing == .borderBox ? widths.max : widths.max - box.Padding.Horizontal - box.Border.Horizontal
+        }
+        let saved = style.Height
+        let savedHeight = box.Height
+        style.Height = .auto
+        let cb = ContainingBlock(width: box.Parent?.InnerWidth ?? ViewportWidth, height: nil)
+        layoutFixed(box, width: box.Width, height: nil, cb: cb, flow: Flow(positioned: box, floats: FloatContext(), x: 0, y: 0))
+        let measured = box.Height
+        style.Height = saved
+        box.Height = savedHeight
+        return style.BoxSizing == .borderBox ? measured : measured - box.Padding.Vertical - box.Border.Vertical
+    }
+
+    // MARK: - Anchor positioning
+
+    /// Places what anchor() and position-area name, once everything it may
+    /// be anchored to is where it ends up. position-try's fallbacks are
+    /// tried in turn, and the first that stays in the viewport used.
+    func resolveAnchors(root: Box) {
+        var named: [string: Box] = [:]
+        func walk(b: Box) {
+            // Text shares its element's style; it's the element that's named.
+            if b.Kind != .text {
+                for n in b.Style.AnchorNames { named[n] = b }
+            }
+            for c in b.Children { walk(c) }
+            for p in b.Positioned { walk(p) }
+        }
+        walk(root)
+        for child in anchored { place(child, among: named, root: root) }
+    }
+
+    func place(child: Box, among named: [string: Box], root: Box) {
+        let s = child.Style
+        var tries: [(uses: [cascade.AnchorUse], area: [string])] = [(uses: s.AnchorUses, area: s.PositionArea)]
+        for t in s.PositionTries {
+            if let rule = cascade.PositionTryRules[t] {
+                tries.append((uses: rule.Uses, area: rule.Area))
+                continue
+            }
+            var uses = s.AnchorUses
+            var area = s.PositionArea
+            for word in t.split(separator: " ").map({ string($0) }) {
+                if word == "flip-block" {
+                    uses = uses.map { flippedUse($0, a: "top", b: "bottom") }
+                    area = area.map { flippedWord($0, a: "top", b: "bottom") }
+                } else if word == "flip-inline" {
+                    uses = uses.map { flippedUse($0, a: "left", b: "right") }
+                    area = area.map { flippedWord($0, a: "left", b: "right") }
+                }
+            }
+            tries.append((uses: uses, area: area))
+        }
+        let viewX = root.ViewportScrollX
+        let viewY = root.ViewportScrollY
+        var first: (x: float32, y: float32, w: float32, h: float32)? = nil
+        var chosen: (x: float32, y: float32, w: float32, h: float32)? = nil
+        for t in tries {
+            guard let spot = anchoredSpot(child, uses: t.uses, area: t.area, named: named) else { continue }
+            if first == nil { first = spot }
+            if spot.x >= viewX && spot.y >= viewY && spot.x + spot.w <= viewX + ViewportWidth && spot.y + spot.h <= viewY + ViewportHeight {
+                chosen = spot
+                break
+            }
+        }
+        guard let at = chosen ?? first else { return }
+        if at.w != child.Width || at.h != child.Height {
+            let cb = ContainingBlock(width: child.Parent?.PaddingBoxWidth ?? ViewportWidth, height: child.Parent?.PaddingBoxHeight)
+            layoutFixed(child, width: at.w, height: at.h != child.Height ? at.h : nil, cb: cb, flow: Flow(positioned: child, floats: FloatContext(), x: 0, y: 0))
+        }
+        // Where it goes on the page, from where it hangs.
+        let now = PagePosition(child)
+        child.X += at.x - now.x
+        child.Y += at.y - now.y
+    }
+
+    /// Where a box goes by these uses and this area, on the page; nil where
+    /// it names an anchor there isn't.
+    func anchoredSpot(child: Box, uses: [cascade.AnchorUse], area: [string], named: [string: Box]) -> (x: float32, y: float32, w: float32, h: float32)? {
+        let s = child.Style
+        func rect(name: string) -> (x: float32, y: float32, w: float32, h: float32)? {
+            let key = name.isEmpty ? s.PositionAnchor : name
+            guard let a = named[key] else { return nil }
+            let p = PagePosition(a)
+            return (x: p.x, y: p.y, w: a.Width, h: a.Height)
+        }
+        var w = child.Width
+        var h = child.Height
+        for u in uses where u.Property == "width" || u.Property == "height" {
+            guard let a = rect(u.Name) else { return nil }
+            let size = u.Edge == "height" || u.Edge == "block" ? a.h : (u.Edge == "width" || u.Edge == "inline" ? a.w : (u.Property == "width" ? a.w : a.h))
+            if u.Property == "width" { w = size + u.Offset } else { h = size + u.Offset }
+        }
+        let start = PagePosition(child)
+        var x = start.x
+        var y = start.y
+        func along(a: (x: float32, y: float32, w: float32, h: float32), u: cascade.AnchorUse, horizontal: bool) -> float32 {
+            let low = horizontal ? a.x : a.y
+            let size = horizontal ? a.w : a.h
+            if u.Percent >= 0 { return low + size * u.Percent / 100 }
+            switch u.Edge {
+            case "right", "bottom", "end", "self-end": return low + size
+            case "center": return low + size / 2
+            default: return low
+            }
+        }
+        for u in uses {
+            switch u.Property {
+            case "top":
+                guard let a = rect(u.Name) else { return nil }
+                y = along(a, u, horizontal: false) + u.Offset + child.Margin.Top
+            case "bottom":
+                guard let a = rect(u.Name) else { return nil }
+                y = along(a, u, horizontal: false) - u.Offset - h - child.Margin.Bottom
+            case "left":
+                guard let a = rect(u.Name) else { return nil }
+                x = along(a, u, horizontal: true) + u.Offset + child.Margin.Left
+            case "right":
+                guard let a = rect(u.Name) else { return nil }
+                x = along(a, u, horizontal: true) - u.Offset - w - child.Margin.Right
+            default:
+                break
+            }
+        }
+        if !area.isEmpty {
+            guard let a = rect("") else { return nil }
+            var acrossSet = false
+            var downSet = false
+            for word in area {
+                switch word {
+                case "top", "block-start", "y-start":
+                    y = a.y - h - child.Margin.Bottom
+                    downSet = true
+                case "bottom", "block-end", "y-end":
+                    y = a.y + a.h + child.Margin.Top
+                    downSet = true
+                case "span-bottom", "span-block-end":
+                    y = a.y + child.Margin.Top
+                    downSet = true
+                case "span-top", "span-block-start":
+                    y = a.y + a.h - h - child.Margin.Bottom
+                    downSet = true
+                case "left", "inline-start", "x-start":
+                    x = a.x - w - child.Margin.Right
+                    acrossSet = true
+                case "right", "inline-end", "x-end":
+                    x = a.x + a.w + child.Margin.Left
+                    acrossSet = true
+                case "span-right", "span-inline-end":
+                    x = a.x + child.Margin.Left
+                    acrossSet = true
+                case "span-left", "span-inline-start":
+                    x = a.x + a.w - w - child.Margin.Right
+                    acrossSet = true
+                default:
+                    break
+                }
+            }
+            // Over the anchor's middle on whichever axis wasn't said.
+            if !acrossSet { x = a.x + (a.w - w) / 2 }
+            if !downSet { y = a.y + (a.h - h) / 2 }
+        }
+        return (x: x, y: y, w: w, h: h)
     }
 
     // MARK: - Edges and sizes
@@ -733,6 +910,7 @@ public final class Layout {
         let cbHeight = cb.Height ?? 0
         for child in list {
             let s = child.Style
+            if s.IsAnchored { anchored.append(child) }
             // The static position was written into X and Y by the flow
             // layout, relative to the flow parent; move it to be relative
             // to this containing block.
@@ -886,7 +1064,7 @@ public final class Layout {
 /// code.
 public func ReadsAttribute(name: string) -> bool {
     switch name {
-    case "src", "colspan", "rowspan", "start", "type", "value", "selected", "placeholder", "multiple", "poster", "data":
+    case "src", "colspan", "rowspan", "start", "type", "value", "selected", "placeholder", "multiple", "poster", "data", "lang":
         return true
     default:
         return false
@@ -900,4 +1078,22 @@ func isSizingKeyword(l: css.Length) -> bool {
     case .minContent, .maxContent, .fitContent: return true
     default: return false
     }
+}
+
+func flippedName(n: string, a: string, b: string) -> string {
+    return n == a ? b : (n == b ? a : n)
+}
+
+/// An anchor use the other way along an axis.
+func flippedUse(u: cascade.AnchorUse, a: string, b: string) -> cascade.AnchorUse {
+    var out = u
+    out.Property = flippedName(u.Property, a, b)
+    out.Edge = flippedName(u.Edge, a, b)
+    return out
+}
+
+func flippedWord(w: string, a: string, b: string) -> string {
+    if w == "span-" + a { return "span-" + b }
+    if w == "span-" + b { return "span-" + a }
+    return flippedName(w, a, b)
 }

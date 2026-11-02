@@ -272,6 +272,10 @@ public struct AnimationSpec {
     public var Directions: [string] = ["normal"]
     public var FillModes: [string] = ["none"]
     public var PlayStates: [string] = ["running"]
+    /// animation-timeline: auto (time), or scroll(), view() or a name;
+    /// animation-range.
+    public var Timelines: [string] = ["auto"]
+    public var Ranges: [string] = ["normal"]
 
     public init() {}
 
@@ -310,6 +314,8 @@ func applyAnimationProperty(prop: css.Prop, v: css.Value, s: ComputedStyle) {
     case .animationDirection: s.Animation.Directions = items
     case .animationFillMode: s.Animation.FillModes = items
     case .animationPlayState: s.Animation.PlayStates = items
+    case .animationTimeline: s.Animation.Timelines = items
+    case .animationRange: s.Animation.Ranges = items
     default: break
     }
 }
@@ -329,6 +335,8 @@ func copyAnimationProperty(prop: css.Prop, from a: ComputedStyle, to b: Computed
     case .animationDirection: b.Animation.Directions = a.Animation.Directions
     case .animationFillMode: b.Animation.FillModes = a.Animation.FillModes
     case .animationPlayState: b.Animation.PlayStates = a.Animation.PlayStates
+    case .animationTimeline: b.Animation.Timelines = a.Animation.Timelines
+    case .animationRange: b.Animation.Ranges = a.Animation.Ranges
     default: break
     }
 }

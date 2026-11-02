@@ -69,6 +69,9 @@ func usesVar(tokens: [css.Token]) -> bool {
     return false
 }
 
+/// @view-transition { navigation: auto }: a new page fades in over the old.
+public var ViewTransitionOnNavigation = false
+
 /// What media() in an if() asks about: the viewport last set.
 var conditionWidth: float32 = 0
 var conditionHeight: float32 = 0

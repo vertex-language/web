@@ -195,6 +195,46 @@ func fillPath(path: draw.Path, rule: draw.FillRule, paint: Fill, opacity: float3
     case 0: return
     case 1: canvas.FillPath(path, rule: rule, currentColor.Faded(opacity))
     case 2: canvas.FillPath(path, rule: rule, paint.color.Faded(opacity))
+    case 4:
+        guard let p = paint.pattern else { return }
+        let b = path.Bounds
+        let area = draw.IRect(int32(math.Floor(b.X)), int32(math.Floor(b.Y)), int32(math.Ceil(b.Width)) + 2, int32(math.Ceil(b.Height)) + 2).Intersect(canvas.Clip)
+        if area.IsEmpty { return }
+        // The tile in user units; drawn once, then repeated over the shape.
+        let bw = math.Sqrt(box.A * box.A + box.B * box.B)
+        let bh = math.Sqrt(box.C * box.C + box.D * box.D)
+        let tileX = p.boundingBoxUnits ? box.E + p.x * bw : p.x
+        let tileY = p.boundingBoxUnits ? box.F + p.y * bh : p.y
+        let tileW = p.boundingBoxUnits ? p.width * bw : p.width
+        let tileH = p.boundingBoxUnits ? p.height * bh : p.height
+        if tileW <= 0 || tileH <= 0 { return }
+        let toDevice = m.Times(p.transform)
+        let scale = math.Sqrt(math.Abs(toDevice.A * toDevice.D - toDevice.B * toDevice.C))
+        let pw = int32(math.Ceil(tileW * scale))
+        let ph = int32(math.Ceil(tileH * scale))
+        if pw <= 0 || ph <= 0 || pw > 4096 || ph > 4096 { return }
+        guard let inv = toDevice.Inverted() else { return }
+        let tile = draw.Layer(draw.IRect(0, 0, pw, ph))
+        var view = Matrix(float32(pw) / tileW, 0, 0, float32(ph) / tileH, 0, 0)
+        if let vb = p.viewBox, vb.Width > 0, vb.Height > 0 {
+            view = Matrix(float32(pw) / vb.Width, 0, 0, float32(ph) / vb.Height, -vb.X * float32(pw) / vb.Width, -vb.Y * float32(ph) / vb.Height)
+        } else if p.contentInBoxUnits {
+            view = view.Times(Matrix(bw, 0, 0, bh, 0, 0))
+        }
+        p.content.drawShapes(on: tile.Canvas, view: view, currentColor: currentColor, fill: nil, fillNone: false, solid: false)
+        let layer = draw.Layer(area)
+        layer.Canvas.FillPath(path, rule: rule, draw.Color(255, 255, 255))
+        layer.Shade { x, y in
+            let u = inv.Apply(float32(x) + 0.5, float32(y) + 0.5)
+            var tx = (u.x - tileX) - tileW * math.Floor((u.x - tileX) / tileW)
+            var ty = (u.y - tileY) - tileH * math.Floor((u.y - tileY) / tileH)
+            tx *= float32(pw) / tileW
+            ty *= float32(ph) / tileH
+            return tile.ColorAt(int32(tx), int32(ty)).Faded(opacity)
+        }
+        layer.Composite(onto: canvas)
+        layer.Free()
+        tile.Free()
     default:
         guard let g = paint.gradient else { return }
         let b = path.Bounds
@@ -212,6 +252,94 @@ func fillPath(path: draw.Path, rule: draw.FillRule, paint: Fill, opacity: float3
         layer.Composite(onto: canvas)
         layer.Free()
     }
+}
+
+/// A <pattern>: its tile's place and size, and what is drawn on it.
+final class Pattern {
+    var boundingBoxUnits = true
+    var contentInBoxUnits = false
+    var x: float32 = 0
+    var y: float32 = 0
+    var width: float32 = 0
+    var height: float32 = 0
+    var transform = Matrix.identity
+    var viewBox: draw.Rect? = nil
+    let content: Drawing
+
+    init(content: Drawing) { self.content = content }
+}
+
+/// A url(#id) paint that is a pattern; nil for anything else.
+func patternFill(v: string, ids: [string: element]) -> Fill? {
+    guard let e = referenced(v, ids), e.TagName == "pattern", nesting < deepestNesting else { return nil }
+    nesting += 1
+    let d = Drawing(viewBox: nil, stretch: false)
+    walk(e, contentContext(), d, ids)
+    nesting -= 1
+    let p = Pattern(content: d)
+    p.boundingBoxUnits = css.lower(e.GetAttribute("patternunits") ?? "") != "userspaceonuse"
+    p.contentInBoxUnits = css.lower(e.GetAttribute("patterncontentunits") ?? "") == "objectboundingbox"
+    p.x = coordinate(e.GetAttribute("x")) ?? 0
+    p.y = coordinate(e.GetAttribute("y")) ?? 0
+    p.width = coordinate(e.GetAttribute("width")) ?? 0
+    p.height = coordinate(e.GetAttribute("height")) ?? 0
+    if let t = e.GetAttribute("patterntransform") { p.transform = parseTransform(t) }
+    p.viewBox = viewBoxOf(e)
+    return Fill(kind: 4, color: draw.Color.transparent, pattern: p)
+}
+
+/// A path cut into dashes, along its contours.
+func dashed(path: draw.Path, dashes: [float32], offset: float32) -> draw.Path {
+    var out = draw.Path()
+    var total: float32 = 0
+    for d in dashes { total += d }
+    if total <= 0 { return path }
+    var c = 0
+    while c < path.Starts.count {
+        let from = path.Starts[c]
+        let to = c + 1 < path.Starts.count ? path.Starts[c + 1] : path.Points.count
+        var pts: [draw.Point] = []
+        var i = from
+        while i < to {
+            pts.append(path.Points[i])
+            i += 1
+        }
+        if c < path.Closed.count && path.Closed[c], let first = pts.first { pts.append(first) }
+        // Where in the pattern the contour starts.
+        var at = offset - total * math.Floor(offset / total)
+        var which = 0
+        while at >= dashes[which] {
+            at -= dashes[which]
+            which = (which + 1) % dashes.count
+        }
+        var left = dashes[which] - at
+        var on = which % 2 == 0
+        i = 0
+        if on, let first = pts.first { out.MoveTo(first.X, first.Y) }
+        while i + 1 < pts.count {
+            let a = pts[i]
+            let b = pts[i + 1]
+            let dx = b.X - a.X
+            let dy = b.Y - a.Y
+            let len = math.Sqrt(dx * dx + dy * dy)
+            var done: float32 = 0
+            while len - done > left {
+                done += left
+                let x = a.X + dx * done / len
+                let y = a.Y + dy * done / len
+                if on { out.LineTo(x, y) } else { out.MoveTo(x, y) }
+                on = !on
+                which = (which + 1) % dashes.count
+                left = dashes[which]
+                if left <= 0 { left = 0.001 }
+            }
+            left -= len - done
+            if on { out.LineTo(b.X, b.Y) }
+            i += 1
+        }
+        c += 1
+    }
+    return out
 }
 
 /// How deep clipPaths, masks and <use>s have nested: what stops one that

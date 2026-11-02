@@ -414,3 +414,69 @@ public enum UnicodeBidi: Equatable {
     case isolateOverride
     case plaintext
 }
+
+/// An inset or a size set by anchor(): its property's name, which anchor
+/// ("" for position-anchor), which edge or size or percentage across, and
+/// what is added.
+public struct AnchorUse {
+    public var Property: string
+    public var Name: string
+    public var Edge: string
+    public var Percent: float32
+    public var Offset: float32
+
+    public init(property: string, name: string, edge: string, percent: float32, offset: float32) {
+        Property = property
+        Name = name
+        Edge = edge
+        Percent = percent
+        Offset = offset
+    }
+}
+
+/// An @position-try rule: what a box uses instead where it fits.
+public struct PositionTry {
+    public var Uses: [AnchorUse] = []
+    public var Area: [string] = []
+}
+
+public var PositionTryRules: [string: PositionTry] = [:]
+
+let fontNumericTags: [string: string] = ["lining-nums": "lnum=1", "oldstyle-nums": "onum=1", "proportional-nums": "pnum=1", "tabular-nums": "tnum=1",
+    "diagonal-fractions": "frac=1", "stacked-fractions": "afrc=1", "ordinal": "ordn=1", "slashed-zero": "zero=1"]
+let fontLigatureTags: [string: string] = ["none": "liga=0,clig=0,dlig=0,hlig=0,calt=0", "common-ligatures": "liga=1,clig=1", "no-common-ligatures": "liga=0,clig=0",
+    "discretionary-ligatures": "dlig=1", "no-discretionary-ligatures": "dlig=0", "historical-ligatures": "hlig=1", "no-historical-ligatures": "hlig=0",
+    "contextual": "calt=1", "no-contextual": "calt=0"]
+let fontCapsTags: [string: string] = ["small-caps": "smcp=1", "all-small-caps": "smcp=1,c2sc=1", "petite-caps": "pcap=1", "all-petite-caps": "pcap=1,c2pc=1",
+    "unicase": "unic=1", "titling-caps": "titl=1"]
+let fontEastAsianTags: [string: string] = ["jis78": "jp78=1", "jis83": "jp83=1", "jis90": "jp90=1", "jis04": "jp04=1", "simplified": "smpl=1", "traditional": "trad=1",
+    "full-width": "fwid=1", "proportional-width": "pwid=1", "ruby": "ruby=1"]
+
+/// @font-feature-values' names: "stylistic/name" to its number.
+public var FontFeatureValues: [string: int] = [:]
+
+/// font-variant-alternates as tags: historical-forms, and names from
+/// @font-feature-values for the functions.
+func fontAlternatesSpec(words: string) -> string {
+    var out: [string] = []
+    for w in words.split(separator: " ").map({ string($0) }) {
+        if w == "historical-forms" {
+            out.append("hist=1")
+            continue
+        }
+        let parts = w.split(separator: "(").map { string($0) }
+        if parts.count != 2 { continue }
+        let name = string(parts[1].dropLast())
+        guard let n = FontFeatureValues["\(parts[0])/\(name)"] else { continue }
+        switch parts[0] {
+        case "stylistic": out.append("salt=\(n)")
+        case "styleset": out.append("ss\(n < 10 ? "0" : "")\(n)=1")
+        case "character-variant": out.append("cv\(n < 10 ? "0" : "")\(n)=1")
+        case "swash": out.append("swsh=\(n)")
+        case "ornaments": out.append("ornm=\(n)")
+        case "annotation": out.append("nalt=\(n)")
+        default: break
+        }
+    }
+    return out.joined(separator: ",")
+}

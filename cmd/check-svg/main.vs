@@ -122,6 +122,12 @@ func main() -> int32 {
     check(at(p, 5, 10).b == 255 && at(p, 15, 10).a == 0, "a mask keeps what is bright in it")
     p = render("<svg viewBox='0 0 20 20'><rect x=5 y=5 width=10 height=10 fill='#00f' stroke='#f00' stroke-width=4 paint-order=stroke /></svg>")
     check(at(p, 6, 10).b == 255 && at(p, 6, 10).r == 0, "paint-order: stroke puts the fill over the stroke (\(at(p, 6, 10)))")
+    p = render("<svg viewBox='0 0 20 20'><line x1=0 y1=10 x2=20 y2=10 stroke='#f00' stroke-width=4 stroke-dasharray='5 5'/></svg>")
+    check(at(p, 2, 10).r == 255 && at(p, 7, 10).a == 0 && at(p, 12, 10).r == 255, "stroke-dasharray leaves gaps (\(at(p, 2, 10)) \(at(p, 7, 10)))")
+    p = render("<svg viewBox='0 0 20 20'><line x1=0 y1=10 x2=20 y2=10 stroke='#f00' stroke-width=4 stroke-dasharray='5 5' stroke-dashoffset=5 /></svg>")
+    check(at(p, 2, 10).a == 0 && at(p, 7, 10).r == 255, "stroke-dashoffset moves them")
+    p = render("<svg viewBox='0 0 20 20'><pattern id=pt width=10 height=10 patternUnits=userSpaceOnUse><rect width=5 height=10 fill='#00f'/></pattern><rect width=20 height=20 fill='url(#pt)'/></svg>")
+    check(at(p, 2, 5).b == 255 && at(p, 7, 5).a == 0 && at(p, 12, 5).b == 255, "a <pattern> tiles across the shape (\(at(p, 2, 5)) \(at(p, 7, 5)) \(at(p, 12, 5)))")
     print("Text")
     p = render("<svg viewBox='0 0 40 40' ><text x=2 y=30 font-size=30 fill='#f00'>HH</text></svg>", size: 40)
     var lit = 0

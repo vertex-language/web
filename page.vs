@@ -286,6 +286,17 @@ public final class Page {
     var media: [int64: MediaState] = [:]
     var mediaFrames: [int64: draw.Image] = [:]
     var snapFrom: draw.Point? = nil
+    /// The page's size when timelines were last styled.
+    var timelineSizedFor = draw.Point(0, 0)
+    var previousBoxes: [int64: layout.Box] = [:]
+    /// A view transition: the old picture and how much of it still shows,
+    /// the named boxes moving, when it began; the scale last drawn at.
+    var oldPicture: draw.Image? = nil
+    var oldGroups: [string: (node: int64, rect: draw.Rect)] = [:]
+    var transitionMoves: [TransitionMove] = []
+    var transitionFade: float32 = 0
+    var transitionAt: float64 = -1
+    var drawnScale: float32 = 0
     /// The panel open over the page, if any.
     var picker: Picker? = nil
     /// Whether a precise scroll past the page's end stretches it, and how
@@ -322,6 +333,8 @@ public final class Page {
         baseURL = Configuration.BaseURL ?? ""
         let a = animator
         resolver.Animate = { node, style, parent in a.apply(node, style, parent) }
+        a.measureAuto = { node, height in self.measureAutoSize(node, height: height) }
+        a.timelineProgress = { node, timeline, range in self.timelineProgress(node, timeline: timeline, range: range) }
         a.startingStyle = { node, style, parent in self.resolver.ResolveStarting(node, style: style, parent: parent, context: self.context) }
         context.Interacted = { node in self.userEdited.contains(node.Id) }
         context.ValueOf = { node in self.valueOf(node) }
@@ -335,7 +348,12 @@ public final class Page {
     public func LoadHTML(source: string, baseURL: string? = nil) {
         if let b = baseURL { self.baseURL = b }
         let doc = html.Parse(source)
+        // A page may ask to fade in over the one before.
+        cascade.ViewTransitionOnNavigation = false
+        takeTransitionPicture()
         load(doc)
+        update()
+        if cascade.ViewTransitionOnNavigation { beginTransition() } else { oldPicture = nil }
     }
 
     /// Shows an HTML file from disk; its folder is the base for what it
@@ -572,6 +590,16 @@ public final class Page {
         return nil
     }
 
+    /// A scroll has moved what anchored boxes hang from, or a timeline's
+    /// progress: they are placed, or styled, again.
+    func scrollMovedThings() {
+        if laidOut?.HasAnchored ?? false { needsLayout = true; needsRepaint = true }
+        if animator.HasTimelines {
+            needsStyle = true
+            needsRepaint = true
+        }
+    }
+
     /// The page's title, from <title>.
     public var Title: string { return title }
 
@@ -730,7 +758,7 @@ public final class Page {
         if animator.Active || !animator.events.isEmpty { return true }
         if bubbleNode != nil { return true }
         if scrollAnimation != nil || pendingSnap != nil { return true }
-        if mediaPlaying || overscroll != 0 { return true }
+        if mediaPlaying || overscroll != 0 || oldPicture != nil { return true }
         // Only what someone is listening for is worth a frame.
         if let doc = Document, doc.HasEventListeners {
             if !pendingImageEvents.isEmpty { return true }
@@ -766,6 +794,7 @@ public final class Page {
         dispatchImageEvents()
         dispatchLayoutEvents()
         if easeOverscroll(time) { repaint = true }
+        if advanceTransition(time: time) { repaint = true }
         if advanceMedia() { repaint = true }
         if advanceScroll(time) { repaint = true }
         for (_, frame) in frames where frame.page.NeedsAnimation() {
@@ -866,7 +895,11 @@ public final class Page {
         // Layout is coming: what the scroll keeps its place by, where it is.
         var anchor: (node: int64, y: float32)? = nil
         if needsStyle || needsLayout { anchor = scrollAnchor() }
-        defer { keepScrollAnchor(anchor) }
+        updateStages()
+        keepScrollAnchor(anchor)
+    }
+
+    func updateStages() {
         root?.ViewportScrollX = scroll.X
         root?.ViewportScrollY = scroll.Y
         if needsStyle {
@@ -895,6 +928,8 @@ public final class Page {
             animator.beginPass()
             resolver.BeginStylePass()
             if let doc = Document {
+                // Where things were: a view() timeline is styled from it.
+                previousBoxes = builder.byNode
                 root = builder.Build(doc.Tree)
             } else {
                 root = nil
@@ -921,6 +956,13 @@ public final class Page {
             clampScroll()
             needsLayout = false
             layoutRan = true
+            // A timeline's length is the page's: known now, it is styled again.
+            if animator.HasTimelines && (timelineSizedFor.X != contentWidth || timelineSizedFor.Y != contentHeight) {
+                timelineSizedFor = draw.Point(contentWidth, contentHeight)
+                needsStyle = true
+                updateStages()
+                return
+            }
             needsPaint = true
             // Container queries ask about sizes only layout knows: once
             // laid out, measure the containers, and while that changes
@@ -1060,6 +1102,8 @@ public final class Page {
         let sx = scroll.X
         let sy = scroll.Y
         let stretch = overscroll
+        drawnScale = scale
+        let fade = oldPicture != nil
         let bg = Configuration.BackgroundColor
         let showBar = contentHeight > size.Height
         let barHeight = size.Height * size.Height / (contentHeight > 0 ? contentHeight : 1)
@@ -1070,6 +1114,7 @@ public final class Page {
             canvas.ClipTo(viewRect)
             if bg.A > 0 { canvas.Fill(viewRect, bg) }
             paint.Rasterize(list, on: canvas, scale: scale, originX: float32(viewRect.X), originY: float32(viewRect.Y) - stretch * scale, scrollX: sx, scrollY: sy)
+            if fade { self.drawTransition(on: canvas, view: viewRect, scale: scale) }
             if showBar {
                 let track = draw.Rect(origin.X + viewWidth - 10, origin.Y + barY + 2, 6, barHeight - 4).Snapped(scale: scale)
                 canvas.FillRounded(track, radii: draw.Radii(all: 3 * scale), draw.Color(0, 0, 0, 90))

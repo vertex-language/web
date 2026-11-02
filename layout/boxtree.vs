@@ -102,6 +102,37 @@ public final class BoxTreeBuilder {
     /// Whether children become flex items: blocks, each of its own.
     func place(made: [Box], into parent: Box) {
         if made.isEmpty { return }
+        if parent.Style.Display == .table || parent.Style.Display == .inlineTable {
+            // What isn't a part of a table goes in a row of its own, made
+            // for it, and a cell in that.
+            var loose: [Box] = []
+            func flushRow() {
+                if loose.isEmpty { return }
+                let rowStyle = cascade.ComputedStyle(inheriting: parent.Style)
+                rowStyle.Display = .tableRow
+                let row = Box(kind: .block, style: rowStyle, node: nil)
+                row.IsAnonymous = true
+                let cellStyle = cascade.ComputedStyle(inheriting: parent.Style)
+                cellStyle.Display = .tableCell
+                let cell = Box(kind: .block, style: cellStyle, node: nil)
+                cell.IsAnonymous = true
+                place(loose, into: cell)
+                row.AppendChild(cell)
+                parent.AppendChild(row)
+                loose = []
+            }
+            for b in made {
+                if b.Kind == .text && IsBlank(b.Text) { continue }
+                if isTableInternal(b.Style.Display) && b.Kind != .text || b.Style.Display == .tableCaption {
+                    flushRow()
+                    parent.AppendChild(b)
+                } else {
+                    loose.append(b)
+                }
+            }
+            flushRow()
+            return
+        }
         if isTableInternal(parent.Style.Display) {
             // Rows and groups hold cells and rows; loose text is dropped
             // and a loose inline is wrapped as a cell would be.
@@ -189,10 +220,11 @@ public final class BoxTreeBuilder {
         // text: they go straight into the parent.
         var onlyOutOfFlow = true
         for b in run {
-            if !(b.Style.IsOutOfFlow || (b.Kind == .text && IsBlank(b.Text))) { onlyOutOfFlow = false }
+            // Text has its element's style: it's in the flow whatever that is.
+            if b.Kind == .text ? !IsBlank(b.Text) : !b.Style.IsOutOfFlow { onlyOutOfFlow = false }
         }
         if onlyOutOfFlow {
-            for b in run where b.Style.IsOutOfFlow { parent.AppendChild(b) }
+            for b in run where b.Kind != .text && b.Style.IsOutOfFlow { parent.AppendChild(b) }
             run = []
             return
         }

@@ -175,6 +175,29 @@ public final class RuleSet {
                 inStarting = false
             case "counter-style":
                 DefineCounterStyle(at)
+            case "font-feature-values":
+                for kind in at.AtRules {
+                    for d in kind.Declarations {
+                        for t in d.Tokens where t.Kind == .number {
+                            FontFeatureValues["\(css.lower(kind.Name))/\(css.lower(d.Property))"] = int(t.NumberVal)
+                            break
+                        }
+                    }
+                }
+            case "position-try":
+                var rule = PositionTry()
+                for d in at.Declarations {
+                    if d.Property == "position-area" {
+                        rule.Area = symbolWords(d.Tokens).map { css.lower($0) }
+                    } else if ["top", "right", "bottom", "left"].contains(d.Property), let f = css.ParseAnchorFunction(d.Tokens) {
+                        rule.Uses.append(AnchorUse(property: d.Property, name: f.Name, edge: f.Edge, percent: f.Percent, offset: 0))
+                    }
+                }
+                PositionTryRules[trimSpaces(at.Params)] = rule
+            case "view-transition":
+                for d in at.Declarations where d.Property == "navigation" {
+                    ViewTransitionOnNavigation = symbolWords(d.Tokens).first == "auto"
+                }
             case "function":
                 DefineCustomFunction(at)
             case "property":
@@ -1149,6 +1172,11 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
     // An inline-start or -end property right to left is the other side.
     var d = given
     if d.FlipsInRightToLeft && s.Direction == .rtl { d.Prop = css.MirroredProp(d.Prop) }
+    // anchor() is for layout; what's written stands in until then.
+    if case .anchor(let f) = d.Value {
+        applyAnchor(d.Prop, f, s, ctx)
+        return
+    }
     switch d.Value {
     case .inherit:
         copyProperty(d.Prop, from: ctx.parent, to: s)
@@ -1163,7 +1191,11 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
     if case .lightDark(let light, let dark) = v { v = .color(ctx.dark ? dark : light) }
     switch d.Prop {
     case .display:
-        if let k = keywordOf(v) { s.Display = displayOf(k) }
+        if let k = keywordOf(v) {
+            s.Display = displayOf(k)
+            s.FlowRoot = k == "flow-root"
+            if k == "masonry" || k == "grid-lanes" { s.Masonry = true }
+        }
     case .position:
         if let k = keywordOf(v) {
             switch k {
@@ -1277,7 +1309,7 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
         if case .number(let n) = v { s.Opacity = n < 0 ? 0 : (n > 1 ? 1 : n) }
     case .transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay, .transitionBehavior,
          .animationName, .animationDuration, .animationTimingFunction, .animationDelay,
-         .animationIterationCount, .animationDirection, .animationFillMode, .animationPlayState:
+         .animationIterationCount, .animationDirection, .animationFillMode, .animationPlayState, .animationTimeline, .animationRange:
         applyAnimationProperty(d.Prop, v, s)
     case .containerType: if let k = keywordOf(v) { s.ContainerType = k }
     case .objectFit: if let k = keywordOf(v) { s.ObjectFit = k }
@@ -1466,6 +1498,56 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
     case .textBoxEdge: if let k = keywordOf(v) { s.TextBoxEdge = k }
     case .initialLetter: if case .number(let n) = v { s.InitialLetter = n }
     case .overflowAnchor: s.NoScrollAnchor = keywordOf(v) == "none"
+    case .shapeOutside:
+        // A shape as clip-path reads one, its box the margin box unless said.
+        s.ShapeOutside = nil
+        if case .clipShape = v {
+            let held = s.ClipPath
+            var asClip = d
+            asClip.Prop = .clipPath
+            apply(asClip, s, ctx)
+            s.ShapeOutside = s.ClipPath
+            s.ClipPath = held
+            if s.ShapeOutside != nil && s.ShapeOutside!.Box.isEmpty { s.ShapeOutside!.Box = "margin-box" }
+        }
+    case .shapeMargin: if let p = pixels(v, s, ctx) { s.ShapeMargin = p }
+    case .cornerShape: s.CornerShapes = (keywordOf(v) ?? "").split(separator: " ").map { string($0) }
+    case .interpolateSize: s.InterpolateKeywords = keywordOf(v) == "allow-keywords"
+    case .maskOrigin: if let k = keywordOf(v) { s.MaskOrigin = k }
+    case .maskClip: if let k = keywordOf(v) { s.MaskClip = k }
+    case .fontFeatureSettings: s.FontFeatureSettings = keywordOf(v) ?? ""
+    case .fontVariationSettings: s.FontVariationSettings = keywordOf(v) ?? ""
+    case .fontVariantNumeric: s.FontVariantNumeric = keywordOf(v) ?? ""
+    case .fontVariantLigatures: s.FontVariantLigatures = keywordOf(v) ?? ""
+    case .fontVariantCaps: s.FontVariantCaps = keywordOf(v) ?? ""
+    case .fontVariantEastAsian: s.FontVariantEastAsian = keywordOf(v) ?? ""
+    case .fontVariantAlternates: s.FontVariantAlternates = keywordOf(v) ?? ""
+    case .fontKerning: s.FontKerning = keywordOf(v) ?? "auto"
+    case .fontStretch: if case .number(let n) = v { s.FontStretch = n }
+    case .textRendering: s.TextRendering = keywordOf(v) ?? "auto"
+    case .textJustify: s.TextJustify = keywordOf(v) ?? "auto"
+    case .hangingPunctuation: s.HangingPunctuation = keywordOf(v) ?? "none"
+    case .textEmphasisStyle:
+        if case .string(let mark) = v {
+            s.TextEmphasisMark = mark
+        } else {
+            s.TextEmphasisMark = emphasisMark(keywordOf(v) ?? "none")
+        }
+    case .textEmphasisColor:
+        if case .currentColor = v { s.TextEmphasisColor = nil } else { s.TextEmphasisColor = colorOf(v) }
+    case .textEmphasisPosition: s.TextEmphasisUnder = (keywordOf(v) ?? "").contains("under")
+    case .anchorName: s.AnchorNames = (keywordOf(v) ?? "").split(separator: " ").map { string($0) }.filter { $0 != "none" }
+    case .positionAnchor:
+        let k = keywordOf(v) ?? ""
+        s.PositionAnchor = k == "auto" ? "" : k
+    case .positionArea: s.PositionArea = (keywordOf(v) ?? "").split(separator: " ").map { css.lower(string($0)) }.filter { $0 != "none" }
+    case .positionTry:
+        if case .string(let text) = v { s.PositionTries = text.split(separator: "|").map { string($0) } }
+    case .scrollTimelineName: s.ScrollTimelineName = keywordOf(v) ?? ""
+    case .viewTimelineName: s.ViewTimelineName = keywordOf(v) ?? ""
+    case .viewTransitionName:
+        let k = keywordOf(v) ?? ""
+        s.ViewTransitionName = k == "none" ? "" : k
     case .writingMode: if let k = keywordOf(v) { s.WritingMode = k }
     case .textOrientation: if let k = keywordOf(v) { s.TextOrientation = k }
     case .perspective:
@@ -1593,8 +1675,11 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
     case .breakInside: s.BreakInsideAvoid = (keywordOf(v) ?? "auto").hasPrefix("avoid")
     case .tableLayout: if let k = keywordOf(v) { s.TableLayout = k == "fixed" ? .fixed : .auto }
     case .gridTemplateColumns:
+        s.SubgridColumns = keywordOf(v) == "subgrid"
         if case .tracks(let t) = v { s.GridColumns = resolveTracks(t, s, ctx) } else { s.GridColumns = [] }
     case .gridTemplateRows:
+        s.SubgridRows = keywordOf(v) == "subgrid"
+        if keywordOf(v) == "masonry" { s.Masonry = true }
         if case .tracks(let t) = v { s.GridRows = resolveTracks(t, s, ctx) } else { s.GridRows = [] }
     case .gridAutoRows:
         if case .tracks(let t) = v, !t.isEmpty { s.GridAutoRows = resolveTracks(t, s, ctx)[0] }
@@ -1797,7 +1882,11 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
     case .content:
         if case .families(let parts) = v { s.Content = parts } else { s.Content = nil }
     case .captionSide: if let k = keywordOf(v) { s.CaptionBelow = k == "bottom" }
-    case .hyphens: if let k = keywordOf(v) { s.HyphensNone = k == "none" }
+    case .hyphens:
+        if let k = keywordOf(v) {
+            s.HyphensNone = k == "none"
+            s.HyphensAuto = k == "auto"
+        }
     case .textAlignLast:
         if let k = keywordOf(v) {
             switch k {
@@ -1910,6 +1999,47 @@ func filtersOf(v: css.Value, s: ComputedStyle, ctx: ApplyContext) -> [draw.Filte
         }
     }
     return out
+}
+
+/// What anchor() on a property sets: a use for layout, and in the meantime
+/// its fallback, or nothing.
+func applyAnchor(prop: css.Prop, f: css.AnchorFunction, s: ComputedStyle, ctx: ApplyContext) {
+    var name = ""
+    switch prop {
+    case .top: name = "top"
+    case .right: name = "right"
+    case .bottom: name = "bottom"
+    case .left: name = "left"
+    case .width: name = "width"
+    case .height: name = "height"
+    default: return
+    }
+    var offset: float32 = 0
+    if let o = f.Offset.first, let p = pixels(o, s, ctx) { offset = f.Negative ? -p : p }
+    s.AnchorUses.removeAll { $0.Property == name }
+    s.AnchorUses.append(AnchorUse(property: name, name: f.Name, edge: f.Edge, percent: f.Percent, offset: offset))
+    if let fb = f.Fallback.first, let l = length(fb, s, ctx) {
+        switch prop {
+        case .top: s.Top = l
+        case .right: s.Right = l
+        case .bottom: s.Bottom = l
+        case .left: s.Left = l
+        case .width: s.Width = l
+        default: s.Height = l
+        }
+    }
+}
+
+/// The mark a text-emphasis-style keyword draws.
+func emphasisMark(words: string) -> string {
+    let w = words.split(separator: " ").map { string($0) }
+    if w.contains("none") { return "" }
+    let open = w.contains("open")
+    if w.contains("dot") { return open ? "\u{25E6}" : "\u{2022}" }
+    if w.contains("double-circle") { return open ? "\u{25CE}" : "\u{25C9}" }
+    if w.contains("triangle") { return open ? "\u{25B3}" : "\u{25B2}" }
+    if w.contains("sesame") { return open ? "\u{FE46}" : "\u{FE45}" }
+    return open ? "\u{25CB}" : "\u{25CF}"
 }
 
 func keywordOf(v: css.Value) -> string? {
@@ -2130,6 +2260,7 @@ func displayOf(k: string) -> Display {
     switch k {
     case "none": return .none
     case "block", "flow-root": return .block
+    case "masonry", "grid-lanes": return .grid
     case "inline-block": return .inlineBlock
     case "flex": return .flex
     case "inline-flex": return .inlineFlex
@@ -2216,7 +2347,10 @@ func alignOf(k: string) -> AlignItems {
 /// `initial` do.
 func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     switch p {
-    case .display: b.Display = a.Display
+    case .display:
+        b.Display = a.Display
+        b.FlowRoot = a.FlowRoot
+        b.Masonry = a.Masonry
     case .position: b.Position = a.Position
     case .float: b.Float = a.Float
     case .clear: b.Clear = a.Clear
@@ -2306,6 +2440,34 @@ func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .textBoxEdge: b.TextBoxEdge = a.TextBoxEdge
     case .initialLetter: b.InitialLetter = a.InitialLetter
     case .overflowAnchor: b.NoScrollAnchor = a.NoScrollAnchor
+    case .shapeOutside: b.ShapeOutside = a.ShapeOutside
+    case .shapeMargin: b.ShapeMargin = a.ShapeMargin
+    case .cornerShape: b.CornerShapes = a.CornerShapes
+    case .interpolateSize: b.InterpolateKeywords = a.InterpolateKeywords
+    case .maskOrigin: b.MaskOrigin = a.MaskOrigin
+    case .maskClip: b.MaskClip = a.MaskClip
+    case .fontFeatureSettings: b.FontFeatureSettings = a.FontFeatureSettings
+    case .fontVariationSettings: b.FontVariationSettings = a.FontVariationSettings
+    case .fontVariantNumeric: b.FontVariantNumeric = a.FontVariantNumeric
+    case .fontVariantLigatures: b.FontVariantLigatures = a.FontVariantLigatures
+    case .fontVariantCaps: b.FontVariantCaps = a.FontVariantCaps
+    case .fontVariantEastAsian: b.FontVariantEastAsian = a.FontVariantEastAsian
+    case .fontVariantAlternates: b.FontVariantAlternates = a.FontVariantAlternates
+    case .fontKerning: b.FontKerning = a.FontKerning
+    case .fontStretch: b.FontStretch = a.FontStretch
+    case .textRendering: b.TextRendering = a.TextRendering
+    case .textJustify: b.TextJustify = a.TextJustify
+    case .hangingPunctuation: b.HangingPunctuation = a.HangingPunctuation
+    case .textEmphasisStyle: b.TextEmphasisMark = a.TextEmphasisMark
+    case .textEmphasisColor: b.TextEmphasisColor = a.TextEmphasisColor
+    case .textEmphasisPosition: b.TextEmphasisUnder = a.TextEmphasisUnder
+    case .anchorName: b.AnchorNames = a.AnchorNames
+    case .positionAnchor: b.PositionAnchor = a.PositionAnchor
+    case .positionArea: b.PositionArea = a.PositionArea
+    case .positionTry: b.PositionTries = a.PositionTries
+    case .scrollTimelineName: b.ScrollTimelineName = a.ScrollTimelineName
+    case .viewTimelineName: b.ViewTimelineName = a.ViewTimelineName
+    case .viewTransitionName: b.ViewTransitionName = a.ViewTransitionName
     case .writingMode: b.WritingMode = a.WritingMode
     case .textOrientation: b.TextOrientation = a.TextOrientation
     case .perspective: b.Perspective = a.Perspective
@@ -2321,7 +2483,7 @@ func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .borderImageRepeat: b.BorderImageRepeat = a.BorderImageRepeat
     case .transitionProperty, .transitionDuration, .transitionTimingFunction, .transitionDelay, .transitionBehavior,
          .animationName, .animationDuration, .animationTimingFunction, .animationDelay,
-         .animationIterationCount, .animationDirection, .animationFillMode, .animationPlayState:
+         .animationIterationCount, .animationDirection, .animationFillMode, .animationPlayState, .animationTimeline, .animationRange:
         copyAnimationProperty(p, from: a, to: b)
     case .containerType: b.ContainerType = a.ContainerType
     case .objectFit: b.ObjectFit = a.ObjectFit
@@ -2465,7 +2627,9 @@ func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .quotes: b.Quotes = a.Quotes
     case .captionSide: b.CaptionBelow = a.CaptionBelow
     case .textAlignLast: b.TextAlignLast = a.TextAlignLast
-    case .hyphens: b.HyphensNone = a.HyphensNone
+    case .hyphens:
+        b.HyphensNone = a.HyphensNone
+        b.HyphensAuto = a.HyphensAuto
     case .listStyleImage: b.ListStyleImage = a.ListStyleImage
     case .emptyCells: b.HideEmptyCells = a.HideEmptyCells
     case .fill:

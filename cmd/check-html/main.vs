@@ -223,6 +223,14 @@ func testStrayLessThan() {
 }
 
 func main() -> int32 {
+    // An explicit <html> after what implies it is still the one root.
+    let late = html.Parse("<!doctype html><meta charset=utf-8><html lang=en><title>t</title><p>hello</p>")
+    var roots: [html.Node] = []
+    for c in late.Root.Children where c.Kind == html.NodeKind.element { roots.append(c) }
+    check(roots.count == 1 && roots[0].TagName == "html" && roots[0].GetAttribute("lang") == "en", "a late <html> is the only root (got \(roots.count), \(roots.first?.TagName ?? "none"))")
+    check(!late.ElementsByTagName("meta").isEmpty && !late.ElementsByTagName("p").isEmpty, "and what came before it is inside it")
+    check(late.ElementsByTagName("meta").first?.Parent?.TagName == "head", "in its head")
+
     testEncodings()
     testTreeBuilding()
     testHTML()

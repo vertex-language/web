@@ -164,11 +164,20 @@ func hitTestBox(box: Box, px: float32, py: float32, originX: float32, originY: f
             li -= 1
         }
     } else {
+        // What is positioned paints over what isn't, so it is asked first.
         var i = box.Children.count - 1
         while i >= 0 {
             let c = box.Children[i]
             i -= 1
-            if c.Style.Position == .absolute || c.Style.Position == .fixed { continue }
+            if c.Style.Position != .relative && c.Style.Position != .sticky { continue }
+            if c.Kind == .text || c.Kind == .inline || c.Kind == .lineBreak { continue }
+            if let h = HitTest(c, px, py, originX: sx, originY: sy) { return h }
+        }
+        i = box.Children.count - 1
+        while i >= 0 {
+            let c = box.Children[i]
+            i -= 1
+            if c.Style.Position != .static { continue }
             if c.Kind == .text || c.Kind == .inline || c.Kind == .lineBreak { continue }
             if let h = HitTest(c, px, py, originX: sx, originY: sy) { return h }
         }

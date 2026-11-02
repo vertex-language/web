@@ -61,6 +61,36 @@ public enum Prop: int32 {
     case mixBlendMode
     case isolation
     case overflowAnchor
+    case shapeOutside
+    case shapeMargin
+    case cornerShape
+    case interpolateSize
+    case maskOrigin
+    case maskClip
+    case fontFeatureSettings
+    case fontVariationSettings
+    case fontVariantNumeric
+    case fontVariantLigatures
+    case fontVariantCaps
+    case fontVariantEastAsian
+    case fontVariantAlternates
+    case fontKerning
+    case fontStretch
+    case textRendering
+    case textJustify
+    case hangingPunctuation
+    case textEmphasisStyle
+    case textEmphasisColor
+    case textEmphasisPosition
+    case anchorName
+    case positionAnchor
+    case positionArea
+    case positionTry
+    case animationTimeline
+    case animationRange
+    case scrollTimelineName
+    case viewTimelineName
+    case viewTransitionName
     case writingMode
     case textOrientation
     case perspective
@@ -279,10 +309,25 @@ public enum Value {
     case placement(GridPlacement)
     case clipShape(ClipShape)
     case filters([FilterFunction])
+    case anchor(AnchorFunction)
     /// Several values, as border-image-slice's sides and the rest.
     case list([Value])
     case inherit
     case initial
+}
+
+/// anchor() or anchor-size(), in an inset or a size: which anchor (""
+/// for the box's position-anchor), which of its edges or sizes (or a
+/// percentage across it), and what calc() added to it.
+public struct AnchorFunction {
+    public var IsSize: bool = false
+    public var Name: string = ""
+    public var Edge: string = ""
+    public var Percent: float32 = -1
+    /// In arrays, one at most each: a Value holds this struct.
+    public var Offset: [Value] = []
+    public var Negative: bool = false
+    public var Fallback: [Value] = []
 }
 
 /// One function of a filter before its lengths are resolved. Amount is a
@@ -370,6 +415,19 @@ let propNames: [string: Prop] = [
     "mix-blend-mode": .mixBlendMode, "isolation": .isolation,
     "image-rendering": .imageRendering, "overflow-clip-margin": .overflowClipMargin, "field-sizing": .fieldSizing,
     "text-box-trim": .textBoxTrim, "text-box-edge": .textBoxEdge, "initial-letter": .initialLetter,
+    "anchor-name": .anchorName, "position-anchor": .positionAnchor, "position-area": .positionArea,
+    "position-try-fallbacks": .positionTry, "position-try": .positionTry,
+    "animation-timeline": .animationTimeline, "animation-range": .animationRange,
+    "scroll-timeline-name": .scrollTimelineName, "view-timeline-name": .viewTimelineName,
+    "view-transition-name": .viewTransitionName,
+    "font-feature-settings": .fontFeatureSettings, "font-variation-settings": .fontVariationSettings,
+    "font-variant-numeric": .fontVariantNumeric, "font-variant-ligatures": .fontVariantLigatures, "font-variant-caps": .fontVariantCaps,
+    "font-variant-east-asian": .fontVariantEastAsian, "font-variant-alternates": .fontVariantAlternates, "font-kerning": .fontKerning,
+    "font-stretch": .fontStretch, "text-rendering": .textRendering, "text-justify": .textJustify, "hanging-punctuation": .hangingPunctuation,
+    "text-emphasis-style": .textEmphasisStyle, "text-emphasis-color": .textEmphasisColor, "text-emphasis-position": .textEmphasisPosition,
+    "-webkit-text-emphasis-style": .textEmphasisStyle, "-webkit-text-emphasis-color": .textEmphasisColor, "-webkit-text-emphasis-position": .textEmphasisPosition,
+    "shape-outside": .shapeOutside, "shape-margin": .shapeMargin, "corner-shape": .cornerShape, "interpolate-size": .interpolateSize,
+    "mask-origin": .maskOrigin, "mask-clip": .maskClip, "-webkit-mask-origin": .maskOrigin, "-webkit-mask-clip": .maskClip,
     "overflow-anchor": .overflowAnchor, "writing-mode": .writingMode, "text-orientation": .textOrientation,
     "perspective": .perspective, "perspective-origin": .perspectiveOrigin, "backface-visibility": .backfaceVisibility,
     "transform-style": .transformStyle,
@@ -791,6 +849,47 @@ func longhands(d: Declaration) -> [Longhand] {
     case "animation", "-webkit-animation":
         guard let parts = parseAnimationShorthand(tokens) else { return [] }
         for (p, v) in parts { set(p, v) }
+    case "font-variant":
+        // Each word to the longhand it belongs to; normal or none resets.
+        var numeric: [string] = []
+        var ligatures: [string] = []
+        var caps: [string] = []
+        var east: [string] = []
+        for tok in tokens where tok.Kind == .ident {
+            let w = lower(tok.Value)
+            if w.hasSuffix("-nums") || w.hasSuffix("-fractions") || w == "ordinal" || w == "slashed-zero" {
+                numeric.append(w)
+            } else if w.hasSuffix("-ligatures") || w.hasSuffix("contextual") || w == "none" {
+                ligatures.append(w)
+            } else if w.hasSuffix("-caps") || w == "unicase" {
+                caps.append(w)
+            } else if w != "normal" {
+                east.append(w)
+            }
+        }
+        set(.fontVariantNumeric, .keyword(joinWords(numeric)))
+        set(.fontVariantLigatures, .keyword(joinWords(ligatures)))
+        set(.fontVariantCaps, .keyword(joinWords(caps)))
+        set(.fontVariantEastAsian, .keyword(joinWords(east)))
+    case "text-emphasis", "-webkit-text-emphasis":
+        // A style and a color, in either order.
+        var i = 0
+        var style: [string] = []
+        while i < tokens.count {
+            if tokens[i].Kind == .string {
+                set(.textEmphasisStyle, .string(tokens[i].Value))
+                i += 1
+                continue
+            }
+            if let c = parseColorAt(tokens, i) {
+                set(.textEmphasisColor, c.0)
+                i += c.1
+                continue
+            }
+            if tokens[i].Kind == .ident { style.append(lower(tokens[i].Value)) }
+            i += 1
+        }
+        if !style.isEmpty { set(.textEmphasisStyle, .keyword(joinWords(style))) }
     case "text-box":
         // normal, or how far to trim and to what.
         if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) == "normal" {
@@ -809,13 +908,12 @@ func longhands(d: Declaration) -> [Longhand] {
         if let v = parseValue(.alignItems, [tokens[0]]) { set(.alignItems, v) }
         if let j = parseValue(.justifyItems, [tokens.count > 1 ? tokens[1] : tokens[0]]) { set(.justifyItems, j) }
     case "transform-box",
-         "font-variant", "font-stretch", "font-feature-settings", "src", "unicode-range",
-         "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
+         "src", "unicode-range",
+         "-webkit-font-smoothing", "-moz-osx-font-smoothing",
          "speak",
          "font-display",
          "text-size-adjust", "-webkit-text-size-adjust", "-webkit-tap-highlight-color",
-         "font-kerning",
-         "text-justify", "font-variant-numeric", "font-variant-ligatures",
+         
          "font-optical-sizing",
          "unused-placeholder-property":
         break
@@ -986,6 +1084,9 @@ func longhandsOf(name: string) -> [Prop] {
     case "contain-intrinsic-size": return [.containIntrinsicWidth, .containIntrinsicHeight]
     case "transition", "-webkit-transition": return transitionProps
     case "animation", "-webkit-animation": return animationProps
+    case "text-box": return [.textBoxTrim, .textBoxEdge]
+    case "font-variant": return [.fontVariantNumeric, .fontVariantLigatures, .fontVariantCaps, .fontVariantEastAsian]
+    case "text-emphasis", "-webkit-text-emphasis": return [.textEmphasisStyle, .textEmphasisColor]
     case "font": return [.fontFamily, .fontSize, .fontWeight, .fontStyle, .lineHeight]
     case "flex": return [.flexGrow, .flexShrink, .flexBasis]
     case "gap": return [.rowGap, .columnGap]
@@ -1717,6 +1818,44 @@ func parseShadows(tokens: [Token]) -> Value? {
     return .shadows(shadows)
 }
 
+/// anchor(...) or anchor-size(...), or calc() of one and a length.
+public func ParseAnchorFunction(tokens: [Token]) -> AnchorFunction? {
+    guard let t = tokens.first, t.Kind == .function else { return nil }
+    let name = lower(t.Value)
+    if name == "calc" && tokens.count > 2 && tokens[1].Kind == .function {
+        let inner = lower(tokens[1].Value)
+        if inner != "anchor" && inner != "anchor-size" { return nil }
+        let end = closeParen(tokens, from: 2)
+        guard var f = ParseAnchorFunction(Array(tokens[1...end])) else { return nil }
+        var i = end + 1
+        while i < tokens.count && tokens[i].Kind != .closeParen {
+            if tokens[i].Kind == .delim && tokens[i].Value == "-" { f.Negative = true }
+            if let v = parseLengthValue(tokens[i], allowAuto: false) { f.Offset = [v] }
+            i += 1
+        }
+        return f
+    }
+    if name != "anchor" && name != "anchor-size" { return nil }
+    var f = AnchorFunction()
+    f.IsSize = name == "anchor-size"
+    let end = closeParen(tokens, from: 1)
+    var i = 1
+    while i < end {
+        let a = tokens[i]
+        if a.Kind == .comma {
+            if i + 1 < end, let v = parseLengthValue(tokens[i + 1], allowAuto: false) { f.Fallback = [v] }
+            break
+        }
+        if a.Kind == .ident {
+            if a.Value.hasPrefix("--") { f.Name = a.Value } else { f.Edge = lower(a.Value) }
+        } else if a.Kind == .percentage {
+            f.Percent = a.NumberVal
+        }
+        i += 1
+    }
+    return f
+}
+
 /// A filter's functions, in order. A url() has nothing to refer to and is
 /// passed over; a function not in Filter Effects drops the declaration.
 func parseFilters(tokens: [Token]) -> Value? {
@@ -1799,7 +1938,7 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
         case "none", "block", "inline", "inline-block", "flex", "inline-flex", "list-item", "table",
              "inline-table", "table-row", "table-cell", "table-row-group", "table-header-group",
              "table-footer-group", "table-caption", "table-column", "table-column-group", "contents",
-             "grid", "inline-grid", "flow-root":
+             "grid", "inline-grid", "flow-root", "masonry", "grid-lanes":
             return .keyword(kw)
         // The old flexbox's names, which line-clamp goes with.
         case "-webkit-box": return .keyword("flow-root")
@@ -1822,6 +1961,7 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
         default: return nil
         }
     case .top, .right, .bottom, .left, .width, .height, .flexBasis:
+        if let a = ParseAnchorFunction(tokens) { return .anchor(a) }
         if let c = calcValue(tokens) { return c }
         return parseLengthValue(t, allowAuto: true)
     case .minWidth, .minHeight:
@@ -2206,6 +2346,113 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
         case "mixed", "upright", "sideways": return .keyword(kw)
         default: return nil
         }
+    case .anchorName, .positionAnchor, .positionArea, .viewTransitionName, .scrollTimelineName, .viewTimelineName:
+        // Names keep their case; a comma between them says nothing here.
+        var words: [string] = []
+        for tok in tokens where tok.Kind == .ident { words.append(tok.Value) }
+        return words.isEmpty ? nil : .keyword(joinWords(words))
+    case .positionTry:
+        // Each fallback is what stands between commas.
+        var out: [string] = []
+        var part: [string] = []
+        for tok in tokens {
+            if tok.Kind == .comma {
+                out.append(joinWords(part))
+                part = []
+            } else if tok.Kind == .ident {
+                part.append(tok.Value)
+            }
+        }
+        if !part.isEmpty { out.append(joinWords(part)) }
+        return out.isEmpty ? nil : .string(out.joined(separator: "|"))
+    case .animationTimeline, .animationRange:
+        return parseAnimationLonghand(prop, tokens)
+    case .fontFeatureSettings, .fontVariationSettings:
+        // "tag" value, comma between: as "tag=value,tag=value".
+        if kw == "normal" { return .keyword("") }
+        var out: [string] = []
+        var i = 0
+        while i < tokens.count {
+            if tokens[i].Kind == .string {
+                var value = prop == .fontFeatureSettings ? "1" : "0"
+                if i + 1 < tokens.count {
+                    let v = tokens[i + 1]
+                    if v.Kind == .number { value = "\(v.NumberVal)" }
+                    if v.Kind == .ident && lower(v.Value) == "off" { value = "0" }
+                    if v.Kind == .ident && lower(v.Value) == "on" { value = "1" }
+                }
+                out.append("\(tokens[i].Value)=\(value)")
+            }
+            i += 1
+        }
+        return .keyword(out.joined(separator: ","))
+    case .fontVariantNumeric, .fontVariantLigatures, .fontVariantCaps, .fontVariantEastAsian, .hangingPunctuation, .textEmphasisPosition:
+        var words: [string] = []
+        for tok in tokens where tok.Kind == .ident { words.append(lower(tok.Value)) }
+        return words.isEmpty ? nil : .keyword(joinWords(words))
+    case .fontVariantAlternates:
+        // Serialized as written: stylistic(name) and the rest.
+        return .keyword(lower(Serialize(tokens)))
+    case .fontKerning, .textRendering, .textJustify:
+        return t.Kind == .ident ? .keyword(kw) : nil
+    case .fontStretch:
+        // A percentage, or the keywords' percentages.
+        if t.Kind == .percentage { return .number(t.NumberVal) }
+        switch kw {
+        case "ultra-condensed": return .number(50)
+        case "extra-condensed": return .number(62.5)
+        case "condensed": return .number(75)
+        case "semi-condensed": return .number(87.5)
+        case "normal": return .number(100)
+        case "semi-expanded": return .number(112.5)
+        case "expanded": return .number(125)
+        case "extra-expanded": return .number(150)
+        case "ultra-expanded": return .number(200)
+        default: return nil
+        }
+    case .textEmphasisStyle:
+        if t.Kind == .string { return .string(t.Value) }
+        var words: [string] = []
+        for tok in tokens where tok.Kind == .ident { words.append(lower(tok.Value)) }
+        return words.isEmpty ? nil : .keyword(joinWords(words))
+    case .textEmphasisColor:
+        if kw == "currentcolor" { return .currentColor }
+        return parseColorAt(tokens, 0)?.0
+    case .shapeOutside:
+        if kw == "none" { return Value.none }
+        return parseValue(.clipPath, tokens)
+    case .shapeMargin:
+        return parseLengthValue(t, allowAuto: false)
+    case .cornerShape:
+        // Up to four, each a keyword or superellipse(k), as "k" numbers.
+        var out: [string] = []
+        var i = 0
+        while i < tokens.count {
+            let c = tokens[i]
+            if c.Kind == .function && lower(c.Value) == "superellipse" && i + 1 < tokens.count {
+                out.append("\(tokens[i + 1].NumberVal)")
+                i = closeParen(tokens, from: i + 1)
+            } else if c.Kind == .ident {
+                switch lower(c.Value) {
+                case "round": out.append("1")
+                case "squircle": out.append("2")
+                case "bevel": out.append("0")
+                case "scoop": out.append("-1")
+                case "notch": out.append("notch")
+                case "square": out.append("square")
+                default: return nil
+                }
+            }
+            i += 1
+        }
+        return out.isEmpty ? nil : .keyword(joinWords(out))
+    case .interpolateSize:
+        return kw == "numeric-only" || kw == "allow-keywords" ? .keyword(kw) : nil
+    case .maskOrigin, .maskClip:
+        switch kw {
+        case "border-box", "padding-box", "content-box", "fill-box", "stroke-box", "view-box", "no-clip": return .keyword(kw)
+        default: return nil
+        }
     case .overflowAnchor:
         return kw == "auto" || kw == "none" ? .keyword(kw) : nil
     case .perspective:
@@ -2258,6 +2505,7 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
         if kw == "auto" || kw == "fixed" { return .keyword(kw) }
         return nil
     case .gridTemplateColumns, .gridTemplateRows:
+        if kw == "subgrid" || kw == "masonry" { return .keyword(kw) }
         if kw == "none" { return .none }
         let tracks = parseTracks(tokens, 0, tokens.count)
         return tracks.isEmpty ? nil : .tracks(tracks)

@@ -91,6 +91,56 @@ public final class ComputedStyle {
     public var WritingMode: string = "horizontal-tb"
     public var TextOrientation: string = "mixed"
     public var AxesSwapped: bool = false
+    /// anchor-name's names; position-anchor; position-area's words; what
+    /// inset and size properties anchor() set; position-try's fallbacks.
+    public var AnchorNames: [string] = []
+    public var PositionAnchor: string = ""
+    public var PositionArea: [string] = []
+    public var AnchorUses: [AnchorUse] = []
+    public var PositionTries: [string] = []
+    /// scroll-timeline-name, view-timeline-name, view-transition-name.
+    public var ScrollTimelineName: string = ""
+    public var ViewTimelineName: string = ""
+    public var ViewTransitionName: string = ""
+    /// shape-outside as a clip shape, and shape-margin in pixels.
+    public var ShapeOutside: ClipPath? = nil
+    public var ShapeMargin: float32 = 0
+    /// corner-shape, per corner from the top left: superellipse exponents as
+    /// text, or "notch" or "square". Empty for all round.
+    public var CornerShapes: [string] = []
+    /// interpolate-size: allow-keywords: auto can transition (inherited).
+    public var InterpolateKeywords: bool = false
+    /// mask-origin and mask-clip.
+    public var MaskOrigin: string = "border-box"
+    public var MaskClip: string = "border-box"
+    /// Whether it lays its items out as masonry, and which axes are subgrids.
+    public var Masonry: bool = false
+    public var SubgridColumns: bool = false
+    public var SubgridRows: bool = false
+    /// display: flow-root: its floats and margins stay inside it.
+    public var FlowRoot: bool = false
+    /// font-feature-settings and font-variation-settings as written; the
+    /// font-variant longhands' words; font-kerning; font-stretch as a
+    /// percentage; text-rendering. All inherited, all reaching the Face.
+    public var FontFeatureSettings: string = ""
+    public var FontVariationSettings: string = ""
+    public var FontVariantNumeric: string = ""
+    public var FontVariantLigatures: string = ""
+    public var FontVariantCaps: string = ""
+    public var FontVariantEastAsian: string = ""
+    public var FontVariantAlternates: string = ""
+    public var FontKerning: string = "auto"
+    public var FontStretch: float32 = 100
+    public var TextRendering: string = "auto"
+    /// text-justify; hanging-punctuation's words; hyphens: auto.
+    public var TextJustify: string = "auto"
+    public var HangingPunctuation: string = "none"
+    public var HyphensAuto: bool = false
+    /// text-emphasis: its style's mark ("" for none), its color (nil for
+    /// the text's), and whether it sits under the line.
+    public var TextEmphasisMark: string = ""
+    public var TextEmphasisColor: draw.Color? = nil
+    public var TextEmphasisUnder: bool = false
     /// overflow-anchor: none: the box isn't what a scroll keeps its place by.
     public var NoScrollAnchor: bool = false
     /// perspective, in CSS pixels (0 for none), and where the viewer is
@@ -376,6 +426,23 @@ public final class ComputedStyle {
         ListStyleType = parent.ListStyleType
         ImageRendering = parent.ImageRendering
         WritingMode = parent.WritingMode
+        InterpolateKeywords = parent.InterpolateKeywords
+        FontFeatureSettings = parent.FontFeatureSettings
+        FontVariationSettings = parent.FontVariationSettings
+        FontVariantNumeric = parent.FontVariantNumeric
+        FontVariantLigatures = parent.FontVariantLigatures
+        FontVariantCaps = parent.FontVariantCaps
+        FontVariantEastAsian = parent.FontVariantEastAsian
+        FontVariantAlternates = parent.FontVariantAlternates
+        FontKerning = parent.FontKerning
+        FontStretch = parent.FontStretch
+        TextRendering = parent.TextRendering
+        TextJustify = parent.TextJustify
+        HangingPunctuation = parent.HangingPunctuation
+        HyphensAuto = parent.HyphensAuto
+        TextEmphasisMark = parent.TextEmphasisMark
+        TextEmphasisColor = parent.TextEmphasisColor
+        TextEmphasisUnder = parent.TextEmphasisUnder
         TextOrientation = parent.TextOrientation
         ListStylePosition = parent.ListStylePosition
         Cursor = parent.Cursor
@@ -413,7 +480,10 @@ public final class ComputedStyle {
     /// asks, so the face is kept.
     public var Face: font.Face {
         if let f = face { return f }
-        let f = font.Load(font.Spec(families: FontFamilies, size: FontSize, weight: FontWeight, italic: FontStyle != .normal))
+        var spec = font.Spec(families: FontFamilies, size: FontSize, weight: FontWeight, italic: FontStyle != .normal)
+        spec.Features = FontFeatureSpec
+        spec.Variations = FontVariationSpec
+        let f = font.Load(spec)
         face = f
         return f
     }
@@ -546,6 +616,43 @@ extension ComputedStyle {
 
     public var HasTransform: bool {
         return !Transform.isEmpty || !Translate.isEmpty || !Rotate.isEmpty || !Scale.isEmpty
+    }
+
+    /// What font-kerning, the font-variant longhands, text-rendering and
+    /// font-feature-settings ask of the font, the last having the last word.
+    public var FontFeatureSpec: string {
+        var out: [string] = []
+        func add(words: string, table: [string: string]) {
+            for w in words.split(separator: " ") {
+                if let tags = table[string(w)] { out.append(tags) }
+            }
+        }
+        if FontKerning == "none" { out.append("kern=0") }
+        if FontKerning == "normal" { out.append("kern=1") }
+        if TextRendering == "optimizespeed" { out.append("kern=0,liga=0,clig=0") }
+        add(FontVariantNumeric, table: fontNumericTags)
+        add(FontVariantLigatures, table: fontLigatureTags)
+        add(FontVariantCaps, table: fontCapsTags)
+        add(FontVariantEastAsian, table: fontEastAsianTags)
+        if !FontVariantAlternates.isEmpty {
+            let spec = fontAlternatesSpec(FontVariantAlternates)
+            if !spec.isEmpty { out.append(spec) }
+        }
+        if !FontFeatureSettings.isEmpty { out.append(FontFeatureSettings) }
+        return out.joined(separator: ",")
+    }
+
+    /// font-stretch and font-variation-settings for the font's axes.
+    public var FontVariationSpec: string {
+        var out: [string] = []
+        if FontStretch != 100 { out.append("wdth=\(FontStretch)") }
+        if !FontVariationSettings.isEmpty { out.append(FontVariationSettings) }
+        return out.joined(separator: ",")
+    }
+
+    /// Whether anchor positioning has anything to do with the box.
+    public var IsAnchored: bool {
+        return !AnchorUses.isEmpty || !PositionArea.isEmpty
     }
 
     /// Whether its lines run down the page.

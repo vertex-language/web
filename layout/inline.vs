@@ -4,6 +4,7 @@ import (
     "image/draw"
     "text/bidi"
     "text/font"
+    "text/hyphen"
     "web/cascade"
 )
 
@@ -40,6 +41,8 @@ struct Item {
     /// A piece of a word after a soft hyphen: the line may break before
     /// it, and the piece before then shows a hyphen.
     var softBreakBefore: bool = false
+    /// hyphens: auto may break after this piece: it then shows a hyphen.
+    var autoHyphen: bool = false
 
     init(kind: ItemKind, box: Box, owner: Box) {
         self.kind = kind
@@ -748,12 +751,29 @@ extension Layout {
     /// hyphen shows. Its text stays as the source has it.
     func hyphenated(item: Item) -> Item {
         let b = [uint8](item.text.utf8)
+        if item.autoHyphen {
+            var out = item
+            let style = item.owner.Style
+            out.run = style.Face.Shape(item.text + "-")
+            out.width = out.run.Width + style.LetterSpacing * float32(out.run.Count)
+            return out
+        }
         if b.count < 2 || b[b.count - 2] != 0xC2 || b[b.count - 1] != 0xAD { return item }
         var out = item
         let style = item.owner.Style
         out.run = style.Face.Shape(stringOf(b, 0, b.count - 2) + "-")
         out.width = out.run.Width + style.LetterSpacing * float32(out.run.Count)
         return out
+    }
+
+    /// The language a box's text is in: the nearest lang attribute.
+    func languageOf(box: Box) -> string {
+        var cur = box.Node
+        while let n = cur {
+            if let l = n.GetAttribute("lang"), !l.isEmpty { return l }
+            cur = n.Parent
+        }
+        return ""
     }
 
     /// Splits a text box into words and spaces as its white-space says.
@@ -877,7 +897,24 @@ extension Layout {
                 }
                 k += 1
             }
-            if wide && wraps { cjkPieces(start, j) } else { piece(start, j) }
+            // hyphens: auto: where the language's dictionary says, in a word
+            // that says nothing itself.
+            if style.HyphensAuto && wraps && !wide && start == i && j - i >= 5 {
+                let lang = languageOf(box)
+                var points: [int] = []
+                if !lang.isEmpty { points = hyphen.Points(stringOf(bytes, i, j), lang: lang) }
+                var cut = i
+                for p in points {
+                    piece(cut, i + p)
+                    items[items.count - 1].autoHyphen = true
+                    cut = i + p
+                }
+                piece(cut, j)
+            } else if wide && wraps {
+                cjkPieces(start, j)
+            } else {
+                piece(start, j)
+            }
             pendingSpace = false
             i = j
         }
@@ -1119,11 +1156,34 @@ extension Layout {
         // Horizontal alignment: start and end are the right and left
         // where the lines run right to left.
         var dx: float32 = 0
-        let free = contentWidth - used
+        var free = contentWidth - used
         let rtl = box.LinesRightToLeft
         // The last line, and a line a forced break ends, aligns by
         // text-align-last; where that is auto, a justified paragraph's
         // starts at the start.
+        // hanging-punctuation: a first line's opening mark, or a last line's
+        // closing one, sits outside the line.
+        if !strutStyle.HangingPunctuation.hasPrefix("none") && !fragments.isEmpty {
+            let words = strutStyle.HangingPunctuation.split(separator: " ").map { string($0) }
+            if isFirst && words.contains("first"), let f = fragments.first, f.Kind == .text, let c = f.Text.unicodeScalars.first, hangsFirst(c.value) {
+                let width = f.Run.Advances.first ?? 0
+                var k = 0
+                while k < fragments.count {
+                    fragments[k].X -= width
+                    k += 1
+                }
+                k = 0
+                while k < spans.count {
+                    spans[k].X -= width
+                    k += 1
+                }
+            }
+            if isLast && words.contains("last"), let f = fragments.last, f.Kind == .text {
+                var lastChar: uint32 = 0
+                for u in f.Text.unicodeScalars { lastChar = u.value }
+                if hangsLast(lastChar) { free += f.Run.Advances.last ?? 0 }
+            }
+        }
         var align = strutStyle.TextAlign
         if isLast {
             if let last = strutStyle.TextAlignLast { align = last } else if align == .justify { align = .start }
@@ -1233,12 +1293,21 @@ extension Layout {
     /// Widens the spaces of a line's text fragments so it fills its free
     /// room. Spaces are the zero glyphs the fragments carry.
     func justify(fragments: inout [Fragment], spans: inout [Span], free: float32) {
+        // text-justify: none leaves it; inter-character spreads the room
+        // between all the glyphs, not only the spaces.
+        var byCharacter = false
+        if let first = fragments.first {
+            if first.Owner.Style.TextJustify == "none" { return }
+            byCharacter = first.Owner.Style.TextJustify == "inter-character"
+        }
         var spaces = 0
         for f in fragments where f.Kind == .text {
-            for g in f.Run.Glyphs where g == 0 { spaces += 1 }
+            for g in f.Run.Glyphs where g == 0 || byCharacter { spaces += 1 }
         }
+        if byCharacter && spaces > 1 { spaces -= 1 }
         if spaces == 0 { return }
         let each = free / float32(spaces)
+        var given = 0
         // Where each fragment began and how much it grew, for the spans.
         var oldX: [float32] = []
         var grown: [float32] = []
@@ -1252,9 +1321,10 @@ extension Layout {
             if f.Kind == .text {
                 var k = 0
                 while k < f.Run.Glyphs.count {
-                    if f.Run.Glyphs[k] == 0 {
+                    if (f.Run.Glyphs[k] == 0 || byCharacter) && given < spaces {
                         f.Run.Advances[k] += each
                         g += each
+                        given += 1
                     }
                     k += 1
                 }
@@ -1363,6 +1433,22 @@ func inFirstLineFont(item: Item, block: Box, style: cascade.ComputedStyle) -> It
         out.width = style.Face.SpaceWidth + style.WordSpacing + style.LetterSpacing
     }
     return out
+}
+
+/// Opening marks hanging-punctuation: first hangs.
+func hangsFirst(c: uint32) -> bool {
+    switch c {
+    case 0x22, 0x27, 0x28, 0x5B, 0x7B, 0xAB, 0x2018, 0x201C, 0x201E, 0x2039, 0x3008, 0x300A, 0x300C, 0x300E, 0x3010, 0xFF08: return true
+    default: return false
+    }
+}
+
+/// Closing marks hanging-punctuation: last hangs.
+func hangsLast(c: uint32) -> bool {
+    switch c {
+    case 0x22, 0x27, 0x29, 0x5D, 0x7D, 0xBB, 0x2019, 0x201D, 0x203A, 0x3009, 0x300B, 0x300D, 0x300F, 0x3011, 0xFF09: return true
+    default: return false
+    }
 }
 
 /// The character at a place in UTF-8, and how many bytes it takes.
