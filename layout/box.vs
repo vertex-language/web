@@ -46,6 +46,8 @@ public enum ReplacedKind: Equatable {
     case frame
     /// <audio controls>: a bar of controls.
     case audio
+    /// <video>: its newest frame or its poster, under controls if it asks.
+    case video
     /// <input type=color>: a swatch of its value.
     case colorWell
     /// <input type=file>: a button and the files chosen.

@@ -344,6 +344,7 @@ public enum AnimValue {
     case length(css.Length)
     case transforms([TransformOp])
     case radii(draw.Radii)
+    case filters([draw.Filter])
     /// A keyword that interpolates discretely: visibility's, display's.
     case keyword(string)
 }
@@ -372,6 +373,7 @@ public let AnimatableProperties: [AnimatableProperty] = [
     AnimatableProperty(Name: "outline-width", Prop: .outlineWidth),
     AnimatableProperty(Name: "border-radius", Prop: .borderTopLeftRadius),
     AnimatableProperty(Name: "filter", Prop: .filter),
+    AnimatableProperty(Name: "backdrop-filter", Prop: .backdropFilter),
     AnimatableProperty(Name: "transform", Prop: .transform),
     AnimatableProperty(Name: "translate", Prop: .translate),
     AnimatableProperty(Name: "rotate", Prop: .rotate),
@@ -452,7 +454,8 @@ public func AnimatedValue(p: css.Prop, of s: ComputedStyle) -> AnimValue? {
     case .borderLeftWidth: return .number(s.BorderLeftWidth)
     case .outlineWidth: return .number(s.OutlineWidth)
     case .borderTopLeftRadius: return .radii(s.BorderRadius)
-    case .filter: return .number(s.FilterBlur)
+    case .filter: return .filters(s.Filters)
+    case .backdropFilter: return .filters(s.BackdropFilters)
     case .transform: return .transforms(s.Transform)
     case .translate: return .transforms(s.Translate)
     case .rotate: return .transforms(s.Rotate)
@@ -500,7 +503,6 @@ public func SetAnimatedValue(p: css.Prop, v: AnimValue, on s: ComputedStyle) {
         case .borderBottomWidth: s.BorderBottomWidth = math.Max(n, 0)
         case .borderLeftWidth: s.BorderLeftWidth = math.Max(n, 0)
         case .outlineWidth: s.OutlineWidth = math.Max(n, 0)
-        case .filter: s.FilterBlur = math.Max(n, 0)
         case .flexGrow: s.FlexGrow = math.Max(n, 0)
         case .flexShrink: s.FlexShrink = math.Max(n, 0)
         case .fontSize:
@@ -555,6 +557,8 @@ public func SetAnimatedValue(p: css.Prop, v: AnimValue, on s: ComputedStyle) {
         }
     case .radii(let r):
         if p == .borderTopLeftRadius { s.BorderRadius = r }
+    case .filters(let list):
+        if p == .filter { s.Filters = list } else if p == .backdropFilter { s.BackdropFilters = list }
     }
 }
 
@@ -567,6 +571,7 @@ public func SameValue(a: AnimValue, b: AnimValue) -> bool {
     case (.length(let x), .length(let y)): return x == y
     case (.radii(let x), .radii(let y)): return x == y
     case (.keyword(let x), .keyword(let y)): return x == y
+    case (.filters(let x), .filters(let y)): return x == y
     case (.transforms(let x), .transforms(let y)):
         if x.count != y.count { return false }
         var i = 0
@@ -609,6 +614,43 @@ func identityOp(like op: TransformOp) -> TransformOp {
     case "rotate": return TransformOp("rotate", numbers: [0])
     case "skew": return TransformOp("skew", numbers: [0, 0])
     default: return TransformOp("matrix", numbers: [1, 0, 0, 1, 0, 0])
+    }
+}
+
+/// The filter that does nothing in another's place: what a shorter list
+/// is padded with.
+func identityFilter(like f: draw.Filter) -> draw.Filter {
+    switch f {
+    case .blur: return .blur(0)
+    case .brightness: return .brightness(1)
+    case .contrast: return .contrast(1)
+    case .grayscale: return .grayscale(0)
+    case .hueRotate: return .hueRotate(0)
+    case .invert: return .invert(0)
+    case .opacity: return .opacity(1)
+    case .saturate: return .saturate(1)
+    case .sepia: return .sepia(0)
+    case .dropShadow(_, _, _, let c): return .dropShadow(0, 0, 0, c.Faded(0))
+    }
+}
+
+/// A fraction t of the way between two filters of one kind; nil for two kinds.
+func lerpFilter(a: draw.Filter, b: draw.Filter, t: float32) -> draw.Filter? {
+    switch (a, b) {
+    case (.blur(let x), .blur(let y)): return .blur(lerp(x, y, t))
+    case (.brightness(let x), .brightness(let y)): return .brightness(lerp(x, y, t))
+    case (.contrast(let x), .contrast(let y)): return .contrast(lerp(x, y, t))
+    case (.grayscale(let x), .grayscale(let y)): return .grayscale(lerp(x, y, t))
+    case (.hueRotate(let x), .hueRotate(let y)): return .hueRotate(lerp(x, y, t))
+    case (.invert(let x), .invert(let y)): return .invert(lerp(x, y, t))
+    case (.opacity(let x), .opacity(let y)): return .opacity(lerp(x, y, t))
+    case (.saturate(let x), .saturate(let y)): return .saturate(lerp(x, y, t))
+    case (.sepia(let x), .sepia(let y)): return .sepia(lerp(x, y, t))
+    case (.dropShadow(let x0, let y0, let r0, let c0), .dropShadow(let x1, let y1, let r1, let c1)):
+        var color = c1
+        if case .color(let c) = Interpolate(.color(c0), .color(c1), t) { color = c }
+        return .dropShadow(lerp(x0, x1, t), lerp(y0, y1, t), lerp(r0, r1, t), color)
+    default: return nil
     }
 }
 
@@ -661,6 +703,19 @@ public func Interpolate(a: AnimValue, b: AnimValue, t: float32) -> AnimValue {
             i += 1
         }
         return .transforms(out)
+    case (.filters(let x0), .filters(let y0)):
+        var x = x0
+        var y = y0
+        while x.count < y.count { x.append(identityFilter(like: y[x.count])) }
+        while y.count < x.count { y.append(identityFilter(like: x[y.count])) }
+        var out: [draw.Filter] = []
+        var i = 0
+        while i < x.count {
+            guard let f = lerpFilter(x[i], y[i], t) else { return t < 0.5 ? a : b }
+            out.append(f)
+            i += 1
+        }
+        return .filters(out)
     default:
         return t < 0.5 ? a : b
     }

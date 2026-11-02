@@ -658,7 +658,7 @@ func testFrames() {
           "object-fit: contain letterboxes an image (got \(at(50, iy + 5)) \(at(50, iy + 50)))")
     let vb = box("v")!
     let vy = int32(layout.PagePosition(vb).y)
-    check(vb.Replaced == .image && at(50, vy + 5) == draw.Color(255, 255, 255) && at(50, vy + 50) == draw.Color(255, 0, 255),
+    check(vb.Replaced == .video && at(50, vy + 5) == draw.Color(255, 255, 255) && at(50, vy + 50) == draw.Color(255, 0, 255),
           "a video shows its poster, contained (got \(at(50, vy + 5)) \(at(50, vy + 50)))")
     check(box("o")!.Replaced == .image && box("o")!.Width == 2, "an object of an image is that image")
     check(box("ufb") != nil, "an object of something unknown shows its fallback")
@@ -1502,6 +1502,180 @@ func testCompositing() {
     check(left.R > 40 && left.R < 200 && right.R > 60 && right.R < 215 && at(110, 80).R < 40 && at(130, 80).R > 215,
           "backdrop-filter: blur() blurs what is behind, inside the box (got \(left) \(right) \(at(110, 80)) \(at(130, 80)))")
     check(at(170, 80) == draw.Color(0, 255, 255), "isolation: isolate keeps a blend inside its group (got \(at(170, 80)))")
+
+    // Media, through a player of the test's own.
+    final class FakePlayer: web.MediaPlayer {
+        var Ready = true
+        var Failed = false
+        var Paused = true
+        var Ended = false
+        var Duration: float64 = 10
+        var CurrentTime: float64 = 0
+        var VideoWidth: int32 = 40
+        var VideoHeight: int32 = 20
+        var loop = false
+        var muted = false
+        var fresh: draw.Image? = nil
+        func Play() { Paused = false }
+        func Pause() { Paused = true }
+        func Seek(to seconds: float64) { CurrentTime = seconds }
+        func SetVolume(volume: float32) {}
+        func SetMuted(muted: bool) { self.muted = muted }
+        func SetLoop(loop: bool) { self.loop = loop }
+        func Frame() -> draw.Image? { let f = fresh; fresh = nil; return f }
+        func Close() {}
+    }
+    let mediaPage = web.Page()
+    mediaPage.SetViewportSize(draw.Size(200, 100))
+    var player: FakePlayer? = nil
+    var opened = ""
+    mediaPage.SetMediaOpener { url in
+        opened = url
+        let p = FakePlayer()
+        player = p
+        return p
+    }
+    mediaPage.LoadHTML("""
+    <style>body { margin: 0; background: white } video { display: block } video:playing { outline: 2px solid red } </style>
+    <video id=v autoplay muted loop controls><source src="clip.mp4"></video>
+    """, baseURL: "file:///m/")
+    guard let vid = mediaPage.QuerySelector("#v"), let fake = player else { check(false, "a video opens a player"); return }
+    var heard: [string] = []
+    for type in ["loadedmetadata", "play", "pause", "ended", "timeupdate", "error"] {
+        _ = mediaPage.Document?.AddEventListener(vid, type, handler: { e in heard.append(e.Type) })
+    }
+    check(opened.hasSuffix("/m/clip.mp4"), "the first <source> is opened, resolved (got \(opened))")
+    check(fake.muted && fake.loop, "muted and loop reach the player")
+    _ = mediaPage.Advance(time: 0)
+    check(!fake.Paused, "autoplay plays once it is ready")
+    _ = mediaPage.Advance(time: 0.1)
+    check(heard.contains("loadedmetadata") && heard.contains("play"), "metadata and play are told (got \(heard))")
+    check(mediaPage.BoundsOf(vid)?.Width == 40 && mediaPage.BoundsOf(vid)?.Height == 20, "the picture's size lays it out (got \(String(describing: mediaPage.BoundsOf(vid))))")
+    fake.fresh = draw.Image(width: 1, height: 1, pixels: [0, 0, 255, 255])
+    _ = mediaPage.Advance(time: 0.2)
+    var mpx = [uint8](repeating: 0, count: 200 * 100 * 4)
+    mediaPage.Draw(into: &mpx, width: 200, height: 100, scale: 1)
+    let frameAt = pixelAt(mpx, 200, 20, 1)
+    check(frameAt == draw.Color(0, 0, 255), "a frame is painted in the box (got \(frameAt))")
+    check(mediaPage.NeedsAnimation(), "a playing video keeps frames coming")
+    fake.CurrentTime = 1
+    _ = mediaPage.Advance(time: 0.3)
+    check(heard.contains("timeupdate"), "time passing is told")
+    fake.Ended = true
+    fake.Paused = true
+    _ = mediaPage.Advance(time: 0.4)
+    let n = heard.count
+    check(n >= 2 && heard[n - 2] == "pause" && heard[n - 1] == "ended", "pause then ended (got \(heard))")
+    mediaPage.PlayMedia(vid)
+    check(fake.CurrentTime == 0 && !fake.Paused, "playing again from the end starts over")
+    let failing = web.Page()
+    failing.SetViewportSize(draw.Size(100, 100))
+    failing.SetMediaOpener { _ in return nil }
+    failing.LoadHTML("<audio id=a src=a.mp3></audio>")
+    var failed = 0
+    if let a = failing.QuerySelector("#a") { _ = failing.Document?.AddEventListener(a, "error", handler: { e in failed += 1 }) }
+    _ = failing.Advance(time: 0)
+    _ = failing.BoundsOf(failing.QuerySelector("#a")!)
+    _ = failing.Advance(time: 0.1)
+    check(failed == 1, "a source no player opens gets error, once (got \(failed))")
+
+    // Markup that comes after the page has loaded, as .vsx mounts it.
+    let later = web.Page()
+    later.SetViewportSize(draw.Size(100, 100))
+    var opens: [string] = []
+    later.SetMediaOpener { url in
+        opens.append(url)
+        return FakePlayer()
+    }
+    later.LoadHTML("<div id=root></div>", baseURL: "file:///m/")
+    guard let laterDoc = later.Document, let root = later.QuerySelector("#root") else { return }
+    let added = laterDoc.CreateElement("video")
+    laterDoc.SetAttribute(added, "src", "a.mp4")
+    laterDoc.AppendChild(root, added)
+    _ = later.BoundsOf(added)
+    check(opens.count == 1 && opens[0].hasSuffix("a.mp4"), "a video added later opens (got \(opens))")
+    laterDoc.SetAttribute(added, "src", "b.mp4")
+    _ = later.BoundsOf(added)
+    check(opens.count == 2 && opens[1].hasSuffix("b.mp4"), "a new src opens anew (got \(opens))")
+
+    // keypress, and layout as a ResizeObserver would tell it.
+    let told = web.Page()
+    told.SetViewportSize(draw.Size(200, 100))
+    told.LoadHTML("<style>body { margin: 0 } #b { width: 50%; height: 10px }</style><div id=b></div>")
+    guard let bx = told.QuerySelector("#b") else { return }
+    var sizes: [float32] = []
+    var presses: [string] = []
+    _ = told.Document?.AddEventListener(bx, "layout", handler: { e in
+        if let l = e as? dom.LayoutEvent { sizes.append(l.Width) }
+    })
+    _ = told.BoundsOf(bx)
+    _ = told.Advance(time: 0)
+    check(sizes == [100], "layout tells an element its size (got \(sizes))")
+    _ = told.BoundsOf(bx)
+    _ = told.Advance(time: 0.1)
+    check(sizes == [100], "and not again while it stays (got \(sizes))")
+    told.SetViewportSize(draw.Size(300, 100))
+    check(told.NeedsAnimation() || told.BoundsOf(bx) != nil, "a new size lays out")
+    _ = told.BoundsOf(bx)
+    _ = told.Advance(time: 0.2)
+    check(sizes == [100, 150], "and again when it changes (got \(sizes))")
+    guard let tree = told.Document?.Tree, let body = tree.ElementsByTagName("body").first else { return }
+    _ = told.Document?.AddEventListener(body, "keypress", handler: { e in
+        if let k = e as? dom.KeyboardEvent { presses.append(k.Key) }
+    })
+    _ = told.Handle(.keyDown(web.Key(Key: "a", Code: "KeyA")))
+    _ = told.Handle(.keyDown(web.Key(Key: "ArrowLeft", Code: "ArrowLeft")))
+    _ = told.Handle(.keyDown(web.Key(Key: "c", Code: "KeyC", Meta: true)))
+    check(presses == ["a"], "keypress is for keys that make a character (got \(presses))")
+
+    // An <img>'s load and error.
+    let imgs = web.Page()
+    imgs.SetViewportSize(draw.Size(100, 100))
+    let dot = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='1' height='1'/>"
+    imgs.LoadHTML("<img id=a src=\"\(dot)\"><img id=b src=missing.png>")
+    var heardImage: [string] = []
+    for id in ["a", "b"] {
+        if let n = imgs.QuerySelector("#\(id)") {
+            for type in ["load", "error"] { _ = imgs.Document?.AddEventListener(n, type, handler: { e in heardImage.append("\(id) \(e.Type)") }) }
+        }
+    }
+    _ = imgs.Advance(time: 0)
+    check(heardImage.contains("b error"), "an image that can't be had gets error (got \(heardImage))")
+
+    // The rest of filter and mix-blend-mode.
+    let fx = web.Page()
+    fx.SetViewportSize(draw.Size(300, 60))
+    fx.LoadHTML("""
+    <style>body { margin: 0; background: white } div { position: absolute; top: 10px; width: 20px; height: 20px }</style>
+    <div style="left: 0; background: rgb(200,100,50); filter: grayscale(1)"></div>
+    <div style="left: 30px; background: rgb(255,0,0); filter: invert(100%)"></div>
+    <div style="left: 60px; background: rgb(100,50,25); filter: brightness(2)"></div>
+    <div style="left: 90px; background: rgb(255,0,0); filter: hue-rotate(120deg)"></div>
+    <div style="left: 120px; background: black; filter: opacity(50%)"></div>
+    <div style="left: 150px; width: 10px; height: 10px; background: black; filter: drop-shadow(10px 10px 0 rgb(0,0,255))"></div>
+    <div style="left: 180px; background: rgb(255,0,0)"></div>
+    <div style="left: 180px; backdrop-filter: invert(1)"></div>
+    <div style="left: 210px; background: rgb(0,0,255)"><div style="left: 0; top: 0; background: rgb(255,0,0); mix-blend-mode: luminosity"></div></div>
+    <div style="left: 240px; background: rgb(100,100,0)"><div style="left: 0; top: 0; background: rgb(100,0,100); mix-blend-mode: plus-lighter"></div></div>
+    <div style="left: 270px; background: rgb(128,128,128)"><div style="left: 0; top: 0; background: rgb(255,0,0); mix-blend-mode: color"></div></div>
+    """)
+    var fp = [uint8](repeating: 0, count: 300 * 60 * 4)
+    fx.Draw(into: &fp, width: 300, height: 60, scale: 1)
+    func fa(x: int32, y: int32) -> draw.Color { return pixelAt(fp, 300, x, y) }
+    func near(c: draw.Color, r: int32, g: int32, b: int32) -> bool {
+        return abs(int32(c.R) - r) <= 3 && abs(int32(c.G) - g) <= 3 && abs(int32(c.B) - b) <= 3
+    }
+    check(fa(10, 20).R == fa(10, 20).G && fa(10, 20).G == fa(10, 20).B, "filter: grayscale() (got \(fa(10, 20)))")
+    check(near(fa(40, 20), 0, 255, 255), "filter: invert() (got \(fa(40, 20)))")
+    check(near(fa(70, 20), 200, 100, 50), "filter: brightness() (got \(fa(70, 20)))")
+    check(near(fa(100, 20), 0, 113, 0), "filter: hue-rotate() by its matrix (got \(fa(100, 20)))")
+    check(near(fa(130, 20), 127, 127, 127), "filter: opacity() (got \(fa(130, 20)))")
+    check(near(fa(155, 15), 0, 0, 0) && near(fa(165, 25), 0, 0, 255) && near(fa(175, 35), 255, 255, 255),
+          "filter: drop-shadow() draws under the box, past it (got \(fa(155, 15)) \(fa(165, 25)))")
+    check(near(fa(190, 20), 0, 255, 255), "backdrop-filter: invert() (got \(fa(190, 20)))")
+    check(near(fa(220, 20), 54, 54, 255), "mix-blend-mode: luminosity keeps the backdrop's hue (got \(fa(220, 20)))")
+    check(near(fa(250, 20), 200, 100, 100), "mix-blend-mode: plus-lighter adds (got \(fa(250, 20)))")
+    check(near(fa(280, 20), 255, 73, 73), "mix-blend-mode: color takes the source's hue (got \(fa(280, 20)))")
 
     // path(), shape(), a geometry box, and clicks.
     let more = web.Page()

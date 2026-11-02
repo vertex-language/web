@@ -18,6 +18,8 @@ public final class BoxTreeBuilder {
     /// Images by URL, for <img> boxes; missing ones are laid out with
     /// their attributes' size, or none.
     public var Images: [string: draw.Image] = [:]
+    /// A playing <video>'s picture size, by node id.
+    public var MediaSizes: [int64: draw.Size] = [:]
     /// The images that are SVG files, by the src that names them: drawn
     /// as vectors, sharp at any size.
     public var Vectors: [string: svg.Document] = [:]
@@ -320,16 +322,19 @@ public final class BoxTreeBuilder {
             box.IntrinsicHeight = size.height
             box.RatioOnly = svg.HasRatioOnly(node)
         case "video":
-            // No video plays yet: its poster shows, as before playing.
+            // Its picture's size once known; its poster until a frame comes.
             box = Box(kind: .replaced, style: style, node: node)
-            box.Replaced = .placeholder
+            box.Replaced = .video
             box.IntrinsicWidth = 300
             box.IntrinsicHeight = 150
             if let poster = node.GetAttribute("poster"), let img = Images[poster] {
-                box.Replaced = .image
                 box.Image = img
                 box.IntrinsicWidth = float32(img.Width)
                 box.IntrinsicHeight = float32(img.Height)
+            }
+            if let size = MediaSizes[node.Id] {
+                box.IntrinsicWidth = size.Width
+                box.IntrinsicHeight = size.Height
             }
         case "audio":
             box = Box(kind: .replaced, style: style, node: node)

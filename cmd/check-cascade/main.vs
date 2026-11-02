@@ -410,6 +410,7 @@ func testEffects() {
     print("Effects")
     guard let e = styleOf("<style>div { filter: brightness(2) blur(1em); border-radius: 50% 4px; background: radial-gradient(circle at 0 100%, red 10%, blue 60%) }</style><div>x</div>", "div") else { check(false, "effects resolve"); return }
     check(e.FilterBlur == 16, "filter: blur() in em, among other functions (got \(e.FilterBlur))")
+    check(e.Filters.count == 2, "filter: functions are kept in order (got \(e.Filters.count))")
     let r = e.Radii(width: 200, height: 100)
     check(r.TopLeft == 50 && r.TopRight == 4 && r.BottomRight == 50, "border-radius percentages resolve against the box (got \(r.TopLeft) \(r.TopRight))")
     guard let shape = e.BackgroundImage?.Gradient?.Radial else { check(false, "radial-gradient has a shape"); return }

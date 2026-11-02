@@ -61,10 +61,10 @@ public final class ComputedStyle {
     public var BackgroundColor: draw.Color = draw.Color.transparent
     public var BackgroundImage: BackgroundImage? = nil
     public var Opacity: float32 = 1
-    /// filter: blur()'s radius, in CSS pixels; 0 for none.
-    public var FilterBlur: float32 = 0
-    /// backdrop-filter: blur()'s radius, in CSS pixels; 0 for none.
-    public var BackdropBlur: float32 = 0
+    /// filter's functions in order, lengths in CSS pixels; empty for none.
+    public var Filters: [draw.Filter] = []
+    /// backdrop-filter's, the same.
+    public var BackdropFilters: [draw.Filter] = []
     /// clip-path's basic shape, or nil for none.
     public var ClipPath: ClipPath? = nil
     /// mask-image: a gradient, or an image's URL; neither for none.
@@ -486,7 +486,15 @@ extension ComputedStyle {
     /// Whether the box is painted apart and put back through a clip,
     /// a mask, a blend mode or a backdrop: it paints as a whole.
     public var HasCompositing: bool {
-        return ClipPath != nil || MaskGradient != nil || !MaskURL.isEmpty || BlendMode != .normal || Isolated || BackdropBlur > 0
+        return ClipPath != nil || MaskGradient != nil || !MaskURL.isEmpty || BlendMode != .normal || Isolated || !BackdropFilters.isEmpty
+    }
+
+    /// filter: blur()'s radius, in CSS pixels; 0 for none.
+    public var FilterBlur: float32 {
+        for f in Filters {
+            if case .blur(let r) = f { return r }
+        }
+        return 0
     }
 
     public var HasTransform: bool {

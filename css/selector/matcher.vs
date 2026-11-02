@@ -35,6 +35,8 @@ public final class MatchContext {
     /// and :popover-open.
     public var Modal = Set<int64>()
     public var PopoverOpen = Set<int64>()
+    /// The media elements playing, by node id.
+    public var Playing = Set<int64>()
     // Each element's 1-based place among its parent's element children,
     // and each parent's count of them, filled in a parent at a time: the
     // nth-child family asks for every element on a page.
@@ -302,15 +304,16 @@ func matchPseudo(p: Pseudo, node: html.Node, ctx: MatchContext) -> bool {
         let t = node.TagName
         return (t == "details" || t == "dialog") && node.HasAttribute("open")
     case "paused":
-        // Nothing plays yet: every media element is paused.
-        return node.TagName == "video" || node.TagName == "audio"
+        return (node.TagName == "video" || node.TagName == "audio") && !ctx.Playing.contains(node.Id)
+    case "playing":
+        return ctx.Playing.contains(node.Id)
     case "muted":
         return (node.TagName == "video" || node.TagName == "audio") && node.HasAttribute("muted")
     case "modal":
         return ctx.Modal.contains(node.Id)
     case "popover-open":
         return ctx.PopoverOpen.contains(node.Id)
-    case "autofill", "fullscreen", "picture-in-picture", "playing", "seeking",
+    case "autofill", "fullscreen", "picture-in-picture", "seeking",
          "buffering", "stalled", "volume-locked", "state":
         return false
     default:

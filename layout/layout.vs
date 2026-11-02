@@ -191,7 +191,7 @@ public final class Layout {
         var inner = box.IsFormattingRoot ? flow.root(box) : (s.IsPositioned ? flow.positionedBy(box) : flow)
         // A transform, a filter or containment makes the box what its
         // fixed descendants are placed against, instead of the viewport.
-        if s.HasTransform || s.FilterBlur > 0 || s.ContainPaint || s.LayoutContained { inner.fixed = box }
+        if s.HasTransform || !s.Filters.isEmpty || s.ContainPaint || s.LayoutContained { inner.fixed = box }
         let contentHeight = layoutContent(box, flow: inner)
 
         // Height: given, or the content's, or the ratio's where the
@@ -413,7 +413,7 @@ public final class Layout {
     /// Whether a replaced box keeps its intrinsic proportions when only one
     /// of its sizes is given: an image or an SVG does, a control does not.
     func keepsRatio(box: Box) -> bool {
-        return box.Replaced == .image || box.Replaced == .svg
+        return box.Replaced == .image || box.Replaced == .svg || box.Replaced == .video
     }
 
     /// Sizes an image or control from its style, or its own size.
@@ -448,7 +448,7 @@ public final class Layout {
             }
         }
         box.Width = clampWidth(box, w!, cbWidth: cb.Width)
-        if box.Replaced == .image && iw > 0 && ih > 0 && box.Width != w! && s.Height.IsAuto {
+        if (box.Replaced == .image || box.Replaced == .video) && iw > 0 && ih > 0 && box.Width != w! && s.Height.IsAuto {
             h = (box.Width - edgesW) * ih / iw + edgesH
         }
         box.Height = clampHeight(box, h!, cbHeight: cb.Height)

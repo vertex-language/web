@@ -265,10 +265,21 @@ public enum Value {
     case tracks([GridTrack])
     case placement(GridPlacement)
     case clipShape(ClipShape)
+    case filters([FilterFunction])
     /// Several values, as border-image-slice's sides and the rest.
     case list([Value])
     case inherit
     case initial
+}
+
+/// One function of a filter before its lengths are resolved. Amount is a
+/// fraction, or degrees for hue-rotate; Lengths are blur's radius, or
+/// drop-shadow's offsets and blur, with its Color (nil for currentColor).
+public struct FilterFunction {
+    public var Name: string
+    public var Amount: float32 = 1
+    public var Lengths: [Value] = []
+    public var Color: draw.Color? = nil
 }
 
 /// A clip-path's basic shape before its lengths are resolved: Kind is
@@ -1676,6 +1687,78 @@ func parseShadows(tokens: [Token]) -> Value? {
     return .shadows(shadows)
 }
 
+/// A filter's functions, in order. A url() has nothing to refer to and is
+/// passed over; a function not in Filter Effects drops the declaration.
+func parseFilters(tokens: [Token]) -> Value? {
+    var out: [FilterFunction] = []
+    var i = 0
+    while i < tokens.count {
+        let t = tokens[i]
+        if t.Kind == .url {
+            i += 1
+            continue
+        }
+        if t.Kind != .function { return nil }
+        let end = closeParen(tokens, from: i + 1)
+        let name = lower(t.Value)
+        var f = FilterFunction(Name: name)
+        var j = i + 1
+        switch name {
+        case "blur":
+            while j < end {
+                if let v = parseLengthValue(tokens[j], allowAuto: false) {
+                    f.Lengths.append(v)
+                    break
+                }
+                j += 1
+            }
+            if f.Lengths.isEmpty { f.Lengths.append(.length(0, .px)) }
+        case "brightness", "contrast", "grayscale", "invert", "opacity", "saturate", "sepia":
+            if j < end {
+                let a = tokens[j]
+                if a.Kind == .number { f.Amount = a.NumberVal } else if a.Kind == .percentage { f.Amount = a.NumberVal / 100 } else { return nil }
+                if f.Amount < 0 { return nil }
+                if name != "brightness" && name != "contrast" && name != "saturate" && f.Amount > 1 { f.Amount = 1 }
+            }
+        case "hue-rotate":
+            f.Amount = 0
+            if j < end {
+                let a = tokens[j]
+                if a.Kind == .number && a.NumberVal == 0 {
+                    f.Amount = 0
+                } else if a.Kind == .dimension {
+                    switch lower(a.Unit) {
+                    case "deg": f.Amount = a.NumberVal
+                    case "rad": f.Amount = a.NumberVal * 180 / 3.14159265
+                    case "grad": f.Amount = a.NumberVal * 0.9
+                    case "turn": f.Amount = a.NumberVal * 360
+                    default: return nil
+                    }
+                } else {
+                    return nil
+                }
+            }
+        case "drop-shadow":
+            while j < end {
+                if let m = parseColorAt(tokens, j) {
+                    if case .color(let c) = m.0 { f.Color = c }
+                    j += m.1
+                    continue
+                }
+                if let v = parseLengthValue(tokens[j], allowAuto: false) { f.Lengths.append(v) }
+                j += 1
+            }
+            if f.Lengths.count < 2 { return nil }
+        default:
+            return nil
+        }
+        out.append(f)
+        i = end + 1
+    }
+    if out.isEmpty { return nil }
+    return .filters(out)
+}
+
 /// The value of one longhand, read from its tokens.
 func parseValue(prop: Prop, tokens: [Token]) -> Value? {
     let t = tokens[0]
@@ -2060,22 +2143,8 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
     case .isolation:
         return kw == "auto" || kw == "isolate" ? .keyword(kw) : nil
     case .filter, .backdropFilter:
-        // Only blur() is drawn; the other filter functions are dropped.
         if kw == "none" { return Value.none }
-        var i = 0
-        while i < tokens.count {
-            if tokens[i].Kind == .function && lower(tokens[i].Value) == "blur" {
-                let end = closeParen(tokens, from: i + 1)
-                var j = i + 1
-                while j < end {
-                    if let v = parseLengthValue(tokens[j], allowAuto: false) { return v }
-                    j += 1
-                }
-                return .length(0, .px)
-            }
-            i += 1
-        }
-        return nil
+        return parseFilters(tokens)
     case .verticalAlign:
         switch kw {
         case "baseline", "middle", "top", "bottom", "text-top", "text-bottom", "sub", "super": return .keyword(kw)

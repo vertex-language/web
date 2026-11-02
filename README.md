@@ -50,12 +50,12 @@ vsc run check-deps
 | **`web/css/selector`** | parse | Selectors: the parser, the matcher (combinators, attributes, pseudo-classes, `:not()`, `:is()`, `:has()`), specificity, `QuerySelector`. |
 | **`web/dom`** | document | The live document: typed mutation (`SetAttribute`, `AppendChild`, `TextContent`, `ClassList`) and the journal of every change, which is how the engine learns of one. Document positions (`TextPosition`) and the HTML standard's form semantics: text controls, focus order, labels, form data. |
 | **`web/cascade`** | style | The user agent stylesheet, rule sets, the resolver, and `ComputedStyle`: the cascade, inheritance, `em`/`rem`/viewport units, `calc()`, custom properties and `var()`, `@media` (with the range syntax), `@supports`, `@layer`, and state (`:hover`, `:focus`, `:active`, `:visited`) re-matched without a rebuild. `Invalidate` turns the DOM journal into the subtrees to restyle, by what the selectors mention: a change nothing depends on costs no frame. |
-| **`web/svg`** | paint | Inline SVG: `<path>` (every command, arcs too), basic shapes, `<g>` and transforms, fills (`currentColor`, fill-rule, opacity) and the viewBox, drawn with `image/draw`'s paths. No strokes, `<use>`, clipping or text yet. |
+| **`web/svg`** | paint | Inline SVG: `<path>` (every command, arcs too), basic shapes, `<g>`, `<use>` and `<symbol>`, transforms, fills and strokes (`currentColor`, linear and radial gradients, fill-rule, opacity), `clip-path` and `mask` by `url()`, `<text>` and `<tspan>`, and the viewBox, drawn with `image/draw`'s paths. |
 | **`web/layout`** | layout | The box tree and its layout: block, inline, flex, grid, tables, floats, positioning, scrolling. Hit testing. |
 | **`web/paint`** | paint | The display list for a laid-out tree (`Build`), and its rasterization onto `image/draw` (`Rasterize`). |
 | **`web/edit`** | input | Caret movement and text editing over UTF-8: characters, words, lines. |
 | **`web/fetch`** | resources | URLs resolved against a base (through `net/url`), and a `Fetcher` that answers their bytes: files by default, or a host's handler. An `Archive` is a page and its resources recorded to a folder, shown again offline. |
-| **`web`** | the page | `Page`: loads a document and its resources, runs the stages whose inputs changed, takes input (`Input`) in its own coordinates, and draws into pixels. |
+| **`web`** | the page | `Page`: loads a document and its resources, runs the stages whose inputs changed, takes input (`Input`) in its own coordinates, and draws into pixels. `<video>` and `<audio>` play through a `MediaPlayer` a host gives it (`SetMediaOpener`): the engine decodes nothing. |
 
 Dependencies point down the pipeline, and nothing here imports `ui/`.
 `cmd/check-deps` holds the repository to that:

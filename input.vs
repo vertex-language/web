@@ -622,6 +622,9 @@ extension Page {
                 return .handled
             }
         }
+        if let n = node, n.TagName == "video" || n.TagName == "audio", clickMediaControls(n, at: p) {
+            return .handled
+        }
         if let summary = dom.Ancestor(node, "summary"), let details = summary.Parent, details.TagName == "details" {
             _ = Document?.ToggleAttribute(details, "open")
             _ = dispatch(dom.Event("toggle", bubbles: false), to: details)
@@ -787,6 +790,13 @@ extension Page {
         if !dispatch(dom.KeyboardEvent("keydown", Key: k.Key, Code: k.Code, Shift: k.Shift, Control: k.Control, Alt: k.Alt, Meta: k.Meta),
                      to: focused ?? Document?.Tree.ElementsByTagName("body").first) {
             return .handled
+        }
+        // A key that makes a character, and Enter, goes on to keypress.
+        if !k.Control && !k.Meta && (k.Key.count == 1 || k.Key == "Enter") {
+            if !dispatch(dom.KeyboardEvent("keypress", Key: k.Key, Code: k.Code, Shift: k.Shift, Control: k.Control, Alt: k.Alt, Meta: k.Meta),
+                         to: focused ?? Document?.Tree.ElementsByTagName("body").first) {
+                return .handled
+            }
         }
         // Escape closes the top modal dialog or auto popover first.
         if k.Code == "Escape" && !topLayer.isEmpty && escapeTopLayer() { return .handled }

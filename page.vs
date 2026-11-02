@@ -282,6 +282,18 @@ public final class Page {
     var programSheets: [string] = []
     var onTitle: ((string) -> Void)? = nil
     var onHoverLink: ((string?) -> Void)? = nil
+    var mediaOpener: ((string) -> (any MediaPlayer)?)? = nil
+    var media: [int64: MediaState] = [:]
+    var mediaFrames: [int64: draw.Image] = [:]
+    /// The URLs an opener turned down, and whom to tell.
+    var mediaRefused: [int64: string] = [:]
+    var mediaErrors: [html.Node] = []
+    /// What each element with a layout listener was last told; whether
+    /// layout has run since.
+    var layoutTold: [int64: draw.Rect] = [:]
+    var layoutRan = false
+    /// The <img>s yet to be told their image loaded or failed.
+    var pendingImageEvents: [html.Node] = []
     var isVisited: ((string) -> bool)? = nil
 
     public init(configuration: Config? = nil) {
@@ -330,6 +342,7 @@ public final class Page {
     }
 
     func load(doc: html.Document) {
+        layoutTold = [:]
         frames = [:]
         files = [:]
         target = nil
@@ -391,8 +404,11 @@ public final class Page {
             triedImages[src] = true
             if images[src] == nil && vectors[src] == nil { loadImage(src) }
         }
+        pendingImageEvents = doc.ElementsByTagName("img")
         title = doc.Title
         if let cb = onTitle { cb(title) }
+        closeMedia()
+        syncMedia(doc)
         needsStyle = true
         needsRepaint = true
     }
@@ -639,6 +655,12 @@ public final class Page {
         if animator.Active || !animator.events.isEmpty { return true }
         if bubbleNode != nil { return true }
         if scrollAnimation != nil || pendingSnap != nil { return true }
+        if mediaPlaying { return true }
+        // Only what someone is listening for is worth a frame.
+        if let doc = Document, doc.HasEventListeners {
+            if !pendingImageEvents.isEmpty { return true }
+            if layoutRan && !doc.NodesListening("layout").isEmpty { return true }
+        }
         for (_, f) in frames where f.page.NeedsAnimation() { return true }
         if let f = focused { return dom.IsTextControl(f) }
         return false
@@ -666,6 +688,9 @@ public final class Page {
             repaint = true
         }
         dispatchAnimationEvents()
+        dispatchImageEvents()
+        dispatchLayoutEvents()
+        if advanceMedia() { repaint = true }
         if advanceScroll(time) { repaint = true }
         for (_, frame) in frames where frame.page.NeedsAnimation() {
             if frame.page.Advance(time: time) {
@@ -684,6 +709,40 @@ public final class Page {
             return true
         }
         return repaint
+    }
+
+    /// A layout event to each element whose box has changed since it was
+    /// last told, the first layout included: what ResizeObserver tells.
+    func dispatchLayoutEvents() {
+        if !layoutRan { return }
+        layoutRan = false
+        guard let doc = Document else { return }
+        for id in doc.NodesListening("layout") {
+            guard let box = builder.byNode[id], let node = box.Node else { continue }
+            let p = layout.PagePosition(box)
+            let now = draw.Rect(p.x, p.y, box.Width, box.Height)
+            if let old = layoutTold[id], old.X == now.X, old.Y == now.Y, old.Width == now.Width, old.Height == now.Height { continue }
+            layoutTold[id] = now
+            _ = doc.Dispatch(dom.LayoutEvent("layout", X: now.X, Y: now.Y, Width: now.Width, Height: now.Height), to: node)
+        }
+    }
+
+    /// An <img>'s load or error, once its bytes have come. Those still
+    /// deferred to the host wait for it.
+    func dispatchImageEvents() {
+        if pendingImageEvents.isEmpty { return }
+        var waiting: [html.Node] = []
+        for n in pendingImageEvents {
+            guard let src = n.GetAttribute("src") else { continue }
+            if images[src] != nil || vectors[src] != nil {
+                _ = dispatch(dom.Event("load", bubbles: false), to: n)
+            } else if pendingImages.contains(src) {
+                waiting.append(n)
+            } else {
+                _ = dispatch(dom.Event("error", bubbles: false), to: n)
+            }
+        }
+        pendingImageEvents = waiting
     }
 
     /// Hands the transition and animation events of the last frames to
@@ -731,9 +790,14 @@ public final class Page {
         root?.ViewportScrollX = scroll.X
         root?.ViewportScrollY = scroll.Y
         if needsStyle {
+            if let doc = Document { syncMedia(doc.Tree) }
             builder.Images = images
             builder.Vectors = vectors
             builder.Values = values
+            builder.MediaSizes = [:]
+            for (id, m) in media where m.ready && m.player.VideoWidth > 0 {
+                builder.MediaSizes[id] = draw.Size(float32(m.player.VideoWidth), float32(m.player.VideoHeight))
+            }
             context.Reset()
             context.Hovered = hovered
             context.Focused = focused
@@ -776,6 +840,7 @@ public final class Page {
             }
             clampScroll()
             needsLayout = false
+            layoutRan = true
             needsPaint = true
             // Container queries ask about sizes only layout knows: once
             // laid out, measure the containers, and while that changes
@@ -808,6 +873,10 @@ public final class Page {
                     state.FieldSelectionEnd = r.end
                 }
                 state.Images = images
+                state.MediaFrames = mediaFrames
+                for (id, m) in media {
+                    state.MediaBars[id] = paint.MediaProgress(time: m.player.CurrentTime, duration: m.player.Duration, paused: m.player.Paused)
+                }
                 // Looked up directly: BoundsOf would update again.
                 if let b = bubbleNode, let box = builder.byNode[b.Id] {
                     let p = layout.PagePosition(box)

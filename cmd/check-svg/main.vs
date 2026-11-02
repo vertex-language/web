@@ -98,7 +98,53 @@ func main() -> int32 {
     p = render("<svg viewBox='0 0 20 20'><polygon points='0,0 20,0 20,20' /></svg>")
     check(at(p, 18, 2).a == 255 && at(p, 2, 18).a == 0, "a polygon")
     p = render("<svg viewBox='0 0 20 20'><defs><linearGradient id=g><stop stop-color='#f00'/></linearGradient></defs><rect width=20 height=20 fill='url(#g)'/></svg>")
-    check(at(p, 10, 10).r == 255, "a gradient fill is its first stop, for now")
+    check(at(p, 10, 10).r == 255, "a gradient of one stop is that stop's color")
+    p = render("<svg viewBox='0 0 20 20'><defs><linearGradient id=g><stop offset=0 stop-color='#f00'/><stop offset=1 stop-color='#00f'/></linearGradient></defs><rect width=20 height=20 fill='url(#g)'/></svg>")
+    check(at(p, 1, 10).r > 220 && at(p, 18, 10).b > 220 && at(p, 10, 10).r > 90 && at(p, 10, 10).r < 160, "a linear gradient runs across the shape (\(at(p, 10, 10)))")
+    p = render("<svg viewBox='0 0 20 20'><defs><linearGradient id=g gradientUnits=userSpaceOnUse x1=0 y1=0 x2=0 y2=20><stop offset=0 stop-color='#000'/><stop offset=1 stop-color='#fff' stop-opacity=0 /></linearGradient></defs><rect width=20 height=20 fill='url(#g)'/></svg>")
+    check(at(p, 10, 1).a > 220 && at(p, 10, 18).a < 40, "user space units, down the box, and stop-opacity (\(at(p, 10, 1)) \(at(p, 10, 18)))")
+    p = render("<svg viewBox='0 0 20 20'><defs><radialGradient id=g><stop offset=0 stop-color='#f00'/><stop offset=1 stop-color='#00f'/></radialGradient></defs><rect width=20 height=20 fill='url(#g)'/></svg>")
+    check(at(p, 10, 10).r > 220 && at(p, 1, 10).b > 200, "a radial gradient from its centre (\(at(p, 10, 10)) \(at(p, 1, 10)))")
+    p = render("<svg viewBox='0 0 20 20'><defs><linearGradient id=a><stop offset=0 stop-color='#0f0'/></linearGradient><linearGradient id=b xlink:href='#a'/></defs><rect width=20 height=20 fill='url(#b)'/></svg>")
+    check(at(p, 10, 10).g == 255, "a gradient takes its stops from what it links to")
+    print("Use, clips and masks")
+    p = render("<svg viewBox='0 0 20 20'><defs><rect id=r width=5 height=5 /></defs><use href='#r' x=10 y=10 fill='#f00'/></svg>")
+    check(at(p, 12, 12).r == 255 && at(p, 2, 2).a == 0, "<use> draws what it names, moved, with its own fill")
+    p = render("<svg viewBox='0 0 20 20'><symbol id=s viewBox='0 0 1 1'><rect width=1 height=1 fill='#00f'/></symbol><use href='#s' width=10 height=10 /></svg>")
+    check(at(p, 8, 8).b == 255 && at(p, 12, 12).a == 0, "<use> of a <symbol> fits its viewBox to the size")
+    p = render("<svg viewBox='0 0 20 20'><g id=a><use href='#a'/><rect width=4 height=4 /></g></svg>")
+    check(at(p, 2, 2).a == 255, "a <use> of its own ancestor stops")
+    p = render("<svg viewBox='0 0 20 20'><clipPath id=c><circle cx=10 cy=10 r=5 /></clipPath><rect width=20 height=20 fill='#f00' clip-path='url(#c)'/></svg>")
+    check(at(p, 10, 10).r == 255 && at(p, 1, 1).a == 0, "clip-path by url() keeps the circle")
+    p = render("<svg viewBox='0 0 20 20'><clipPath id=c clipPathUnits=objectBoundingBox><rect width=.5 height=1 /></clipPath><rect x=10 width=10 height=20 fill='#f00' clip-path='url(#c)'/></svg>")
+    check(at(p, 12, 10).r == 255 && at(p, 17, 10).a == 0, "objectBoundingBox clip units")
+    p = render("<svg viewBox='0 0 20 20'><mask id=m><rect width=10 height=20 fill=white /></mask><g mask='url(#m)'><rect width=20 height=20 fill='#00f'/></g></svg>")
+    check(at(p, 5, 10).b == 255 && at(p, 15, 10).a == 0, "a mask keeps what is bright in it")
+    print("Text")
+    p = render("<svg viewBox='0 0 40 40' ><text x=2 y=30 font-size=30 fill='#f00'>HH</text></svg>", size: 40)
+    var lit = 0
+    var y: int32 = 0
+    while y < 40 {
+        var x: int32 = 0
+        while x < 40 {
+            if at(p, x, y, size: 40).r > 100 { lit += 1 }
+            x += 1
+        }
+        y += 1
+    }
+    check(lit > 40, "<text> draws glyphs in its fill (\(lit) pixels)")
+    p = render("<svg viewBox='0 0 40 40'><text x=20 y=30 font-size=30 text-anchor=end fill='#f00'>H</text></svg>", size: 40)
+    var rightOf = 0
+    y = 0
+    while y < 40 {
+        var x: int32 = 22
+        while x < 40 {
+            if at(p, x, y, size: 40).a > 0 { rightOf += 1 }
+            x += 1
+        }
+        y += 1
+    }
+    check(rightOf == 0, "text-anchor: end ends at x (\(rightOf))")
     p = render("<svg viewBox='0 0 40 20'><rect width=40 height=20 /></svg>")
     check(at(p, 10, 3).a == 0 && at(p, 10, 10).a == 255, "a wide viewBox is centered in a square box")
 

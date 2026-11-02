@@ -301,7 +301,22 @@ public final class CompositionEvent: Event {
         super.init(type)
     }
 }
-public final class LayoutEvent: Event {}
+/// Sent to an element when layout changes its size or place: what it is
+/// now on the page, in CSS pixels.
+public final class LayoutEvent: Event {
+    public let X: float32
+    public let Y: float32
+    public let Width: float32
+    public let Height: float32
+
+    public init(type: string, X: float32, Y: float32, Width: float32, Height: float32) {
+        self.X = X
+        self.Y = Y
+        self.Width = Width
+        self.Height = Height
+        super.init(type, bubbles: false)
+    }
+}
 
 /// A listener's handle, for removing it.
 public struct ListenerID: Equatable {
@@ -343,6 +358,18 @@ extension Document {
         if listeners.isEmpty { return }
         listeners[node.Id] = nil
         for c in node.Children { RemoveEventListeners(within: c) }
+    }
+
+    /// The ids of the nodes with a listener of a type.
+    public func NodesListening(type: string) -> [int64] {
+        var out: [int64] = []
+        for (id, list) in listeners {
+            for l in list where l.type == type {
+                out.append(id)
+                break
+            }
+        }
+        return out
     }
 
     /// Whether any listener is registered: a document with none costs a

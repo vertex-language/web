@@ -1325,7 +1325,7 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
             s.TransformOriginY = ops[0].Lengths[1]
         }
     case .backdropFilter:
-        if case .none = v { s.BackdropBlur = 0 } else if let r = pixels(v, s, ctx), r > 0 { s.BackdropBlur = r } else { s.BackdropBlur = 0 }
+        s.BackdropFilters = filtersOf(v, s, ctx)
     case .clipPath:
         s.ClipPath = nil
         if case .clipShape(let shape) = v {
@@ -1392,7 +1392,7 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
     case .isolation:
         s.Isolated = keywordOf(v) == "isolate"
     case .filter:
-        if case .none = v { s.FilterBlur = 0 } else if let r = pixels(v, s, ctx), r > 0 { s.FilterBlur = r } else { s.FilterBlur = 0 }
+        s.Filters = filtersOf(v, s, ctx)
     case .overflowX: if let k = keywordOf(v) { s.OverflowX = overflowOf(k) }
     case .overflowY: if let k = keywordOf(v) { s.OverflowY = overflowOf(k) }
     case .boxShadow:
@@ -1771,9 +1771,7 @@ func applyLayerKeyword(p: css.Prop, k: string, layer: inout BackgroundImage, s: 
     }
 }
 
-/// mix-blend-mode's keyword as a draw blend mode. The non-separable
-/// modes (hue, saturation, color, luminosity) and plus-lighter are not
-/// drawn and blend as normal.
+/// mix-blend-mode's keyword as a draw blend mode.
 func blendModeOf(k: string) -> draw.BlendMode {
     switch k {
     case "multiply": return .multiply
@@ -1787,8 +1785,42 @@ func blendModeOf(k: string) -> draw.BlendMode {
     case "soft-light": return .softLight
     case "difference": return .difference
     case "exclusion": return .exclusion
+    case "hue": return .hue
+    case "saturation": return .saturation
+    case "color": return .color
+    case "luminosity": return .luminosity
+    case "plus-lighter": return .plusLighter
     default: return .normal
     }
+}
+
+/// A filter's functions, their lengths resolved; a blur of nothing and a
+/// drop-shadow with no color (currentColor) taken as they compute.
+func filtersOf(v: css.Value, s: ComputedStyle, ctx: ApplyContext) -> [draw.Filter] {
+    guard case .filters(let list) = v else { return [] }
+    var out: [draw.Filter] = []
+    for f in list {
+        switch f.Name {
+        case "blur":
+            let r = f.Lengths.isEmpty ? 0 : pixels(f.Lengths[0], s, ctx) ?? 0
+            if r > 0 { out.append(.blur(r)) }
+        case "brightness": out.append(.brightness(f.Amount))
+        case "contrast": out.append(.contrast(f.Amount))
+        case "grayscale": out.append(.grayscale(f.Amount))
+        case "hue-rotate": out.append(.hueRotate(f.Amount))
+        case "invert": out.append(.invert(f.Amount))
+        case "opacity": out.append(.opacity(f.Amount))
+        case "saturate": out.append(.saturate(f.Amount))
+        case "sepia": out.append(.sepia(f.Amount))
+        case "drop-shadow":
+            let x = pixels(f.Lengths[0], s, ctx) ?? 0
+            let y = pixels(f.Lengths[1], s, ctx) ?? 0
+            let r = f.Lengths.count > 2 ? pixels(f.Lengths[2], s, ctx) ?? 0 : 0
+            out.append(.dropShadow(x, y, r, f.Color ?? s.Color))
+        default: break
+        }
+    }
+    return out
 }
 
 func keywordOf(v: css.Value) -> string? {
@@ -2157,8 +2189,8 @@ func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
             }
         }
     case .opacity: b.Opacity = a.Opacity
-    case .filter: b.FilterBlur = a.FilterBlur
-    case .backdropFilter: b.BackdropBlur = a.BackdropBlur
+    case .filter: b.Filters = a.Filters
+    case .backdropFilter: b.BackdropFilters = a.BackdropFilters
     case .clipPath: b.ClipPath = a.ClipPath
     case .maskImage: b.MaskGradient = a.MaskGradient; b.MaskURL = a.MaskURL
     case .maskRepeat:

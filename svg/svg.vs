@@ -2,18 +2,20 @@
 // file's (read with encoding/xml) that an <img> shows, filled into the
 // box it lays out as. What it reads: <path> (every command, arcs
 // too), <rect>, <circle>, <ellipse>, <polygon> and <polyline>, grouped
-// by <g> and moved by `transform`; fills by attribute or style
-// (colors, none, currentColor, the first stop of a gradient), fill-rule,
-// fill-opacity and opacity; strokes (stroke, stroke-width,
-// stroke-linecap, stroke-linejoin, stroke-miterlimit, stroke-opacity) of
-// those and <line>; and the viewBox with preserveAspectRatio. <use>,
-// dashes, clipping, masks, filters and text aren't drawn yet.
+// by <g>, repeated by <use> and <symbol>, and moved by `transform`; fills
+// by attribute or style (colors, none, currentColor, linear and radial
+// gradients), fill-rule, fill-opacity and opacity; strokes (stroke,
+// stroke-width, stroke-linecap, stroke-linejoin, stroke-miterlimit,
+// stroke-opacity) of those and <line>; clip-path and mask by url(); <text>
+// and <tspan>; and the viewBox with preserveAspectRatio. Dashes, filters,
+// patterns and text on a path aren't drawn yet.
 package svg
 
 import (
     "encoding/xml"
     "image/draw"
     "math"
+    "text/font"
     "web/css"
     "web/html"
 )
@@ -47,9 +49,10 @@ public struct Matrix {
 
 /// How a shape is filled.
 struct Fill {
-    /// 0 none, 1 the current color, 2 Color.
+    /// 0 none, 1 the current color, 2 Color, 3 Gradient.
     var kind: int
     var color: draw.Color
+    var gradient: Gradient? = nil
 }
 
 let noFill = Fill(kind: 0, color: draw.Color.transparent)
@@ -77,6 +80,12 @@ struct Shape {
     var stroke: Fill
     var strokeStyle: draw.Stroke
     var strokeOpacity: float32
+    /// What it is cut to and masked by; clip-rule, for a shape in a clip.
+    var clips: [Drawing] = []
+    var masks: [Drawing] = []
+    var clipRule: draw.FillRule = .nonZero
+    /// A <text> run instead of an outline.
+    var text: TextRun? = nil
 }
 
 /// An <svg> element's shapes, ready to draw into a box.
@@ -86,6 +95,9 @@ public final class Drawing {
     /// preserveAspectRatio="none": stretch to the box.
     let stretch: bool
     var shapes: [Shape] = []
+    /// A clipPath's or mask's units: its content is in fractions of what
+    /// it applies to.
+    var boundingBoxUnits: bool = false
 
     init(viewBox: draw.Rect?, stretch: bool) {
         ViewBox = viewBox
@@ -117,43 +129,80 @@ public final class Drawing {
         }
         var clipped = canvas
         clipped.ClipTo(draw.IRect(int32(r.X), int32(r.Y), int32(r.Width + 1), int32(r.Height + 1)))
+        drawShapes(on: clipped, view: view, currentColor: currentColor, fill: fill, fillNone: fillNone, solid: false)
+    }
+
+    /// Draws the shapes through a view. Solid draws them opaque in black,
+    /// fills only: a clipPath's content.
+    func drawShapes(on canvas: draw.Canvas, view: Matrix, currentColor: draw.Color, fill: draw.Color?, fillNone: bool, solid: bool) {
         for s in shapes {
-            var color = draw.Color.transparent
-            var skipFill = false
-            switch s.fill.kind {
-            case 0:
-                skipFill = true
-            case 1:
-                color = currentColor
-            default:
-                color = s.fill.color
-            }
-            // The <svg> element's CSS fill stands in for a shape that
-            // says nothing of its own.
-            if s.fillInherited {
-                if fillNone {
-                    skipFill = true
-                } else if let f = fill {
-                    color = f
-                    skipFill = false
-                }
-            }
-            if skipFill && s.stroke.kind == 0 { continue }
-            if s.opacity < 1 { color = color.Faded(s.opacity) }
             let m = view.Times(s.matrix)
-            let path = devicePath(s, m)
-            if !skipFill { clipped.FillPath(path, rule: s.rule, color) }
-            if s.stroke.kind != 0 {
-                var sc = s.stroke.kind == 1 ? currentColor : s.stroke.color
-                let o = s.opacity * s.strokeOpacity
-                if o < 1 { sc = sc.Faded(o) }
-                // The width scales as the transform does.
-                let det = m.A * m.D - m.B * m.C
-                var st = s.strokeStyle
-                st.Width = st.Width * math.Sqrt(det < 0 ? -det : det)
-                clipped.FillPath(path.Stroked(st), rule: .nonZero, sc)
+            if s.clips.isEmpty && s.masks.isEmpty {
+                drawShape(s, m, on: canvas, currentColor: currentColor, fill: fill, fillNone: fillNone, solid: solid)
+                continue
+            }
+            // Apart, then cut, then put back.
+            let area = reach(s, m).Intersect(canvas.Clip)
+            if area.IsEmpty { continue }
+            let layer = draw.Layer(area)
+            drawShape(s, m, on: layer.Canvas, currentColor: currentColor, fill: fill, fillNone: fillNone, solid: solid)
+            let box = boundingBox(s)
+            for c in s.clips {
+                let alpha = draw.Layer(area)
+                c.drawShapes(on: alpha.Canvas, view: c.boundingBoxUnits ? m.Times(box) : m, currentColor: currentColor, fill: nil, fillNone: false, solid: true)
+                layer.MaskBy(alpha)
+                alpha.Free()
+            }
+            for k in s.masks {
+                let lum = draw.Layer(area)
+                k.drawShapes(on: lum.Canvas, view: k.boundingBoxUnits ? m.Times(box) : m, currentColor: currentColor, fill: nil, fillNone: false, solid: false)
+                layer.MaskByLuminance(lum)
+                lum.Free()
+            }
+            layer.Composite(onto: canvas)
+            layer.Free()
+        }
+    }
+
+    /// One shape's fill and stroke, m taking it to device pixels.
+    func drawShape(s: Shape, m: Matrix, on canvas: draw.Canvas, currentColor: draw.Color, fill: draw.Color?, fillNone: bool, solid: bool) {
+        var paint = s.fill
+        // The <svg> element's CSS fill stands in for a shape that says
+        // nothing of its own.
+        if s.fillInherited && !solid {
+            if fillNone {
+                paint = noFill
+            } else if let f = fill {
+                paint = Fill(kind: 2, color: f)
             }
         }
+        if solid { paint = blackFill }
+        if let t = s.text {
+            if paint.kind != 0 { drawText(t, m, on: canvas, paint: paint, opacity: solid ? 1 : s.opacity, currentColor: currentColor) }
+            return
+        }
+        if paint.kind == 0 && (s.stroke.kind == 0 || solid) { return }
+        let path = devicePath(s, m)
+        let box = boundingBox(s)
+        if paint.kind != 0 {
+            fillPath(path, rule: solid ? s.clipRule : s.rule, paint: paint, opacity: solid ? 1 : s.opacity, m: m, box: box, on: canvas, currentColor: currentColor)
+        }
+        if s.stroke.kind != 0 && !solid {
+            // The width scales as the transform does.
+            let det = m.A * m.D - m.B * m.C
+            var st = s.strokeStyle
+            st.Width = st.Width * math.Sqrt(det < 0 ? -det : det)
+            fillPath(path.Stroked(st), rule: .nonZero, paint: s.stroke, opacity: s.opacity * s.strokeOpacity, m: m, box: box, on: canvas, currentColor: currentColor)
+        }
+    }
+
+    /// Where a shape can paint, in device pixels.
+    func reach(s: Shape, m: Matrix) -> draw.IRect {
+        if s.text != nil { return draw.IRect(-16384, -16384, 32768, 32768) }
+        let b = devicePath(s, m).Bounds
+        let det = m.A * m.D - m.B * m.C
+        let w = s.stroke.kind == 0 ? 1 : s.strokeStyle.Width * math.Sqrt(det < 0 ? -det : det) * math.Max(s.strokeStyle.MiterLimit, 1) + 2
+        return draw.IRect(int32(math.Floor(b.X - w)), int32(math.Floor(b.Y - w)), int32(math.Ceil(b.Width + 2 * w)) + 1, int32(math.Ceil(b.Height + 2 * w)) + 1)
     }
 
     /// A shape's outline in device pixels.
@@ -259,6 +308,11 @@ func intrinsicSize(root: element) -> (width: float32, height: float32) {
     return (width: w ?? 300, height: h ?? 150)
 }
 
+/// The context a clipPath's or mask's content starts from.
+func contentContext() -> Context {
+    return Context(matrix: Matrix.identity, fill: blackFill, fillInherited: false, rule: .nonZero, opacity: 1)
+}
+
 /// What a group passes down to what's inside it.
 struct Context {
     var matrix: Matrix
@@ -269,6 +323,11 @@ struct Context {
     var stroke: Fill = noFill
     var strokeStyle = draw.Stroke(width: 1)
     var strokeOpacity: float32 = 1
+    var clips: [Drawing] = []
+    var masks: [Drawing] = []
+    var clipRule: draw.FillRule = .nonZero
+    var spec = font.Spec(families: ["sans-serif"], size: 16)
+    var anchor: string = "start"
 
     /// The context inside an element: its transform, and the fill
     /// properties it sets by attribute or style.
@@ -277,7 +336,8 @@ struct Context {
         if let t = n.GetAttribute("transform") { c.matrix = matrix.Times(parseTransform(t)) }
         var props: [(string, string)] = []
         for name in ["fill", "fill-rule", "fill-opacity", "opacity", "stroke", "stroke-width", "stroke-linecap",
-                     "stroke-linejoin", "stroke-miterlimit", "stroke-opacity"] {
+                     "stroke-linejoin", "stroke-miterlimit", "stroke-opacity", "clip-path", "mask", "clip-rule",
+                     "font-family", "font-size", "font-weight", "font-style", "text-anchor"] {
             if let v = n.GetAttribute(name) { props.append((name, v)) }
         }
         if let style = n.GetAttribute("style") {
@@ -301,6 +361,22 @@ struct Context {
                 }
             case "fill-rule":
                 c.rule = v == "evenodd" ? .evenOdd : .nonZero
+            case "clip-rule":
+                c.clipRule = v == "evenodd" ? .evenOdd : .nonZero
+            case "clip-path":
+                if let t = referenced(v, ids), t.TagName == "clippath", let d = contentOf(t, ids) { c.clips.append(d) }
+            case "mask":
+                if let t = referenced(v, ids), t.TagName == "mask", let d = contentOf(t, ids) { c.masks.append(d) }
+            case "font-family":
+                c.spec.Families = familiesOf(raw)
+            case "font-size":
+                if let w = lengthAttribute(v), w > 0 { c.spec.Size = w }
+            case "font-weight":
+                c.spec.Weight = weightOf(v, c.spec.Weight)
+            case "font-style":
+                c.spec.Italic = v == "italic" || v == "oblique"
+            case "text-anchor":
+                c.anchor = v
             case "stroke":
                 if v == "none" || v == "transparent" {
                     c.stroke = noFill
@@ -341,26 +417,6 @@ struct Context {
     }
 }
 
-/// A url(#id) fill: a gradient's first stop color, until gradients are
-/// drawn as gradients.
-func gradientFill(v: string, ids: [string: element]) -> Fill? {
-    let b = [uint8](v.utf8)
-    var i = 0
-    while i < b.count && b[i] != 35 { i += 1 }
-    var j = i + 1
-    while j < b.count && b[j] != 41 && b[j] != 34 && b[j] != 39 { j += 1 }
-    if i >= b.count { return nil }
-    guard let g = ids[css.stringOf(b, i + 1, j)] else { return nil }
-    for stop in g.Children where stop.TagName == "stop" {
-        var color = stop.GetAttribute("stop-color")
-        if let style = stop.GetAttribute("style") {
-            for d in css.ParseDeclarations(style) where d.Property == "stop-color" { color = d.Value }
-        }
-        if let c = color, let parsed = css.ParseColor(trim(c)) { return Fill(kind: 2, color: parsed) }
-    }
-    return nil
-}
-
 func collectIds(n: element, ids: inout [string: element]) {
     for c in n.Children {
         if let id = c.GetAttribute("id") { ids[id] = c }
@@ -373,13 +429,21 @@ func walk(n: element, ctx: Context, d: Drawing, ids: [string: element]) {
     for c in n.Children {
         switch c.TagName {
         case "defs", "clippath", "mask", "lineargradient", "radialgradient", "pattern", "symbol", "marker",
-             "title", "desc", "metadata", "style", "script", "filter", "text", "foreignobject":
+             "title", "desc", "metadata", "style", "script", "filter", "foreignobject", "#text":
             continue
+        case "text":
+            if isHidden(c) { continue }
+            walkText(c, ctx.with(c, ids: ids), d, ids)
+        case "use":
+            if isHidden(c) { continue }
+            walkUse(c, ctx, d, ids)
         case "g", "a", "switch":
             if isHidden(c) { continue }
             walk(c, ctx.with(c, ids: ids), d, ids)
         case "svg":
-            walk(c, ctx.with(c, ids: ids), d, ids)
+            var inner = ctx.with(c, ids: ids)
+            inner.matrix = inner.matrix.Times(viewportOf(c, width: lengthAttribute(c.GetAttribute("width")), height: lengthAttribute(c.GetAttribute("height"))))
+            walk(c, inner, d, ids)
         default:
             if isHidden(c) { continue }
             let inner = ctx.with(c, ids: ids)
@@ -391,7 +455,8 @@ func walk(n: element, ctx: Context, d: Drawing, ids: [string: element]) {
             let fill = c.TagName == "line" ? noFill : inner.fill
             d.shapes.append(Shape(ops: ops, coords: coords, matrix: inner.matrix, fill: fill, rule: inner.rule,
                                   opacity: inner.opacity, fillInherited: inner.fillInherited && c.TagName != "line",
-                                  stroke: inner.stroke, strokeStyle: inner.strokeStyle, strokeOpacity: inner.strokeOpacity))
+                                  stroke: inner.stroke, strokeStyle: inner.strokeStyle, strokeOpacity: inner.strokeOpacity,
+                                  clips: inner.clips, masks: inner.masks, clipRule: inner.clipRule))
         }
     }
 }

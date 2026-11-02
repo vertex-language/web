@@ -57,9 +57,9 @@ public enum PaintKind: Equatable {
     /// An <svg>'s shapes, fitted to Rect.
     case vector
     /// What follows, to the matching unlayer, is painted apart, then
-    /// blurred by Blur and put back through Transform: filter: blur()
-    /// and transform. Rect is the box they are on.
-    /// After the blur, a layer is cut to Shape (clip-path), kept as
+    /// run through Filters and put back through Transform: filter and
+    /// transform. Rect is the box they are on.
+    /// After its filters, a layer is cut to Shape (clip-path), kept as
     /// much as Gradient or MaskImage is opaque over MaskRect
     /// (mask-image), and mixed onto what is under it by Blend.
     case layer
@@ -67,7 +67,7 @@ public enum PaintKind: Equatable {
     /// Image (or Gradient, sized to Rect) cut by Slice and drawn round
     /// Rect, Widths in from its sides: border-image.
     case borderImage
-    /// What is painted so far under Rect, blurred by Blur and kept
+    /// What is painted so far under Rect, run through Filters and kept
     /// inside Rect's corners Radii: backdrop-filter.
     case backdrop
     /// Where an element marked data-viewport is painted: what comes after
@@ -84,6 +84,41 @@ public enum PaintKind: Equatable {
     /// Outline, in CSS pixels, filled with Color: a rounded box's dashed,
     /// dotted or double side.
     case path
+}
+
+/// Where a media element has got to, for its controls.
+public struct MediaProgress {
+    public var time: float64
+    public var duration: float64
+    public var paused: bool
+
+    public init(time: float64, duration: float64, paused: bool) {
+        self.time = time
+        self.duration = duration
+        self.paused = paused
+    }
+}
+
+/// Where a media element's controls are: all of an <audio>, the foot of a
+/// <video>. x and y are the box's on the page.
+public func MediaBar(box: layout.Box, x: float32, y: float32) -> draw.Rect {
+    let inner = draw.Rect(x + box.ContentX, y + box.ContentY, box.InnerWidth, box.InnerHeight)
+    if box.Replaced == .audio { return inner }
+    let h = math.Min(inner.Height / 2, 40)
+    return draw.Rect(inner.X, inner.Bottom - h, inner.Width, h)
+}
+
+/// The part of a bar that seeks.
+public func MediaTrack(bar: draw.Rect) -> draw.Rect {
+    let x = bar.X + bar.Height + 44
+    return draw.Rect(x, bar.Y, bar.Right - bar.Height / 2 - x, bar.Height)
+}
+
+/// Seconds as a clock reads them: 0:07, 12:34.
+func clockOf(seconds: float64) -> string {
+    let t = int(seconds)
+    let s = t % 60
+    return "\(t / 60):\(s < 10 ? "0" : "")\(s)"
 }
 
 /// One thing to paint, in CSS pixels on the page: a filled rectangle, a
@@ -115,8 +150,8 @@ public struct PaintItem {
     public var Vector: svg.Drawing?
     public var Fill: draw.Color?
     public var FillNone: bool
-    /// A layer's blur radius, in CSS pixels.
-    public var Blur: float32
+    /// A layer's or a backdrop's filters, lengths in CSS pixels.
+    public var Filters: [draw.Filter] = []
     /// A layer's transform, in the page's CSS pixels.
     public var Transform: draw.Affine = draw.Affine.identity
     /// A layer's clip-path, mask and blend mode. Unbounded layers take
@@ -171,7 +206,6 @@ public struct PaintItem {
         Vector = nil
         Fill = nil
         FillNone = false
-        Blur = 0
     }
 
     static func fill(r: draw.Rect, c: draw.Color, radii: draw.Radii) -> PaintItem {
@@ -269,6 +303,9 @@ public struct State {
     public var FieldSelectionEnd: int = -1
     /// The page's images by URL, for backgrounds; its SVG images.
     public var Images: [string: draw.Image] = [:]
+    /// Each media element's newest frame and where it has got to.
+    public var MediaFrames: [int64: draw.Image] = [:]
+    public var MediaBars: [int64: MediaProgress] = [:]
     public var Vectors: [string: svg.Document] = [:]
     /// The selection, if any, and each text node's place in the document.
     public var SelectionStart: dom.TextPosition? = nil
@@ -307,6 +344,8 @@ public func Build(root: layout.Box, state: State, viewportWidth: float32, viewpo
     b.fieldSelectionStart = state.FieldSelectionStart
     b.fieldSelectionEnd = state.FieldSelectionEnd
     b.images = state.Images
+    b.mediaFrames = state.MediaFrames
+    b.mediaBars = state.MediaBars
     b.bubble = state.Bubble
     b.vectors = state.Vectors
     b.selectionStart = state.SelectionStart
@@ -336,6 +375,8 @@ final class DisplayListBuilder {
     var stacked: [Stacked] = []
     /// The page's images by URL, for backgrounds.
     var images: [string: draw.Image] = [:]
+    var mediaFrames: [int64: draw.Image] = [:]
+    var mediaBars: [int64: MediaProgress] = [:]
     /// The page's SVG images by URL, for masks.
     var vectors: [string: svg.Document] = [:]
     /// The selection, if any, and each text node's place in the document.
@@ -494,18 +535,18 @@ final class DisplayListBuilder {
         // A transform that flattens the box shows nothing of it.
         if transform.Determinant == 0 { opacity = savedOpacity; return }
         if box.FixedToViewport { items.append(PaintItem(.fixed)) }
-        if s.BackdropBlur > 0 {
+        if !s.BackdropFilters.isEmpty {
             var b = PaintItem(.backdrop)
             b.Rect = draw.Rect(x, y, box.Width, box.Height)
             b.Radii = s.HasBorderRadius ? s.Radii(width: box.Width, height: box.Height) : draw.Radii.zero
-            b.Blur = s.BackdropBlur
+            b.Filters = s.BackdropFilters
             items.append(b)
         }
-        let blurred = s.FilterBlur > 0 || !transform.IsIdentity || s.HasCompositing
+        let blurred = !s.Filters.isEmpty || !transform.IsIdentity || s.HasCompositing
         if blurred {
             var layer = PaintItem(.layer)
             layer.Rect = draw.Rect(x, y, box.Width, box.Height)
-            layer.Blur = s.FilterBlur
+            layer.Filters = s.Filters
             layer.Transform = transform
             if s.ClipPath != nil { layer.Shape = layout.ClipRegionOf(box, x: x, y: y) }
             layer.MaskRect = layer.Rect
@@ -659,7 +700,7 @@ final class DisplayListBuilder {
                 if phase == .inlineContent { stacked.append(Stacked(box: child, x: sx, y: sy)) }
                 continue
             }
-            if child.Style.ClipsOverflow || child.Style.Opacity < 1 || child.Style.FilterBlur > 0 || child.Style.HasCompositing {
+            if child.Style.ClipsOverflow || child.Style.Opacity < 1 || !child.Style.Filters.isEmpty || child.Style.HasCompositing {
                 // A clipping or translucent box paints as a whole, in
                 // the phase its background would go in.
                 if phase == .blockBackgrounds { paintBox(child, x: sx, y: sy, skipBackground: skipBackground) }
@@ -1268,7 +1309,7 @@ final class DisplayListBuilder {
                         if sh.Blur > 0 {
                             var layer = PaintItem(.layer)
                             layer.Rect = draw.Rect(x + f.X + sh.X - sh.Blur, y + f.Y + sh.Y - sh.Blur, f.Width + 2 * sh.Blur, f.Height + 2 * sh.Blur)
-                            layer.Blur = sh.Blur / 2
+                            layer.Filters = [.blur(sh.Blur / 2)]
                             items.append(layer)
                         }
                         items.append(.text(x + f.X + sh.X, y + f.Y + f.Ascent + sh.Y, f.Run, color(sh.Color), f.Owner.Style.LetterSpacing))
@@ -1372,6 +1413,42 @@ final class DisplayListBuilder {
     }
 
     /// Paints what a control or image shows inside its box.
+    /// The controls a browser shows: a play or pause button, the time, and
+    /// a track with how far it has got.
+    func paintMediaBar(box: layout.Box, bar: draw.Rect, face: font.Face, accent: draw.Color?) {
+        var progress = MediaProgress(time: 0, duration: 0, paused: true)
+        if let n = box.Node, let p = mediaBars[n.Id] { progress = p }
+        let h = bar.Height
+        items.append(.fill(bar, color(draw.Color(241, 243, 244)), draw.Radii(all: h / 2)))
+        let d = math.Min(h * 0.6, 32)
+        let cx = bar.X + h / 2
+        let cy = bar.Y + h / 2
+        items.append(.fill(draw.Rect(cx - d / 2, cy - d / 2, d, d), color(accent ?? css.SystemAccent), draw.Radii(all: d / 2)))
+        let tri = d * 0.36
+        if progress.paused {
+            // The play triangle, as steps of a narrowing bar.
+            var k: float32 = 0
+            while k < tri {
+                let half = tri / 2 * (1 - k / tri)
+                items.append(.fill(draw.Rect(cx - tri * 0.3 + k, cy - half, 1, half * 2), color(draw.Color.white), draw.Radii.zero))
+                k += 1
+            }
+        } else {
+            items.append(.fill(draw.Rect(cx - tri * 0.5, cy - tri / 2, tri * 0.33, tri), color(draw.Color.white), draw.Radii.zero))
+            items.append(.fill(draw.Rect(cx + tri * 0.17, cy - tri / 2, tri * 0.33, tri), color(draw.Color.white), draw.Radii.zero))
+        }
+        let text = clockOf(progress.time)
+        items.append(.text(bar.X + h + 4, cy + (face.Ascent - face.Descent) / 2, face.Shape(text), color(draw.Color(60, 64, 67)), 0))
+        let track = MediaTrack(bar)
+        if track.Width > 8 {
+            items.append(.fill(draw.Rect(track.X, cy - 2, track.Width, 4), color(draw.Color(0, 0, 0, 60)), draw.Radii(all: 2)))
+            if progress.duration > 0 {
+                let k = float32(math.Min(progress.time / progress.duration, 1))
+                items.append(.fill(draw.Rect(track.X, cy - 2, track.Width * k, 4), color(accent ?? css.SystemAccent), draw.Radii(all: 2)))
+            }
+        }
+    }
+
     func paintReplaced(box: layout.Box, x: float32, y: float32) {
         let s = box.Style
         // appearance: none: a checkbox, radio, range or progress bar draws
@@ -1593,10 +1670,22 @@ final class DisplayListBuilder {
             let dot = draw.Rect(tx + thumb * 0.3, cy - thumb * 0.2, thumb * 0.4, thumb * 0.4)
             items.append(.fill(dot, accent, draw.Radii(all: thumb * 0.2)))
         case .placeholder:
-            // A video without a poster, and an embed of something the
-            // engine can't show, draw nothing, as a browser's do before
-            // loading.
+            // An embed of something the engine can't show draws nothing.
             break
+        case .video:
+            // The newest frame, or the poster; nothing before either.
+            var picture = box.Image
+            if let node = box.Node, let frame = mediaFrames[node.Id] { picture = frame }
+            if let img = picture {
+                let fitted = objectRect(s, inner, float32(img.Width), float32(img.Height))
+                let spills = fitted.X < inner.X || fitted.Y < inner.Y || fitted.Right > inner.Right || fitted.Bottom > inner.Bottom
+                if spills { items.append(.clip(inner)) }
+                items.append(.image(fitted, img, opacity))
+                if spills { items.append(PaintItem.unclip) }
+            }
+            if box.Node?.HasAttribute("controls") ?? false {
+                paintMediaBar(box, MediaBar(box, x: x, y: y), face: face, accent: s.AccentColor)
+            }
         case .frame:
             guard let node = box.Node, let sub = subpages[node.Id] else { break }
             items.append(.clip(inner))
@@ -1630,31 +1719,7 @@ final class DisplayListBuilder {
             items.append(.text(button.Right + 8, ty, face.Shape(box.Text), color(s.Color), 0))
             items.append(PaintItem.unclip)
         case .audio:
-            // The controls a browser shows, at rest: a play button, a
-            // track, and the time.
-            let bar = inner
-            let h = bar.Height
-            items.append(.fill(bar, color(draw.Color(241, 243, 244)), draw.Radii(all: h / 2)))
-            let d = math.Min(h * 0.6, 32)
-            let cx = bar.X + h / 2
-            let cy = bar.Y + h / 2
-            items.append(.fill(draw.Rect(cx - d / 2, cy - d / 2, d, d), color(s.AccentColor ?? css.SystemAccent), draw.Radii(all: d / 2)))
-            // The play triangle, as steps of a narrowing bar.
-            let tri = d * 0.36
-            var k: float32 = 0
-            while k < tri {
-                let half = tri / 2 * (1 - k / tri)
-                items.append(.fill(draw.Rect(cx - tri * 0.3 + k, cy - half, 1, half * 2), color(draw.Color.white), draw.Radii.zero))
-                k += 1
-            }
-            let label = face.Shape("0:00")
-            let tx = bar.X + h + 4
-            items.append(.text(tx, cy + (face.Ascent - face.Descent) / 2, label, color(draw.Color(60, 64, 67)), 0))
-            let trackX = tx + face.Measure("0:00") + 10
-            let trackW = bar.Right - h / 2 - trackX
-            if trackW > 8 {
-                items.append(.fill(draw.Rect(trackX, cy - 2, trackW, 4), color(draw.Color(0, 0, 0, 60)), draw.Radii(all: 2)))
-            }
+            paintMediaBar(box, inner, face: face, accent: s.AccentColor)
         case .svg:
             guard let v = box.Vector, !v.IsEmpty else { break }
             let st = box.Style
@@ -1714,7 +1779,6 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
     }
     var layers: [draw.Layer?] = []
     var layerCanvases: [draw.Canvas] = []
-    var layerBlurs: [float32] = []
     var layerTransforms: [draw.Affine] = []
     var layerItems: [PaintItem] = []
     func inflate(r: draw.IRect, by: float32) -> draw.IRect {
@@ -1829,7 +1893,8 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
         case .layer:
             // The box and as far as its blur reaches, within reach of
             // what shows.
-            let reach = item.Blur * scale * 3
+            var reach: float32 = 0
+            for f in item.Filters { reach += f.Reach * scale }
             var shows = canvas.Clip
             var bounds = item.Unbounded ? shows : inflate(device(item.Rect), reach)
             // CSS pixels to the canvas's, where the layer is: what its
@@ -1857,7 +1922,6 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
             let layer = draw.Layer(area)
             layers.append(layer)
             layerCanvases.append(canvas)
-            layerBlurs.append(item.Blur * scale)
             layerTransforms.append(t)
             layerItems.append(item)
             canvas = layer.Canvas
@@ -1866,11 +1930,10 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
             let made = layers.popLast() ?? nil
             canvas = parent
             if let layer = made {
-                let sigma = layerBlurs.popLast() ?? 0
                 let t = layerTransforms.popLast() ?? draw.Affine.identity
-                layer.Blur(sigma)
                 var blend = draw.BlendMode.normal
                 if let effects = layerItems.popLast() {
+                    layer.Apply(effects.Filters.map { $0.Scaled(scale) })
                     applyClipAndMask(layer, effects, scale: scale, dx: dx, dy: dy)
                     blend = effects.Blend
                 }
@@ -1917,14 +1980,16 @@ public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, 
             }
         case .backdrop:
             let box = device(item.Rect)
-            let sigma = item.Blur * scale
+            let filters = item.Filters.map { $0.Scaled(scale) }
+            var reach: float32 = 0
+            for f in filters { reach += f.Reach }
             // What shows under the box, and as far round it as the blur
             // reaches, so its edges blur with what is beside them.
-            let area = inflate(box, sigma * 3).Intersect(canvas.Clip)
+            let area = inflate(box, reach).Intersect(canvas.Clip)
             if area.IsEmpty || box.Intersect(canvas.Clip).IsEmpty { continue }
             let under = draw.Layer(area)
             under.CopyFrom(canvas)
-            under.Blur(sigma)
+            under.Apply(filters)
             under.MaskRounded(box, radii: item.Radii.Scaled(scale))
             under.Composite(onto: canvas, transform: draw.Affine.identity)
             under.Free()
@@ -2103,7 +2168,7 @@ public func SelectedPart(f: layout.Fragment, node: html.Node, range: (start: dom
 /// with the code.
 public func ReadsAttribute(name: string) -> bool {
     switch name {
-    case "alt", "max", "min", "step", "placeholder", "value", "checked", "data-viewport":
+    case "controls", "alt", "max", "min", "step", "placeholder", "value", "checked", "data-viewport":
         return true
     default:
         return false

@@ -15,6 +15,8 @@ final class element {
     let TagName: string
     var attributes: [string: string] = [:]
     var Children: [element] = []
+    /// A "#text" child's characters.
+    var Text: string = ""
 
     init(name: string) {
         TagName = name
@@ -29,8 +31,14 @@ final class element {
 func fromHTML(n: html.Node) -> element {
     let e = element(n.TagName)
     for a in n.Attributes { e.attributes[a.Name] = a.Value }
-    for c in n.Children where c.Kind == html.NodeKind.element {
-        e.Children.append(fromHTML(c))
+    for c in n.Children {
+        if c.Kind == html.NodeKind.element {
+            e.Children.append(fromHTML(c))
+        } else if c.Kind == html.NodeKind.text {
+            let t = element("#text")
+            t.Text = c.Text
+            e.Children.append(t)
+        }
     }
     return e
 }
@@ -50,6 +58,17 @@ func fromXML(x: xml.Element) -> element {
             e.attributes["xlink:\(a.Name.Local.lowercased())"] = a.Value
         }
     }
-    for c in x.Elements { e.Children.append(fromXML(c)) }
+    for c in x.Children {
+        switch c {
+        case .element(let child):
+            e.Children.append(fromXML(child))
+        case .text(let text):
+            let t = element("#text")
+            t.Text = text
+            e.Children.append(t)
+        default:
+            break
+        }
+    }
     return e
 }
