@@ -344,48 +344,109 @@ public final class BoxTreeBuilder {
             return
         }
         var listIndex = 0
-        for child in node.Children {
-            switch child.Kind {
-            case .text:
-                if child.Text.isEmpty { continue }
-                let t = Box(kind: .text, style: parentStyle, node: child)
-                t.Text = child.Text
-                textCount += 1
-                textOrder[child.Id] = textCount
-                out.append(t)
-            case .element:
-                let style = resolver.Resolve(child, parent: parentStyle, context: context)
-                if style.Display == .none { continue }
-                applyCounters(child, style)
-                if style.Display == .contents {
-                    enterCounters()
-                    appendChildBoxes(of: child, parentStyle: style, into: &out)
-                    leaveCounters()
-                    continue
+        for child in node.Children { appendNode(child, of: node, parentStyle: parentStyle, listIndex: &listIndex, into: &out) }
+    }
+
+    /// The boxes for one of a node's children, as appendChildBoxes makes them.
+    func appendNode(child: html.Node, of node: html.Node, parentStyle: cascade.ComputedStyle, listIndex: inout int, into out: inout [Box]) {
+        switch child.Kind {
+        case .text:
+            if child.Text.isEmpty { return }
+            let t = Box(kind: .text, style: parentStyle, node: child)
+            t.Text = child.Text
+            textCount += 1
+            textOrder[child.Id] = textCount
+            out.append(t)
+        case .element:
+            let style = resolver.Resolve(child, parent: parentStyle, context: context)
+            if style.Display == .none { return }
+            applyCounters(child, style)
+            if style.Display == .contents {
+                enterCounters()
+                appendChildBoxes(of: child, parentStyle: style, into: &out)
+                leaveCounters()
+                return
+            }
+            // Where text turns vertical is where the turn starts. A root
+            // that says so hands it to what's in it.
+            let starts = style.IsVertical && (!parentStyle.IsVertical || node.TagName == "html")
+            if style.IsVertical && !starts { style.SwapAxesForVertical() }
+            // Horizontal again inside vertical: it turns back.
+            let turnsBack = !style.IsVertical && parentStyle.IsVertical && node.TagName != "html"
+            if turnsBack { style.SwapAxesForVertical() }
+            if child.TagName == "ruby" && style.Display == .inline {
+                appendRuby(child, style: style, listIndex: &listIndex, into: &out)
+                return
+            }
+            if let box = makeBox(child, style: style, parentStyle: parentStyle, listIndex: &listIndex) {
+                resolveURLEffects(box, style, in: child)
+                if turnsBack {
+                    turnVertical(box)
+                    box.VerticalContent?.QuarterTurn = -1
+                } else if starts { turnVertical(box) } else if box.Kind == .replaced && style.AxesSwapped {
+                    let w = box.IntrinsicWidth
+                    box.IntrinsicWidth = box.IntrinsicHeight
+                    box.IntrinsicHeight = w
                 }
-                // Where text turns vertical is where the turn starts. A root
-                // that says so hands it to what's in it.
-                let starts = style.IsVertical && (!parentStyle.IsVertical || node.TagName == "html")
-                if style.IsVertical && !starts { style.SwapAxesForVertical() }
-                // Horizontal again inside vertical: it turns back.
-                let turnsBack = !style.IsVertical && parentStyle.IsVertical && node.TagName != "html"
-                if turnsBack { style.SwapAxesForVertical() }
-                if let box = makeBox(child, style: style, parentStyle: parentStyle, listIndex: &listIndex) {
-                    resolveURLEffects(box, style, in: child)
-                    if turnsBack {
-                        turnVertical(box)
-                        box.VerticalContent?.QuarterTurn = -1
-                    } else if starts { turnVertical(box) } else if box.Kind == .replaced && style.AxesSwapped {
-                        let w = box.IntrinsicWidth
-                        box.IntrinsicWidth = box.IntrinsicHeight
-                        box.IntrinsicHeight = w
-                    }
-                    out.append(box)
+                out.append(box)
+            }
+        default:
+            return
+        }
+    }
+
+    /// A <ruby>: an inline box of its own, holding for each base and its <rt>
+    /// an inline-block, the annotation on top and the base under it, each
+    /// centred over the other. The base's line is its last, and so the
+    /// line's baseline is the base's. <rp> shows nothing (the sheet says so);
+    /// a base with no annotation goes inline as it is.
+    func appendRuby(ruby: html.Node, style: cascade.ComputedStyle, listIndex: inout int, into out: inout [Box]) {
+        let box = Box(kind: .inline, style: style, node: ruby)
+        byNode[ruby.Id] = box
+        var base: [html.Node] = []
+        func pair(rt: html.Node?) {
+            if rt == nil {
+                var loose: [Box] = []
+                for n in base { appendNode(n, of: ruby, parentStyle: style, listIndex: &listIndex, into: &loose) }
+                for b in loose { box.AppendChild(b) }
+                base = []
+                return
+            }
+            let outerStyle = cascade.ComputedStyle(inheriting: style)
+            outerStyle.Display = .inlineBlock
+            outerStyle.TextAlign = .center
+            let outer = Box(kind: .inlineBlock, style: outerStyle, node: nil)
+            outer.IsAnonymous = true
+            if let r = rt {
+                let rtStyle = resolver.Resolve(r, parent: outerStyle, context: context)
+                if rtStyle.Display != .none {
+                    rtStyle.Display = .block
+                    if let rtBox = makeBox(r, style: rtStyle, parentStyle: outerStyle, listIndex: &listIndex) { outer.AppendChild(rtBox) }
                 }
-            default:
+            }
+            let baseStyle = cascade.ComputedStyle(inheriting: outerStyle)
+            baseStyle.Display = .block
+            let under = Box(kind: .block, style: baseStyle, node: nil)
+            under.IsAnonymous = true
+            under.IsRubyBase = true
+            var made: [Box] = []
+            for n in base { appendNode(n, of: ruby, parentStyle: baseStyle, listIndex: &listIndex, into: &made) }
+            place(made, into: under)
+            outer.AppendChild(under)
+            box.AppendChild(outer)
+            base = []
+        }
+        for c in ruby.Children {
+            if c.Kind == html.NodeKind.element && c.TagName == "rt" {
+                pair(rt: c)
+            } else if c.Kind == html.NodeKind.element && c.TagName == "rp" {
                 continue
+            } else {
+                base.append(c)
             }
         }
+        pair(rt: nil)
+        out.append(box)
     }
 
     /// The box for an element, with its children's boxes under it.

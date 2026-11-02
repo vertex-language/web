@@ -67,6 +67,8 @@ img, video, iframe, embed, object, svg, audio { display: inline-block; }
 audio:not([controls]) { display: none; }
 iframe { border: 2px inset #767676; }
 dialog:not([open]) { display: none; }
+rp { display: none; }
+rt { font-size: 50%; line-height: 1; text-emphasis: none; }
 dialog { position: absolute; left: 0; right: 0; width: fit-content; height: fit-content; margin: auto; border: 2px solid; padding: 1em; background-color: Canvas; color: CanvasText; }
 dialog:modal { position: fixed; top: 0; bottom: 0; max-width: calc(100% - 6px - 2em); max-height: calc(100% - 6px - 2em); overflow: auto; z-index: 2147480000; }
 [popover]:not(:popover-open):not(dialog[open]) { display: none; }

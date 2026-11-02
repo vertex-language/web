@@ -29,11 +29,19 @@ var hitDepth: float32? = nil
 /// A box's rectangle on the page as it shows: through the turns of any
 /// vertical text it's in, whose layout it's in unturned.
 public func VisualBounds(box: Box) -> draw.Rect {
-    let p = PagePosition(box)
+    var p = PagePosition(box)
+    var w = box.Width
+    var h = box.Height
+    // An inline element is where its pieces on its lines are, together.
+    if box.Kind == .inline, let r = inlineExtent(box) {
+        p = (x: r.X, y: r.Y)
+        w = r.Width
+        h = r.Height
+    }
     var x0 = p.x
     var y0 = p.y
-    var x1 = p.x + box.Width
-    var y1 = p.y + box.Height
+    var x1 = p.x + w
+    var y1 = p.y + h
     var turned = false
     var cur = box.Parent
     while let a = cur {
@@ -50,8 +58,25 @@ public func VisualBounds(box: Box) -> draw.Rect {
         }
         cur = a.Parent
     }
-    if !turned { return draw.Rect(p.x, p.y, box.Width, box.Height) }
+    if !turned { return draw.Rect(p.x, p.y, w, h) }
     return draw.Rect(x0, y0, x1 - x0, y1 - y0)
+}
+
+/// The rectangle round an inline element's spans on the lines of the block
+/// that holds them, on the page; nil where it has none.
+func inlineExtent(box: Box) -> draw.Rect? {
+    var owner = box.Parent
+    while let o = owner, o.Lines.isEmpty { owner = o.Parent }
+    guard let o = owner else { return nil }
+    let at = PagePosition(o)
+    var out: draw.Rect? = nil
+    for line in o.Lines {
+        for sp in line.Spans where sp.Box === box {
+            let r = draw.Rect(at.x + sp.X, at.y + sp.Y, sp.Width, sp.Height)
+            out = out == nil ? r : out!.Union(r)
+        }
+    }
+    return out
 }
 
 /// What transform-box says a box's transforms are about: nil for its border

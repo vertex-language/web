@@ -169,6 +169,11 @@ public final class ComputedStyle {
     public var TextEmphasisMark: string = ""
     public var TextEmphasisColor: draw.Color? = nil
     public var TextEmphasisUnder: bool = false
+    /// text-emphasis-position as written, for vertical text's left and
+    /// right; whether text-emphasis-style named a shape (vertical text's
+    /// default is sesame, not a circle).
+    public var TextEmphasisPosition: string = "over right"
+    public var TextEmphasisShaped: bool = false
     /// overflow-anchor: none: the box isn't what a scroll keeps its place by.
     public var NoScrollAnchor: bool = false
     /// perspective, in CSS pixels (0 for none), and where the viewer is
@@ -474,6 +479,8 @@ public final class ComputedStyle {
         TextEmphasisMark = parent.TextEmphasisMark
         TextEmphasisColor = parent.TextEmphasisColor
         TextEmphasisUnder = parent.TextEmphasisUnder
+        TextEmphasisPosition = parent.TextEmphasisPosition
+        TextEmphasisShaped = parent.TextEmphasisShaped
         TextOrientation = parent.TextOrientation
         TextCombineUpright = parent.TextCombineUpright
         ListStylePosition = parent.ListStylePosition

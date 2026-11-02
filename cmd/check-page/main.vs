@@ -1844,6 +1844,41 @@ func testCompositing() {
     check(vfmGlyphs.count == 5 && vfmGlyphs[0] != vfmFace.Shape("「").Glyphs[0] && vfmGlyphs[3] == vfmFace.Shape("A").Glyphs[0],
           "vertical text takes a bracket's vertical form, and Latin its own (got \(vfmGlyphs), horizontal 「 \(vfmFace.Shape("「").Glyphs))")
 
+    // Ruby: the annotation over its base, centred; <rp> shows nothing.
+    let rb = web.Page()
+    rb.SetViewportSize(draw.Size(300, 200))
+    rb.LoadHTML("<style>body { margin: 0; font-size: 20px }</style><p style='margin: 0'>x<ruby><span id=b>漢字</span><rp id=rp>(</rp><rt id=r>かんじ</rt><rp>)</rp></ruby>y</p>")
+    let rbBase = rb.BoundsOf(rb.QuerySelector("#b")!)!
+    let rbText = rb.BoundsOf(rb.QuerySelector("#r")!)!
+    check(rbText.Y + rbText.Height <= rbBase.Y + 1 && abs(rbText.X + rbText.Width / 2 - rbBase.X - rbBase.Width / 2) < 1 && rbText.Height < rbBase.Height,
+          "ruby puts its annotation over its base, centred and smaller (rt \(rbText), base \(rbBase))")
+    check(rb.BoxFor(rb.QuerySelector("#rp")!) == nil, "and <rp> shows nothing")
+
+    // text-emphasis in vertical text: right or left of the line.
+    func markSide(position: string) -> float32 {
+        let em = web.Page()
+        em.SetViewportSize(draw.Size(100, 100))
+        em.LoadHTML("<style>body { margin: 0; background: white } p { writing-mode: vertical-rl; height: 90px; margin: 0 0 0 30px; font-size: 30px; line-height: 60px; text-emphasis: filled; text-emphasis-position: \(position) }</style><p>一</p>")
+        var px = [uint8](repeating: 0, count: 100 * 100 * 4)
+        em.Draw(into: &px, width: 100, height: 100, scale: 1)
+        var sum: float32 = 0
+        var n: float32 = 0
+        var yy: int32 = 0
+        while yy < 100 {
+            var xx: int32 = 0
+            while xx < 100 {
+                let c = pixelAt(px, 100, xx, yy)
+                if c.R < 100 { sum += float32(xx); n += 1 }
+                xx += 1
+            }
+            yy += 1
+        }
+        return n > 0 ? sum / n : -1
+    }
+    let markRight = markSide("over right")
+    let markLeft = markSide("over left")
+    check(markRight > markLeft + 3, "text-emphasis in vertical text goes right or left as it says (ink centre \(markRight) and \(markLeft))")
+
     // shape-outside: url(): text wraps round the image's opaque part.
     let so = web.Page()
     so.SetViewportSize(draw.Size(300, 200))
@@ -2331,6 +2366,7 @@ func testCompositing() {
     <style>body { margin: 0; background: white } select { display: block; width: 100px; height: 24px } input { display: block; width: 120px; height: 24px; margin-top: 4px }</style>
     <select id=s><option>One</option><option disabled>Two</option><option>Three</option></select>
     <input id=d type=date value="2026-02-10"><input id=c type=color value="#000000"><input id=t type=time><input id=m type=month value="2026-03"><input id=w type=week>
+    <input id=ts type=time step=900 min=08:00 max=09:00>
     """)
     guard let pSel = pk.QuerySelector("#s"), let pDate = pk.QuerySelector("#d"), let pColor = pk.QuerySelector("#c"), let pTime = pk.QuerySelector("#t"), let pMonth = pk.QuerySelector("#m"), let pWeek = pk.QuerySelector("#w"), let pkDoc = pk.Document else { return }
     var changes = 0
@@ -2376,15 +2412,30 @@ func testCompositing() {
     check(pk.ValueOf(pDate) == "2026-03-01", "its arrow goes to the next month, whose first is a Sunday (got \(pk.ValueOf(pDate)))")
     clickOn(pColor)
     let cBox = pk.BoundsOf(pColor)!
-    clickAt(cBox.X + 8 * 24 - 12, cBox.Y + cBox.Height + 2 + 5 * 24 + 12)
-    check(pk.ValueOf(pColor) == "#000000", "a palette's darkest gray is black (got \(pk.ValueOf(pColor)))")
+    let cTop = cBox.Y + cBox.Height + 2
+    clickAt(cBox.X + 11 * 20 + 10, cTop + 7 * 20 + 10)
+    check(pk.ValueOf(pColor) == "#000000", "a color panel's bottom row is black (got \(pk.ValueOf(pColor)))")
     clickOn(pColor)
-    clickAt(cBox.X + 12, cBox.Y + cBox.Height + 2 + 2 * 24 + 12)
-    check(pk.ValueOf(pColor) != "#000000" && pk.ValueOf(pColor).hasPrefix("#"), "and a swatch sets a color (got \(pk.ValueOf(pColor)))")
+    // The hue strip's ninth of 24 is 120 degrees: green; the grid's top right
+    // is that hue at its fullest.
+    clickAt(cBox.X + 8 * 10 + 5, cTop + 8 * 20 + 10)
+    clickAt(cBox.X + 11 * 20 + 10, cTop + 10)
+    check(pk.ValueOf(pColor) == "#00ff00", "a hue, then any of its colors (got \(pk.ValueOf(pColor)))")
+    clickOn(pColor)
+    clickAt(cBox.X + 10, cTop + 10)
+    check(pk.ValueOf(pColor) == "#ffffff", "white at the top left (got \(pk.ValueOf(pColor)))")
     clickOn(pTime)
     _ = pk.Handle(.keyDown(web.Key(Key: "ArrowDown", Code: "ArrowDown")))
     _ = pk.Handle(.keyDown(web.Key(Key: "Enter", Code: "Enter")))
     check(pk.ValueOf(pTime) == "09:30", "a list of times (got \(pk.ValueOf(pTime)))")
+    clickOn(pk.QuerySelector("#ts")!)
+    let quarter = pk.PressPanelCell(text: "08:45")
+    clickOn(pk.QuerySelector("#ts")!)
+    let past = pk.PressPanelCell(text: "09:15")
+    _ = pk.Handle(.keyDown(web.Key(Key: "Escape", Code: "Escape")))
+    clickOn(pk.QuerySelector("#ts")!)
+    let between = pk.PressPanelCell(text: "08:30")
+    check(quarter && !past && between && pk.ValueOf(pk.QuerySelector("#ts")!) == "08:30", "a time list goes by its step, from its min to its max (got \(quarter) \(past) \(between) \(pk.ValueOf(pk.QuerySelector("#ts")!)))")
     clickOn(pMonth)
     pk.PressPanelCell(text: "Apr")
     check(pk.ValueOf(pMonth) == "2026-04", "a month's grid (got \(pk.ValueOf(pMonth)))")

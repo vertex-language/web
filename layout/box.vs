@@ -72,6 +72,9 @@ public final class Box {
     /// A box layout made with no element of its own: a block wrapping
     /// inline content beside blocks, or a list marker.
     public var IsAnonymous: bool = false
+    /// A ruby base's box: its annotation is the box above it, in the same
+    /// inline-block.
+    public var IsRubyBase: bool = false
 
     public var X: float32 = 0
     public var Y: float32 = 0

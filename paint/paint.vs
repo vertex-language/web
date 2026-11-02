@@ -1864,16 +1864,37 @@ final class DisplayListBuilder {
                 // text-emphasis: a mark over each character, half its size.
                 if f.Kind == .text && !f.Owner.Style.TextEmphasisMark.isEmpty {
                     let st = f.Owner.Style
+                    // In vertical text the marks go right or left, which the
+                    // turn makes over or under; they stand upright, sesame
+                    // dots unless a shape is named.
+                    let vertical = st.IsVertical
+                    var under = st.TextEmphasisUnder
+                    if vertical {
+                        let left = st.TextEmphasisPosition.contains("left")
+                        under = st.WritingMode == "sideways-lr" ? !left : left
+                    }
+                    var markText = st.TextEmphasisMark
+                    if vertical && !st.TextEmphasisShaped { markText = markText == "\u{25CB}" ? "\u{FE46}" : "\u{FE45}" }
                     let markFace = font.Load(font.Spec(families: st.FontFamilies, size: st.FontSize / 2, weight: 400))
-                    let mark = markFace.Shape(st.TextEmphasisMark)
+                    let mark = markFace.Shape(markText)
                     let baseline = y + f.Y + f.Ascent
-                    let my = st.TextEmphasisUnder ? baseline + st.Face.Descent + markFace.Ascent : baseline - st.Face.Ascent - markFace.Descent
+                    var my = under ? baseline + st.Face.Descent + markFace.Ascent : baseline - st.Face.Ascent - markFace.Descent
+                    // Over a ruby base, the marks go past its annotation.
+                    if !under, let base = f.Box.Parent, base.IsRubyBase, let above = base.Parent?.Children.first, above !== base {
+                        my -= above.Height
+                    }
                     var pen = x + f.X
                     var gi = 0
                     while gi < f.Run.Glyphs.count {
                         let adv = f.Run.Advances[gi]
                         if f.Run.Glyphs[gi] != 0 {
-                            items.append(.text(pen + (adv - mark.Width) / 2, my, mark, color(st.TextEmphasisColor ?? st.Color), 0))
+                            var item = PaintItem.text(pen + (adv - mark.Width) / 2, my, mark, color(st.TextEmphasisColor ?? st.Color), 0)
+                            if vertical {
+                                item.Upright = true
+                                item.TileWidth = mark.Width
+                                item.TileHeight = (markFace.Ascent - markFace.Descent) / 2
+                            }
+                            items.append(item)
                         }
                         pen += adv + st.LetterSpacing
                         gi += 1

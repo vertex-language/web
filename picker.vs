@@ -37,6 +37,9 @@ final class Picker {
     var cells: [paint.PanelCell] = []
     var actions: [(() -> Void)?] = []
     var frame: draw.Rect = draw.Rect.zero
+    /// A time list's times; a color panel's hue, in degrees.
+    var times: [string] = []
+    var hue: float32 = 0
 
     init(node: html.Node, kind: PickerKind) {
         self.node = node
@@ -346,16 +349,47 @@ extension Page {
             p.year = today.year
             p.month = today.month
         }
-        if kind == .times { p.highlight = 18 }
-        if kind == .times, let h = int(valueOf(node).prefix(2)) { p.highlight = h * 2 }
-        if kind == .times { p.first = p.highlight > 4 ? p.highlight - 4 : 0 }
+        if kind == .times {
+            // At its value, or nine in the morning, or the nearest after.
+            p.times = timeList(node)
+            let current = valueOf(node).isEmpty ? "09:00" : string(valueOf(node).prefix(5))
+            p.highlight = 0
+            while p.highlight + 1 < p.times.count && p.times[p.highlight] < current { p.highlight += 1 }
+            p.first = p.highlight > 4 ? p.highlight - 4 : 0
+        }
         picker = p
         layoutPicker()
     }
 
     func openColorPanel(node: html.Node) {
-        picker = Picker(node: node, kind: .colors)
+        let p = Picker(node: node, kind: .colors)
+        if let c = css.ParseColor(valueOf(node)) { p.hue = hueOf(c) }
+        picker = p
         layoutPicker()
+    }
+
+    /// The times a time field's list offers: from its min (or midnight) by
+    /// its step, to its max. Half hours where no step says otherwise, and
+    /// no finer than a minute.
+    func timeList(node: html.Node) -> [string] {
+        func minutes(s: string?) -> int? {
+            guard let s = s, s.count >= 5, let h = int(s.prefix(2)), let m = int(s.dropFirst(3).prefix(2)) else { return nil }
+            return h * 60 + m
+        }
+        var step = 30
+        if let given = node.GetAttribute("step"), let seconds = double(given), seconds > 0 {
+            step = int(seconds / 60)
+            if step < 1 { step = 1 }
+        }
+        let low = minutes(node.GetAttribute("min")) ?? 0
+        let high = minutes(node.GetAttribute("max")) ?? 1439
+        var out: [string] = []
+        var t = low
+        while t <= high && t < 1440 {
+            out.append("\(twoDigits(t / 60)):\(twoDigits(t % 60))")
+            t += step
+        }
+        return out
     }
 
     // MARK: - Laying out
@@ -419,8 +453,8 @@ extension Page {
             var row = 0
             while row < shown {
                 let i = row + p.first
-                if i >= 48 { break }
-                let text = "\(twoDigits(i / 2)):\(i % 2 == 0 ? "00" : "30")"
+                if i >= p.times.count { break }
+                let text = p.times[i]
                 let lit = i == p.highlight
                 add(draw.Rect(0, float32(row) * panelRow, w, panelRow), text, fill: lit ? accent : nil, color: lit ? draw.Color.white : draw.Color(30, 30, 30),
                     action: { self.pickValue(p, text) })
@@ -466,21 +500,33 @@ extension Page {
                 day += 1
             }
         case .colors:
-            let side: float32 = 24
-            let hues = 8
-            let shades = 6
-            w = float32(hues) * side
-            h = float32(shades) * side
+            // The hue's colors, saturation across and brightness down, white
+            // at the top left and black along the bottom; under them every
+            // hue, which shows that hue's.
+            let side: float32 = 20
+            let cols = 12
+            let rowsHere = 8
+            let hueCells = 24
+            w = float32(cols) * side
+            h = float32(rowsHere) * side + side
             var row = 0
-            while row < shades {
+            while row < rowsHere {
                 var col = 0
-                while col < hues {
-                    let c = paletteColor(col, row, hues: hues, shades: shades)
+                while col < cols {
+                    let c = hsvColor(p.hue, float32(col) / float32(cols - 1), 1 - float32(row) / float32(rowsHere - 1))
                     let hex = "#\(hexByte(c.R))\(hexByte(c.G))\(hexByte(c.B))"
                     add(draw.Rect(float32(col) * side, float32(row) * side, side, side), "", fill: c, action: { self.pickValue(p, hex) })
                     col += 1
                 }
                 row += 1
+            }
+            let hueWidth = w / float32(hueCells)
+            var k = 0
+            while k < hueCells {
+                let hue = float32(k) * 360 / float32(hueCells)
+                add(draw.Rect(float32(k) * hueWidth, float32(rowsHere) * side, hueWidth, side), "", fill: hsvColor(hue, 1, 1),
+                    action: { p.hue = hue; self.layoutPicker() })
+                k += 1
             }
         }
         // Under the control, or over it, and kept on the page's view.
@@ -568,7 +614,7 @@ extension Page {
 
     func pickerWheel(dy: float32) {
         guard let k = picker, k.kind == .options || k.kind == .times else { return }
-        let total = k.kind == .times ? 48 : dom.Descendants(k.node, tag: "option").count
+        let total = k.kind == .times ? k.times.count : dom.Descendants(k.node, tag: "option").count
         let most = total > panelMaxRows ? total - panelMaxRows : 0
         let step = dy > 0 ? 1 : -1
         let next = k.first + step
@@ -622,7 +668,7 @@ extension Page {
         }
         if p.kind != .options && p.kind != .times { return true }
         let options = p.kind == .options ? dom.Descendants(p.node, tag: "option") : []
-        let total = p.kind == .times ? 48 : options.count
+        let total = p.kind == .times ? p.times.count : options.count
         switch k.Code {
         case "ArrowDown": if p.highlight + 1 < total { p.highlight += 1 }
         case "ArrowUp": if p.highlight > 0 { p.highlight -= 1 }
@@ -633,8 +679,8 @@ extension Page {
                 if p.highlight >= 0 && p.highlight < options.count && !options[p.highlight].HasAttribute("disabled") {
                     pickOption(p, options[p.highlight])
                 }
-            } else {
-                pickValue(p, "\(twoDigits(p.highlight / 2)):\(p.highlight % 2 == 0 ? "00" : "30")")
+            } else if p.highlight >= 0 && p.highlight < p.times.count {
+                pickValue(p, p.times[p.highlight])
             }
             return true
         default:
@@ -656,31 +702,47 @@ func hexByte(v: uint8) -> string {
     return string(decoding: [digits[int(v >> 4)], digits[int(v & 15)]], as: UTF8.self)
 }
 
-/// A palette: hues across, light to dark down, with grays in the last column.
-func paletteColor(col: int, row: int, hues: int, shades: int) -> draw.Color {
-    let t = float32(row) / float32(shades - 1)
-    if col == hues - 1 {
-        let v = uint8((1 - t) * 255)
-        return draw.Color(v, v, v)
-    }
-    let h = float32(col) / float32(hues - 1) * 6
+/// A color by its hue (degrees), saturation and value, each 0 to 1.
+func hsvColor(hue: float32, s: float32, v: float32) -> draw.Color {
+    var h = hue / 60
+    while h >= 6 { h -= 6 }
+    while h < 0 { h += 6 }
     let i = int(h)
     let f = h - float32(i)
-    var r: float32 = 0
-    var g: float32 = 0
-    var b: float32 = 0
+    let p = v * (1 - s)
+    let q = v * (1 - s * f)
+    let t = v * (1 - s * (1 - f))
+    var r = v
+    var g = t
+    var b = p
     switch i % 6 {
-    case 0: r = 1; g = f
-    case 1: r = 1 - f; g = 1
-    case 2: g = 1; b = f
-    case 3: g = 1 - f; b = 1
-    case 4: r = f; b = 1
-    default: r = 1; b = 1 - f
+    case 0: r = v; g = t; b = p
+    case 1: r = q; g = v; b = p
+    case 2: r = p; g = v; b = t
+    case 3: r = p; g = q; b = v
+    case 4: r = t; g = p; b = v
+    default: r = v; g = p; b = q
     }
-    // Pale at the top, full in the middle, dark below.
-    func shade(c: float32) -> uint8 {
-        let v = t < 0.5 ? c + (1 - c) * (1 - t * 2) * 0.8 : c * (1 - (t - 0.5) * 1.4)
-        return uint8(v * 255)
+    return draw.Color(uint8(r * 255 + 0.5), uint8(g * 255 + 0.5), uint8(b * 255 + 0.5))
+}
+
+/// A color's hue in degrees; 0 for a gray.
+func hueOf(c: draw.Color) -> float32 {
+    let r = float32(c.R) / 255
+    let g = float32(c.G) / 255
+    let b = float32(c.B) / 255
+    let most = r > g ? (r > b ? r : b) : (g > b ? g : b)
+    let least = r < g ? (r < b ? r : b) : (g < b ? g : b)
+    let d = most - least
+    if d <= 0 { return 0 }
+    var h: float32 = 0
+    if most == r {
+        h = (g - b) / d
+    } else if most == g {
+        h = (b - r) / d + 2
+    } else {
+        h = (r - g) / d + 4
     }
-    return draw.Color(shade(r), shade(g), shade(b))
+    h *= 60
+    return h < 0 ? h + 360 : h
 }

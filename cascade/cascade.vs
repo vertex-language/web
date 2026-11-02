@@ -1588,12 +1588,18 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
     case .textEmphasisStyle:
         if case .string(let mark) = v {
             s.TextEmphasisMark = mark
+            s.TextEmphasisShaped = true
         } else {
-            s.TextEmphasisMark = emphasisMark(keywordOf(v) ?? "none")
+            let words = keywordOf(v) ?? "none"
+            s.TextEmphasisMark = emphasisMark(words)
+            s.TextEmphasisShaped = false
+            for shape in ["dot", "circle", "double-circle", "triangle", "sesame"] where words.contains(shape) { s.TextEmphasisShaped = true }
         }
     case .textEmphasisColor:
         if case .currentColor = v { s.TextEmphasisColor = nil } else { s.TextEmphasisColor = colorOf(v) }
-    case .textEmphasisPosition: s.TextEmphasisUnder = (keywordOf(v) ?? "").contains("under")
+    case .textEmphasisPosition:
+        s.TextEmphasisPosition = keywordOf(v) ?? "over right"
+        s.TextEmphasisUnder = s.TextEmphasisPosition.contains("under")
     case .anchorName: s.AnchorNames = (keywordOf(v) ?? "").split(separator: " ").map { string($0) }.filter { $0 != "none" }
     case .positionAnchor:
         let k = keywordOf(v) ?? ""
@@ -2638,9 +2644,13 @@ func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .textRendering: b.TextRendering = a.TextRendering
     case .textJustify: b.TextJustify = a.TextJustify
     case .hangingPunctuation: b.HangingPunctuation = a.HangingPunctuation
-    case .textEmphasisStyle: b.TextEmphasisMark = a.TextEmphasisMark
+    case .textEmphasisStyle:
+        b.TextEmphasisMark = a.TextEmphasisMark
+        b.TextEmphasisShaped = a.TextEmphasisShaped
     case .textEmphasisColor: b.TextEmphasisColor = a.TextEmphasisColor
-    case .textEmphasisPosition: b.TextEmphasisUnder = a.TextEmphasisUnder
+    case .textEmphasisPosition:
+        b.TextEmphasisUnder = a.TextEmphasisUnder
+        b.TextEmphasisPosition = a.TextEmphasisPosition
     case .anchorName: b.AnchorNames = a.AnchorNames
     case .positionAnchor: b.PositionAnchor = a.PositionAnchor
     case .positionArea: b.PositionArea = a.PositionArea
