@@ -639,6 +639,51 @@ func testColumns() {
     check(spn.rect("c")! == draw.Rect(0, 50, 200, 40) && spn.rect("d")! == draw.Rect(200, 50, 200, 40) && spn.rect("mc")!.Height == 90,
           "and what follows starts a column set of its own (got \(spn.rect("c")!) \(spn.rect("d")!) \(spn.rect("mc")!.Height))")
 
+    guard let av = layoutOf("""
+    <body style='margin:0'><div id=mc style='width:400px;column-count:2;column-gap:0'>
+    <div id=a style='height:30px'></div><div id=b style='height:30px;break-after:avoid'></div><div id=c style='height:30px'></div><div id=d style='height:30px'></div>
+    </div></body>
+    """) else { check(false, "layout"); return }
+    check(av.rect("c")!.X == 0 && av.rect("c")!.Y == 60 && av.rect("d")!.X == 200,
+          "break-after: avoid keeps the next box in the same column (got \(av.rect("c")!) \(av.rect("d")!))")
+    guard let avb = layoutOf("""
+    <body style='margin:0'><div style='width:400px;column-count:2;column-gap:0'>
+    <div style='height:30px'></div><div id=b style='height:30px'></div><div id=c style='height:30px;break-before:avoid'></div><div style='height:30px'></div>
+    </div></body>
+    """) else { check(false, "layout"); return }
+    check(avb.rect("b")!.X == avb.rect("c")!.X, "break-before: avoid keeps a box with the one before it (got \(avb.rect("b")!) \(avb.rect("c")!))")
+
+    guard let cs = layoutOf("""
+    <body style='margin:0'><div style='width:400px'>
+    <div id=half style='width:calc-size(auto, size * 0.5)'></div>
+    <div id=pad style='width:calc-size(auto, size / 2);padding:0 10px'></div>
+    <div id=fixed style='width:calc-size(50px, size * 2)'></div>
+    <div id=mc style='width:calc-size(max-content, size + 20px);font-size:10px'>xxxxxxxxxx</div>
+    <div id=mx style='width:max-content;font-size:10px'>xxxxxxxxxx</div>
+    <div id=tall style='height:calc-size(auto, size * 2 + 5px)'><div style='height:30px'></div></div>
+    </div></body>
+    """) else { check(false, "layout"); return }
+    check(cs.rect("half")!.Width == 200 && cs.rect("pad")!.Width == 210 && cs.rect("fixed")!.Width == 100,
+          "calc-size() on auto and on a length (got \(cs.rect("half")!.Width) \(cs.rect("pad")!.Width) \(cs.rect("fixed")!.Width))")
+    check(cs.rect("mc")!.Width == cs.rect("mx")!.Width + 20, "calc-size() on max-content (got \(cs.rect("mc")!.Width) and \(cs.rect("mx")!.Width))")
+    check(cs.rect("tall")!.Height == 65, "calc-size() on an auto height (got \(cs.rect("tall")!.Height))")
+
+    guard let mv = layoutOf("<body style='margin:0'><div id=mc style='width:400px;column-count:2;column-gap:0'><div style='height:30px'></div><div id=t style='height:30px;background:red'>x</div></div></body>") else { check(false, "layout"); return }
+    let mvf = mv.box("t")!.ColumnFragments
+    check(mvf.count == 1 && mvf[0].X == 200 && mv.rect("mc")!.Height == 30,
+          "a block whose lines all move to the next column takes its background with it, at its own height (got \(mvf) \(mv.rect("mc")!.Height))")
+
+    guard let deep = layoutOf("""
+    <body style='margin:0'><div id=mc style='width:400px;column-count:2;column-gap:0'><div id=wrap>
+    <div id=a style='height:40px'></div><div id=b style='height:40px'></div>
+    <div id=span style='column-span:all;height:10px'></div>
+    <div id=c style='height:40px'></div><div id=d style='height:40px'></div>
+    </div></div></body>
+    """) else { check(false, "layout"); return }
+    check(deep.rect("b")!.X == 200 && deep.rect("span")! == draw.Rect(0, 40, 400, 10), "column-span: all inside a child goes across too (got \(deep.rect("b")!) \(deep.rect("span")!))")
+    check(deep.rect("c")! == draw.Rect(0, 50, 200, 40) && deep.rect("d")! == draw.Rect(200, 50, 200, 40) && deep.rect("mc")!.Height == 90,
+          "and what follows it starts a column set (got \(deep.rect("c")!) \(deep.rect("d")!) \(deep.rect("mc")!.Height))")
+
     guard let dc = layoutOf("<body style='margin:0'><div style='width:400px;column-count:2;column-gap:0'><div id=dec style='border:2px solid;padding:0 4px'><div style='height:40px'></div><div style='height:40px'></div></div></div></body>") else { check(false, "layout"); return }
     let frags = dc.box("dec")!.ColumnFragments
     check(frags.count == 2 && frags[1].X == 200 && frags[0].Y == 0 && frags[1].Y < 10, "a block with a border splits into a fragment in each column (got \(frags))")

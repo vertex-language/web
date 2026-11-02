@@ -176,8 +176,10 @@ public final class RuleSet {
             case "counter-style":
                 DefineCounterStyle(at)
             case "page":
-                // Only a sheet in general: :first, :left and the rest aren't kept.
-                if !at.Params.isEmpty { continue }
+                // A sheet in general, or :first, :left, :right or :blank;
+                // a named page's aren't kept.
+                let pick = css.lower(trimSpaces(at.Params))
+                if !pick.isEmpty && !["first", "left", "right", "blank"].contains(where: { pick == ":" + $0 }) { continue }
                 var rule = pageRuleOf(at)
                 for box in at.AtRules {
                     for d in box.Declarations where d.Property == "content" {
@@ -194,7 +196,11 @@ public final class RuleSet {
                         rule.MarginBoxes[css.lower(box.Name)] = words
                     }
                 }
-                PageRule = rule
+                if pick.isEmpty {
+                    PageRule = rule
+                } else {
+                    PageRulesFor[string(pick.dropFirst())] = rule
+                }
             case "font-feature-values":
                 for kind in at.AtRules {
                     for d in kind.Declarations {
@@ -2269,6 +2275,24 @@ func length(v: css.Value, s: ComputedStyle, ctx: ApplyContext) -> css.Length? {
         if percent == 0 { return .px(px) }
         if px == 0 { return .percent(percent) }
         return .calc(px, percent)
+    case .list(let parts):
+        // calc-size() on a keyword: the number part is size's share.
+        if parts.count != 3 { return nil }
+        guard case .keyword(let tag) = parts[0], tag == "calc-size" else { return nil }
+        guard case .keyword(let basis) = parts[1] else { return nil }
+        guard case .calc(let terms) = parts[2] else { return nil }
+        var share: float32 = 0
+        var px: float32 = 0
+        var percent: float32 = 0
+        for t in terms {
+            guard let unit = t.Unit else { share += t.Number; continue }
+            if unit == .percent {
+                percent += t.Number
+            } else if let l = length(.length(t.Number, unit), s, ctx), case .px(let v) = l {
+                px += v
+            }
+        }
+        return .calcSize(basis, share, px, percent)
     default:
         return nil
     }

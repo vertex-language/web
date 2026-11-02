@@ -1842,6 +1842,56 @@ func parseShadows(tokens: [Token]) -> Value? {
     return .shadows(shadows)
 }
 
+/// calc-size(basis, calculation). With a sizing keyword for basis, the
+/// calculation is read with size as the number 1, so its plain-number part
+/// is size's share (a length's calculation has none of its own), and comes
+/// back as [calc-size, basis, calc]. A length basis is put in for size, and
+/// the whole is a calc().
+func calcSizeValue(tokens: [Token]) -> Value? {
+    guard let t = tokens.first, t.Kind == .function, lower(t.Value) == "calc-size" else { return nil }
+    let end = closeParen(tokens, from: 1)
+    var comma = -1
+    var depth = 0
+    var i = 1
+    while i < end {
+        let k = tokens[i].Kind
+        if k == .function || k == .openParen { depth += 1 }
+        if k == .closeParen { depth -= 1 }
+        if k == .comma && depth == 0 {
+            comma = i
+            break
+        }
+        i += 1
+    }
+    if comma < 2 { return nil }
+    let basis = Array(tokens[1..<comma])
+    var keyword = ""
+    if basis.count == 1 && basis[0].Kind == .ident {
+        keyword = lower(basis[0].Value)
+        if !["auto", "any", "min-content", "max-content", "fit-content"].contains(keyword) { return nil }
+    } else if basis.contains(where: { $0.Kind == .ident }) {
+        return nil
+    }
+    var expr: [Token] = [Token(kind: .function, value: "calc")]
+    for k in tokens[(comma + 1)..<end] {
+        if k.Kind == .ident && lower(k.Value) == "size" {
+            if keyword.isEmpty {
+                expr.append(Token(kind: .openParen))
+                expr += basis
+                expr.append(Token(kind: .closeParen))
+            } else {
+                expr.append(Token(kind: .number, numberVal: 1))
+            }
+        } else {
+            expr.append(k)
+        }
+    }
+    expr.append(Token(kind: .closeParen))
+    guard let calc = calcValue(expr) else { return nil }
+    if keyword.isEmpty { return calc }
+    return .list([.keyword("calc-size"), .keyword(keyword == "any" ? "auto" : keyword), calc])
+}
+
 /// anchor(...) or anchor-size(...), or calc() of one and a length.
 public func ParseAnchorFunction(tokens: [Token]) -> AnchorFunction? {
     guard let t = tokens.first, t.Kind == .function else { return nil }
@@ -1992,6 +2042,7 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
         }
     case .top, .right, .bottom, .left, .width, .height, .flexBasis:
         if let a = ParseAnchorFunction(tokens) { return .anchor(a) }
+        if prop == .width || prop == .height, let v = calcSizeValue(tokens) { return v }
         if let c = calcValue(tokens) { return c }
         return parseLengthValue(t, allowAuto: true)
     case .minWidth, .minHeight:

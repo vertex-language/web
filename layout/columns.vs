@@ -11,9 +11,11 @@ import "image/draw"
 // border, padding or background of its own too, drawn then as a
 // fragment in each column (box-decoration-break) -- and anything that
 // is a formatting root, or has break-inside: avoid, stays in one piece.
-// break-before and break-after force a column; orphans and widows keep
-// lines together at a break; column-span: all cuts the content into
-// column sets, each balanced on its own, with the spanner across them.
+// break-before and break-after force a column, or with avoid move a
+// break back to where it may go; orphans and widows keep lines together
+// at a break; column-span: all, on a child or deeper in opened blocks,
+// cuts the content into column sets, each balanced on its own, with the
+// spanner across them.
 
 /// A piece of a multi-column container's content, its top and bottom
 /// in the container's coordinates.
@@ -26,6 +28,9 @@ struct ColumnPiece {
     /// A break before it is forced (break-before, or break-after on what
     /// came before).
     var forced: bool = false
+    /// A break before it is to be avoided (break-before: avoid, or
+    /// break-after: avoid on what came before).
+    var avoided: bool = false
     /// The opened blocks it is inside, outermost first, and where each
     /// one's border box sits in the container.
     var chain: [Box] = []
@@ -36,6 +41,17 @@ struct OpenedBlock {
     var box: Box
     var left: float32
     var top: float32
+}
+
+/// What collecting a container's pieces gathers: its column sets, the
+/// spanners between them with where their parents sit, the split blocks,
+/// and whether the next piece's break is forced or to be avoided.
+struct ColumnCollect {
+    var segments: [[ColumnPiece]] = [[]]
+    var spanners: [OpenedBlock] = []
+    var opened: [OpenedBlock] = []
+    var force: bool = false
+    var avoid: bool = false
 }
 
 extension Layout {
@@ -67,24 +83,11 @@ extension Layout {
         box.ColumnGapUsed = g.gap
         box.ColumnRules = []
         // The content cut into column sets at the spanners.
-        var segments: [[ColumnPiece]] = [[]]
-        var spanners: [Box] = []
-        var opened: [OpenedBlock] = []
-        var force = false
-        if !box.Lines.isEmpty {
-            collectColumnPieces(box, left: 0, top: 0, &segments[0], &opened, &force, chain: [])
-        } else {
-            for child in box.Children {
-                if child.Style.Position == .absolute || child.Style.Position == .fixed { continue }
-                if child.Style.ColumnSpanAll && child.Kind == .block && child.Style.Float == .none {
-                    spanners.append(child)
-                    segments.append([])
-                    force = false
-                    continue
-                }
-                collectChild(child, left: 0, top: 0, &segments[segments.count - 1], &opened, &force, chain: [])
-            }
-        }
+        var c = ColumnCollect()
+        collectColumnPieces(box, left: 0, top: 0, &c, chain: [])
+        let segments = c.segments
+        let spanners = c.spanners
+        let opened = c.opened
         var y = box.ContentY
         var used = 0
         var moves: [int64: (dx: float32, dy: float32)] = [:]
@@ -109,11 +112,12 @@ extension Layout {
                 if right - box.ContentX > box.ContentWidth { box.ContentWidth = right - box.ContentX }
             }
             if s < spanners.count {
-                // A spanner across the columns, laid out at the full width.
-                let sp = spanners[s]
+                // A spanner across the columns, laid out at the full width;
+                // its place is from its parent, which may be a split block.
+                let sp = spanners[s].box
                 layoutBlock(sp, cb: ContainingBlock(width: contentWidth, height: nil), flow: flow.root(sp))
-                sp.X = box.ContentX + sp.Margin.Left
-                sp.Y = y + sp.Margin.Top
+                sp.X = box.ContentX + sp.Margin.Left - spanners[s].left
+                sp.Y = y + sp.Margin.Top - spanners[s].top
                 y += sp.OuterHeight
             }
             s += 1
@@ -207,6 +211,13 @@ extension Layout {
                     b = i - (p.line - at)
                     if b <= first { b = i }
                 }
+                // break-*: avoid: back to the nearest piece a break may come
+                // before, if there's one in this column.
+                if !p.forced && pieces[b].avoided {
+                    var j = b
+                    while j > first && pieces[j].avoided { j -= 1 }
+                    if j > first { b = j }
+                }
                 col += 1
                 colStart = pieces[b].top
                 starts.append(colStart)
@@ -223,6 +234,12 @@ extension Layout {
         return (columns: cols, starts: starts, count: col + 1)
     }
 
+    /// Whether a break-before or break-after value keeps a column break
+    /// away.
+    func avoidsBreak(v: string) -> bool {
+        return v == "avoid" || v == "avoid-column"
+    }
+
     /// Whether a break-before or break-after value forces a break.
     func forcesBreak(v: string) -> bool {
         switch v {
@@ -232,53 +249,73 @@ extension Layout {
     }
 
     /// The pieces of a box's content in order, its border box's corner at
-    /// left, top in the container's coordinates.
-    func collectColumnPieces(box: Box, left: float32, top: float32, out: inout [ColumnPiece], opened: inout [OpenedBlock],
-                             force: inout bool, chain: [Box]) {
+    /// left, top in the container's coordinates, into the current set.
+    func collectColumnPieces(box: Box, left: float32, top: float32, c: inout ColumnCollect, chain: [Box]) {
         if !box.Lines.isEmpty {
             var i = 0
             while i < box.Lines.count {
                 let line = box.Lines[i]
                 var p = ColumnPiece(box: box, line: i, top: top + line.Y, bottom: top + line.Y + line.Height)
-                p.forced = force
+                p.forced = c.force
+                p.avoided = c.avoid
                 p.chain = chain
-                force = false
-                out.append(p)
+                c.force = false
+                c.avoid = false
+                c.segments[c.segments.count - 1].append(p)
                 i += 1
             }
             // Floats in the lines go with them.
             for child in box.Children where child.Style.Float != .none {
                 var p = ColumnPiece(box: child, line: -1, top: top + child.Y, bottom: top + child.Y + child.Height)
                 p.chain = chain
-                out.append(p)
+                c.segments[c.segments.count - 1].append(p)
             }
             return
         }
         for child in box.Children {
             if child.Style.Position == .absolute || child.Style.Position == .fixed { continue }
-            collectChild(child, left: left, top: top, &out, &opened, &force, chain: chain)
+            // A spanner ends a column set and starts the next.
+            if child.Style.ColumnSpanAll && child.Kind == .block && child.Style.Float == .none {
+                c.spanners.append(OpenedBlock(box: child, left: left, top: top))
+                c.segments.append([])
+                c.force = false
+                c.avoid = false
+                continue
+            }
+            collectChild(child, left: left, top: top, &c, chain: chain)
         }
     }
 
-    func collectChild(child: Box, left: float32, top: float32, out: inout [ColumnPiece], opened: inout [OpenedBlock],
-                      force: inout bool, chain: [Box]) {
-        if forcesBreak(child.Style.BreakBefore) { force = true }
+    func collectChild(child: Box, left: float32, top: float32, c: inout ColumnCollect, chain: [Box]) {
+        if forcesBreak(child.Style.BreakBefore) { c.force = true }
+        if avoidsBreak(child.Style.BreakBefore) { c.avoid = true }
         let childLeft = left + child.X
         let childTop = top + child.Y
-        let before = out.count
+        let set = c.segments.count
+        let before = c.segments[set - 1].count
         if opensForColumns(child) {
             child.ColumnFragments = []
-            if child.HasDecoration { opened.append(OpenedBlock(box: child, left: childLeft, top: childTop)) }
-            collectColumnPieces(child, left: childLeft, top: childTop, &out, &opened, &force, chain: chain + [child])
+            if child.HasDecoration { c.opened.append(OpenedBlock(box: child, left: childLeft, top: childTop)) }
+            collectColumnPieces(child, left: childLeft, top: childTop, &c, chain: chain + [child])
+            // Its last piece takes what's below its content too: a height
+            // of its own, its bottom padding and border.
+            let last = c.segments.count - 1
+            let n = c.segments[last].count
+            if n > (last == set - 1 ? before : 0) && c.segments[last][n - 1].bottom < childTop + child.Height {
+                c.segments[last][n - 1].bottom = childTop + child.Height
+            }
         }
-        if out.count == before && (child.Height > 0 || child.Kind != .text) {
+        if c.segments.count == set && c.segments[set - 1].count == before && (child.Height > 0 || child.Kind != .text) {
             var p = ColumnPiece(box: child, line: -1, top: childTop, bottom: childTop + child.Height)
-            p.forced = force
+            p.forced = c.force
+            p.avoided = c.avoid
             p.chain = chain
-            force = false
-            out.append(p)
+            c.force = false
+            c.avoid = false
+            c.segments[set - 1].append(p)
         }
-        if forcesBreak(child.Style.BreakAfter) { force = true }
+        if forcesBreak(child.Style.BreakAfter) { c.force = true }
+        if avoidsBreak(child.Style.BreakAfter) { c.avoid = true }
     }
 
     /// Whether a box's lines and children may go to different columns:
@@ -328,7 +365,8 @@ extension Layout {
                     }
                 }
             }
-            if frags.count < 2 { continue }
+            // In one piece, it needs a fragment only where it moved.
+            if frags.isEmpty || frags.count == 1 && frags[0].dx == 0 && frags[0].dy == 0 { continue }
             // The block's own top and bottom edges, with their padding
             // and border, go with its first and last fragments.
             frags[0].top = d.top

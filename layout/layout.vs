@@ -480,11 +480,24 @@ public final class Layout {
                 // to left is the left one.
                 box.Margin.Left = free - box.Margin.Right
             }
-        } else if s.Width == .minContent || s.Width == .maxContent || s.Width == .fitContent || box.Style.Float != .none || box.Style.IsOutOfFlow || box.Style.Display == .table || box.Style.Display == .inlineTable {
+        } else if isSizingKeyword(s.Width) || box.Style.Float != .none || box.Style.IsOutOfFlow || box.Style.Display == .table || box.Style.Display == .inlineTable {
             let widths = intrinsicWidths(box)
             var w = widths.max
             if s.Width == .minContent { w = widths.min }
             if w > available { w = available > widths.min ? available : widths.min }
+            if case .calcSize(let basis, _, _, _) = s.Width {
+                switch basis {
+                case "min-content": w = widths.min
+                case "max-content": w = widths.max
+                case "fit-content": break
+                default:
+                    // auto: what a block in flow stretches to.
+                    if box.Style.Float == .none && !box.Style.IsOutOfFlow && box.Style.Display != .table && box.Style.Display != .inlineTable {
+                        w = available > 0 ? available : 0
+                    }
+                }
+                w = calcSized(box, s.Width, basis: w, edges: box.Padding.Horizontal + box.Border.Horizontal, base: cb.Width) ?? w
+            }
             box.Width = clampWidth(box, w, cbWidth: cb.Width)
         } else {
             box.Width = clampWidth(box, available > 0 ? available : 0, cbWidth: cb.Width)
@@ -528,6 +541,8 @@ public final class Layout {
             h = given
         } else if let r = ratioHeight {
             if r > h { h = r }
+        } else if let sized = calcSized(box, s.Height, basis: h, edges: box.Padding.Vertical + box.Border.Vertical, base: cb.Height ?? 0) {
+            h = sized
         }
         box.Height = clampHeight(box, h, cbHeight: cb.Height)
         box.ContentHeight = contentHeight
@@ -1230,13 +1245,23 @@ public func ReadsAttribute(name: string) -> bool {
     }
 }
 
-/// Whether a width or height is min-content, max-content or fit-content:
-/// sized by the content even where both insets are given.
+/// Whether a width or height is min-content, max-content, fit-content or
+/// calc-size(): sized by the content even where both insets are given.
 func isSizingKeyword(l: css.Length) -> bool {
     switch l {
-    case .minContent, .maxContent, .fitContent: return true
+    case .minContent, .maxContent, .fitContent, .calcSize: return true
     default: return false
     }
+}
+
+/// calc-size()'s calculation on its basis's size, both border-box sizes;
+/// nil where the length isn't one. size is in the box's box-sizing.
+func calcSized(box: Box, length: css.Length, basis: float32, edges: float32, base: float32) -> float32? {
+    guard case .calcSize(_, let share, let px, let percent) = length else { return nil }
+    let borderBox = box.Style.BoxSizing == .borderBox
+    let size = borderBox ? basis : basis - edges
+    let v = share * size + px + base * percent / 100
+    return borderBox ? v : v + edges
 }
 
 func flippedName(n: string, a: string, b: string) -> string {

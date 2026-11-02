@@ -497,3 +497,23 @@ public struct PageDescriptor {
 }
 
 public var PageRule: PageDescriptor? = nil
+/// @page :first, :left, :right and :blank, by that name: what each says over
+/// PageRule for the sheets it picks.
+public var PageRulesFor: [string: PageDescriptor] = [:]
+
+/// What a sheet prints with: PageRule, then :left or :right (the first sheet
+/// is a right one), then :first, each over what's before it. A sheet's size
+/// is PageRule's alone.
+public func PageRuleFor(sheet: int) -> PageDescriptor? {
+    var out = PageRule
+    var picks: [string] = [sheet % 2 == 0 ? "right" : "left"]
+    if sheet == 0 { picks.append("first") }
+    for name in picks {
+        guard let r = PageRulesFor[name] else { continue }
+        var merged = out ?? PageDescriptor()
+        if !r.Margins.isEmpty { merged.Margins = r.Margins }
+        for (slot, words) in r.MarginBoxes { merged.MarginBoxes[slot] = words }
+        out = merged
+    }
+    return out
+}

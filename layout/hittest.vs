@@ -265,6 +265,23 @@ func hitTestBox(box: Box, px: float32, py: float32, originX: float32, originY: f
         while i >= 0 {
             let c = box.Children[i]
             i -= 1
+            // A positioned box among a plain static child's lines, an
+            // anonymous one's too, paints over later blocks as well.
+            if c.Style.Position == .static && !c.Lines.isEmpty && !c.Style.ClipsOverflow && !c.Style.HasTransform && c.QuarterTurn == 0 {
+                let cx = sx + c.X + c.OffsetX - c.ScrollX
+                let cy = sy + c.Y + c.OffsetY - c.ScrollY
+                var li = c.Lines.count - 1
+                while li >= 0 {
+                    var fi = c.Lines[li].Fragments.count - 1
+                    while fi >= 0 {
+                        let f = c.Lines[li].Fragments[fi]
+                        fi -= 1
+                        if f.Kind != .atomic || (f.Box.Style.Position != .relative && f.Box.Style.Position != .sticky) { continue }
+                        if let h = HitTest(f.Box, px, py, originX: cx, originY: cy) { return h }
+                    }
+                    li -= 1
+                }
+            }
             if c.Style.Position != .relative && c.Style.Position != .sticky { continue }
             if c.Kind == .text || c.Kind == .inline || c.Kind == .lineBreak { continue }
             if let h = HitTest(c, px, py, originX: sx, originY: sy) { return h }

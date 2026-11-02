@@ -144,6 +144,16 @@ func isAutoLength(v: cascade.AnimValue) -> bool {
     return false
 }
 
+/// calc-size() on auto as the pixels it comes to, measured; nil for
+/// anything else.
+func autoCalcSize(v: cascade.AnimValue, node: html.Node, height: bool, measure: ((html.Node, bool) -> float32?)?) -> cascade.AnimValue? {
+    guard case .length(let l) = v else { return nil }
+    guard case .calcSize(let basis, let share, let px, let percent) = l else { return nil }
+    if basis != "auto" || percent != 0 { return nil }
+    guard let m = measure?(node, height) else { return nil }
+    return .length(.px(share * m + px))
+}
+
 final class Animator {
     /// How big an element's auto height, or width, comes to.
     var measureAuto: ((html.Node, bool) -> float32?)? = nil
@@ -362,6 +372,12 @@ final class Animator {
                 if style.InterpolateKeywords && (prop.Prop == .width || prop.Prop == .height) {
                     if isAutoLength(from), let m = measureAuto?(e.node, prop.Prop == .height) { from = .length(.px(m)) }
                     if isAutoLength(to), let m = measureAuto?(e.node, prop.Prop == .height) { to = .length(.px(m)) }
+                }
+                // calc-size() on auto goes from and to the size it comes to,
+                // whatever interpolate-size says.
+                if prop.Prop == .width || prop.Prop == .height {
+                    if let v = autoCalcSize(from, e.node, prop.Prop == .height, measureAuto) { from = v }
+                    if let v = autoCalcSize(to, e.node, prop.Prop == .height, measureAuto) { to = v }
                 }
                 if let running = e.transitions[prop.Name] {
                     if cascade.SameValue(running.to, to) { continue }

@@ -1608,6 +1608,7 @@ func testCompositing() {
     #mk { width: 100px; height: 40px; padding: 10px; box-sizing: border-box; background: rgb(0,0,255); mask-image: linear-gradient(black, black); mask-clip: content-box }
     #over { position: relative; height: 10px } #cover { margin-top: -10px; height: 10px }
     #grow { interpolate-size: allow-keywords; transition: height 1s linear; overflow: hidden; height: 0 } #grow.open { height: auto } #grow div { height: 40px }
+    #cgrow { transition: height 1s linear; overflow: hidden; height: 0 } #cgrow.open { height: calc-size(auto, size) } #cgrow div { height: 40px }
     </style>
     <div id=tx><div id=fl></div>word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word</div>
     <div id=g><div id=sub><div id=s1></div><div id=s2></div><div id=s3></div></div></div>
@@ -1616,6 +1617,7 @@ func testCompositing() {
     <div id=cs></div><div id=sq></div><div id=mk></div>
     <div id=over></div><div id=cover></div>
     <div id=grow><div></div></div>
+    <div id=cgrow><div></div></div>
     """)
     func lob(id: string) -> draw.Rect { return lo.BoundsOf(lo.QuerySelector("#" + id)!)! }
     let txLines = lo.BoxFor(lo.QuerySelector("#tx")!)!.Lines
@@ -1649,11 +1651,17 @@ func testCompositing() {
     _ = lo.BoundsOf(grower)
     _ = lo.Advance(time: 20)
     lo.Document?.SetAttribute(grower, "class", "open")
+    let cgrower = lo.QuerySelector("#cgrow")!
+    lo.Document?.SetAttribute(cgrower, "class", "open")
     _ = lo.BoundsOf(grower)
     _ = lo.Advance(time: 20)
     _ = lo.Advance(time: 20.5)
     let midHeight = lo.BoundsOf(grower)!.Height
     check(midHeight > 10 && midHeight < 30, "interpolate-size: allow-keywords transitions to auto (got \(midHeight))")
+    let cMid = lo.BoundsOf(cgrower)!.Height
+    check(cMid > 10 && cMid < 30, "and so does calc-size(auto, size), on its own (got \(cMid))")
+    _ = lo.Advance(time: 22)
+    check(lo.BoundsOf(cgrower)!.Height == 40, "ending at the size it comes to (got \(lo.BoundsOf(cgrower)!.Height))")
 
     // An animated image moves on with time.
     let ga = web.Page()
@@ -1758,6 +1766,49 @@ func testCompositing() {
         }
     }
     check(pmDark > 5, "@page's margin boxes print (\(pmDark) pixels)")
+
+    // A relative inline-block in an anonymous line box, under a later block.
+    let ho = web.Page()
+    ho.SetViewportSize(draw.Size(200, 200))
+    ho.LoadHTML("<style>body { margin: 0 } #pin { position: relative; display: inline-block; width: 40px; height: 40px } #after { margin-top: -20px; height: 40px }</style><div>loose <span id=pin></span><div id=after></div></div>")
+    let pinAt = ho.BoundsOf(ho.QuerySelector("#pin")!)!
+    let underHit = ho.ElementAt(draw.Point(pinAt.X + 20, pinAt.Y + pinAt.Height - 5))?.GetAttribute("id") ?? "none"
+    check(underHit == "pin", "a positioned inline-block in a line is hit over a later block (got \(underHit))")
+
+    // @page :first, :left and :right.
+    let pf = web.Page()
+    pf.SetViewportSize(draw.Size(300, 200))
+    pf.LoadHTML("""
+    <style>@page { size: 200px 100px; margin: 10px } @page :first { margin: 40px 10px 10px 10px; @top-center { content: "Title" } } @page :left { margin: 10px 10px 10px 50px }
+    body { margin: 0 } div { height: 50px } .r { background: rgb(255,0,0) } .g { background: rgb(0,255,0) } .b { background: rgb(0,0,255) }</style>
+    <div class=r></div><div class=g></div><div class=b></div>
+    """)
+    let pfSheets = pf.Print(scale: 1)
+    func pfAt(n: int, x: int, y: int) -> draw.Color {
+        let i = (y * int(pfSheets[n].Width) + x) * 4
+        return draw.Color(pfSheets[n].Pixels[i], pfSheets[n].Pixels[i + 1], pfSheets[n].Pixels[i + 2])
+    }
+    func pfDark(n: int) -> int {
+        var dark = 0
+        var y = 0
+        while y < 10 {
+            var x = 0
+            while x < 200 {
+                let c = pfAt(n, x, y + 15)
+                if c.R < 120 && c.G < 120 && c.B < 120 { dark += 1 }
+                x += 1
+            }
+            y += 1
+        }
+        return dark
+    }
+    check(pfSheets.count == 3, "@page :first's margin leaves room for one box on the first sheet (got \(pfSheets.count) sheets)")
+    if pfSheets.count == 3 {
+        check(pfAt(0, 50, 45) == draw.Color(255, 0, 0) && pfAt(0, 50, 30) == draw.Color.white, "the first sheet starts below its own top margin (got \(pfAt(0, 50, 30)))")
+        check(pfDark(0) > 5 && pfDark(1) == 0, "its margin box is the first sheet's alone (got \(pfDark(0)) \(pfDark(1)))")
+        check(pfAt(1, 30, 30) == draw.Color.white && pfAt(1, 60, 30) == draw.Color(0, 255, 0), "a left sheet takes @page :left's margin (got \(pfAt(1, 30, 30)))")
+        check(pfAt(2, 15, 30) == draw.Color(0, 0, 255), "and a right one the page's own (got \(pfAt(2, 15, 30)))")
+    }
 
     // Printing.
     let pr = web.Page()
@@ -2515,6 +2566,21 @@ func testCompositing() {
     if let o = bf.BoundsOf(bf.QuerySelector("#b2")!) {
         check(o.Y + o.Height <= lowAt.Y, "a picker with no room below flips above (option at \(o.Y), select at \(lowAt.Y))")
     } else { check(false, "the low picker opens") }
+
+    // A split block's background image: sliced, one image across its
+    // fragments; cloned, one in each.
+    func splitTop(clone: bool) -> draw.Color {
+        let sp = web.Page()
+        sp.SetViewportSize(draw.Size(200, 100))
+        sp.LoadHTML("<style>body { margin: 0 } #g { background: linear-gradient(#ff0000, #0000ff); \(clone ? "box-decoration-break: clone" : "") }</style><div style='width:200px;column-count:2;column-gap:0'><div id=g><div style='height:40px'></div><div style='height:40px'></div></div></div>")
+        var px = [uint8](repeating: 0, count: 200 * 100 * 4)
+        sp.Draw(into: &px, width: 200, height: 100, scale: 1)
+        return pixelAt(px, 200, 150, 1)
+    }
+    let sliced = splitTop(false)
+    let cloned = splitTop(true)
+    check(sliced.R > 90 && sliced.R < 170 && sliced.B > 90, "a sliced split block's image runs on into its next column (got \(sliced))")
+    check(cloned.R > 230 && cloned.B < 30, "a cloned one starts again there (got \(cloned))")
 
     // anchor-scope, position-try-order, logical position-area.
     let anq = web.Page()

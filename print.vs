@@ -66,7 +66,21 @@ extension Page {
         update()
         var found = PageBreaks()
         if let r = root { collectBreaks(r, into: &found) }
-        let cuts = cutPages(found, total: contentHeight, page: contentH)
+        // Each sheet's paper: its own margins, by :first, :left and :right.
+        func paperFor(sheet: int) -> PrintPaper {
+            var p = paper
+            if let r = cascade.PageRuleFor(sheet), r.Margins.count == 4 {
+                p.Top = r.Margins[0]
+                p.Right = r.Margins[1]
+                p.Bottom = r.Margins[2]
+                p.Left = r.Margins[3]
+            }
+            return p
+        }
+        let cuts = cutPages(found, total: contentHeight, page: { sheet in
+            let p = paperFor(sheet)
+            return p.Height - p.Top - p.Bottom
+        })
         var sheets: [draw.Image] = []
         let w = draw.RoundToInt(paper.Width * scale)
         let h = draw.RoundToInt(paper.Height * scale)
@@ -74,14 +88,15 @@ extension Page {
         while i + 1 < cuts.count {
             let top = cuts[i]
             let bottom = cuts[i + 1]
+            let sheetPaper = paperFor(i)
             var pixels = [uint8](repeating: 255, count: int(w) * int(h) * 4)
             scroll = draw.Point(0, top)
             root?.ViewportScrollX = 0
             root?.ViewportScrollY = top
             size = draw.Size(contentW, bottom - top)
             needsRepaint = true
-            Draw(into: &pixels, width: w, height: h, scale: scale, at: draw.Point(paper.Left, paper.Top))
-            drawMarginBoxes(&pixels, width: w, height: h, scale: scale, paper: paper, page: i + 1, pages: cuts.count - 1)
+            Draw(into: &pixels, width: w, height: h, scale: scale, at: draw.Point(sheetPaper.Left, sheetPaper.Top))
+            drawMarginBoxes(&pixels, width: w, height: h, scale: scale, paper: sheetPaper, page: i + 1, pages: cuts.count - 1)
             sheets.append(draw.Image(width: w, height: h, pixels: pixels))
             i += 1
         }
@@ -100,7 +115,7 @@ extension Page {
     /// @page's margin boxes on a sheet: their text at the sheet's corners and
     /// edges, counter(page) and counter(pages) filled in.
     func drawMarginBoxes(pixels: inout [uint8], width: int32, height: int32, scale: float32, paper: PrintPaper, page: int, pages: int) {
-        guard let rule = cascade.PageRule, !rule.MarginBoxes.isEmpty else { return }
+        guard let rule = cascade.PageRuleFor(page - 1), !rule.MarginBoxes.isEmpty else { return }
         let face = font.Load(font.Spec(families: ["system-ui"], size: 10))
         draw.WithCanvas(&pixels, width: width, height: height) { canvas in
             for (slot, words) in rule.MarginBoxes {
@@ -148,7 +163,7 @@ extension Page {
     }
 
     /// Where each sheet starts, and the end of the last.
-    func cutPages(found: PageBreaks, total: float32, page: float32) -> [float32] {
+    func cutPages(found: PageBreaks, total: float32, page pageHeight: (int) -> float32) -> [float32] {
         var cuts: [float32] = [0]
         var at: float32 = 0
         let may = found.may.sorted()
@@ -156,6 +171,7 @@ extension Page {
         var rounds = 0
         while at < total - 0.5 && rounds < 2000 {
             rounds += 1
+            let page = pageHeight(cuts.count - 1)
             let limit = at + page
             var next = limit
             var forced = false
@@ -177,7 +193,7 @@ extension Page {
             cuts.append(next)
             at = next
         }
-        if cuts.count == 1 { cuts.append(page) }
+        if cuts.count == 1 { cuts.append(pageHeight(0)) }
         return cuts
     }
 }

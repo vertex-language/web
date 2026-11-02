@@ -13,6 +13,9 @@ public enum Length: Equatable {
     case minContent
     case maxContent
     case fitContent
+    /// calc-size(): a basis keyword's size times so much, plus so many
+    /// pixels and so much of the base.
+    case calcSize(string, float32, float32, float32)
 
     public var IsAuto: bool { return self == .auto }
     public var IsNone: bool { return self == .none }

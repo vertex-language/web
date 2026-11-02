@@ -388,6 +388,7 @@ public final class Page {
         animatedImages = [:]
         animatedStart = -1
         cascade.PageRule = nil
+        cascade.PageRulesFor = [:]
         picker = nil
         context.PickerOpen = Set<int64>()
         builder.PickersOpen = context.PickerOpen

@@ -1101,9 +1101,11 @@ final class DisplayListBuilder {
         return false
     }
 
-    func paintBackgroundAndBorder(box: layout.Box, x: float32, y: float32) {
+    /// With imageOnly, just the background image, for a fragment of a split
+    /// block to show.
+    func paintBackgroundAndBorder(box: layout.Box, x: float32, y: float32, imageOnly: bool = false) {
         let s = box.Style
-        if !box.ColumnFragments.isEmpty {
+        if !box.ColumnFragments.isEmpty && !imageOnly {
             paintFragments(box, x: x, y: y)
             return
         }
@@ -1139,7 +1141,7 @@ final class DisplayListBuilder {
         }
         // Shadows go under the box: each drawn as rings from the blur's
         // outer edge inward, which fades like a blur near enough.
-        for sh in s.Shadows where !sh.Inset && sh.Color.A > 0 {
+        for sh in s.Shadows where !sh.Inset && sh.Color.A > 0 && !imageOnly {
             let steps = sh.Blur > 1 ? (sh.Blur > 12 ? 12 : int(sh.Blur)) : 1
             let each = color(sh.Color).Faded(1 / float32(steps))
             var i = 0
@@ -1168,7 +1170,7 @@ final class DisplayListBuilder {
         }
         // The background: its color and its image, in a clip area.
         func background(clip: (rect: draw.Rect, radii: draw.Radii), textClip: bool) {
-            if s.BackgroundColor.A > 0 {
+            if s.BackgroundColor.A > 0 && !imageOnly {
                 items.append(.fill(clip.rect, color(s.BackgroundColor), clip.radii))
             }
             guard let bg = s.BackgroundImage else { return }
@@ -1250,6 +1252,7 @@ final class DisplayListBuilder {
         } else {
             background(area(s.BackgroundClip), textClip: false)
         }
+        if imageOnly { return }
         let widths = box.Border
         if s.HasBorderImage, let bi = borderImage(box, x: x, y: y) {
             items.append(bi)
@@ -1351,6 +1354,9 @@ final class DisplayListBuilder {
     func paintFragments(box: layout.Box, x: float32, y: float32) {
         let s = box.Style
         let n = box.ColumnFragments.count
+        // How far down the whole box this fragment starts, the fragments
+        // stacked as if never split.
+        var stitched: float32 = 0
         var i = 0
         while i < n {
             let f = box.ColumnFragments[i]
@@ -1362,6 +1368,21 @@ final class DisplayListBuilder {
             if !last { radii.BottomLeft = 0; radii.BottomRight = 0 }
             if !radii.IsZero { radii = radii.Fitted(r.Width, r.Height) }
             if s.BackgroundColor.A > 0 { items.append(.fill(r, color(s.BackgroundColor), radii)) }
+            // The image: sliced, the whole box's seen through this fragment;
+            // cloned, the fragment's own as if it were the box.
+            if s.BackgroundImage != nil {
+                items.append(.clip(r))
+                if s.DecorationClone {
+                    let whole = box.Height
+                    box.Height = f.Height
+                    paintBackgroundAndBorder(box, x: r.X, y: r.Y, imageOnly: true)
+                    box.Height = whole
+                } else {
+                    paintBackgroundAndBorder(box, x: r.X, y: r.Y - stitched, imageOnly: true)
+                }
+                items.append(PaintItem.unclip)
+            }
+            stitched += f.Height
             let w = draw.Edges(first ? box.Border.Top : 0, box.Border.Right, last ? box.Border.Bottom : 0, box.Border.Left)
             if w.Top > 0 || w.Right > 0 || w.Bottom > 0 || w.Left > 0 {
                 var colors: [draw.Color] = []
