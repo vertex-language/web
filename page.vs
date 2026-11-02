@@ -313,6 +313,8 @@ public final class Page {
     var transitionElapsed: float64 = 0
     var transitionAt: float64 = -1
     var drawnScale: float32 = 0
+    /// The text on each sheet the last Print made.
+    var printedText: [[SheetText]] = []
     /// The panel open over the page, if any.
     var picker: Picker? = nil
     /// Whether a precise scroll past the page's end stretches it, and how

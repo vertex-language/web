@@ -787,6 +787,10 @@ final class DisplayListBuilder {
     /// in vertical text turned back, the rest left to turn with the line.
     func appendVerticalText(f: layout.Fragment, x: float32, baseline: float32, c: draw.Color, spacing: float32) {
         let style = f.Owner.Style
+        if f.Combined {
+            appendCombinedText(f, x: x, baseline: baseline, c: c)
+            return
+        }
         var cps: [uint32] = []
         for u in f.Text.unicodeScalars { cps.append(u.value) }
         if style.TextOrientation == "sideways" || style.WritingMode.hasPrefix("sideways") || cps.count != f.Run.Glyphs.count {
@@ -818,6 +822,33 @@ final class DisplayListBuilder {
             items.append(item)
             i = j
         }
+    }
+
+    /// text-combine-upright: the run upright across one em of the line, its
+    /// middle on the em's, squeezed to the em where it's wider.
+    func appendCombinedText(f: layout.Fragment, x: float32, baseline: float32, c: draw.Color) {
+        let face = f.Owner.Style.Face
+        let em = f.Width
+        let w = f.Run.Width
+        var item = PaintItem.text(x + (em - w) / 2, baseline, f.Run, c, 0)
+        item.Upright = true
+        item.TileWidth = w
+        item.TileHeight = (face.Ascent - face.Descent) / 2
+        if w <= em {
+            items.append(item)
+            return
+        }
+        // Upright, the run's width runs along the unturned line's height:
+        // squeezed that way, about its middle.
+        let k = em / w
+        let cy = baseline - item.TileHeight
+        var layer = PaintItem(.layer)
+        layer.Rect = draw.Rect(x - w, baseline - face.Ascent - w, em + 2 * w, face.Ascent + face.Descent + 2 * w)
+        layer.MaskRect = layer.Rect
+        layer.Transform = draw.Affine(1, 0, 0, k, 0, cy - k * cy)
+        items.append(layer)
+        items.append(item)
+        items.append(PaintItem(.unlayer))
     }
 
     func paintBox(box: layout.Box, x parentX: float32, y parentY: float32, skipBackground: Int) {
@@ -1103,8 +1134,11 @@ final class DisplayListBuilder {
 
     /// With imageOnly, just the background image, for a fragment of a split
     /// block to show.
-    func paintBackgroundAndBorder(box: layout.Box, x: float32, y: float32, imageOnly: bool = false) {
+    func paintBackgroundAndBorder(box: layout.Box, x: float32, y: float32, imageOnly: bool = false, upright: bool = false) {
         let s = box.Style
+        // In vertical text the box is laid out unturned and turned with what's
+        // round it: its image is drawn turned back, so that it stands upright.
+        let turned = s.AxesSwapped && s.BackgroundImage != nil && !upright && s.BackgroundAttachment != "fixed"
         if !box.ColumnFragments.isEmpty && !imageOnly {
             paintFragments(box, x: x, y: y)
             return
@@ -1216,7 +1250,7 @@ final class DisplayListBuilder {
             if s.BackgroundColor.A > 0 && !imageOnly {
                 items.append(.fill(clip.rect, color(s.BackgroundColor), clip.radii))
             }
-            guard let bg = s.BackgroundImage else { return }
+            guard let bg = s.BackgroundImage, !turned else { return }
             var paddingBox = area(s.BackgroundOrigin).rect
             let shown = textClip ? clip.rect : clip.rect.Intersect(s.BackgroundClip == "border-box" ? area("padding-box").rect.Union(clip.rect) : clip.rect)
             // background-attachment: fixed positions and sizes the image
@@ -1294,6 +1328,7 @@ final class DisplayListBuilder {
             }
         } else {
             background(area(s.BackgroundClip), textClip: false)
+            if turned { paintUprightImage(box, x: x, y: y) }
         }
         if imageOnly { return }
         let widths = box.Border
@@ -1389,6 +1424,35 @@ final class DisplayListBuilder {
         case "space": return .space
         default: return .stretch
         }
+    }
+
+    /// A turned box's background image the right way up: drawn on the box as
+    /// it shows, its width its height, in a layer that turns it the other way
+    /// from the turn it's in.
+    func paintUprightImage(box: layout.Box, x: float32, y: float32) {
+        let w = box.Width
+        let h = box.Height
+        let clockwise = box.Style.WritingMode != "sideways-lr"
+        var layer = PaintItem(.layer)
+        layer.Rect = draw.Rect(x, y, w, h)
+        layer.MaskRect = layer.Rect
+        layer.Transform = clockwise ? draw.Affine(0, -1, 1, 0, x - y, y + h + x) : draw.Affine(0, 1, -1, 0, x + y + w, y - x)
+        items.append(layer)
+        let border = box.Border
+        let padding = box.Padding
+        func upright(e: draw.Edges) -> draw.Edges {
+            return clockwise ? draw.Edges(e.Left, e.Top, e.Right, e.Bottom) : draw.Edges(e.Right, e.Bottom, e.Left, e.Top)
+        }
+        box.Width = h
+        box.Height = w
+        box.Border = upright(border)
+        box.Padding = upright(padding)
+        paintBackgroundAndBorder(box, x: x, y: y, imageOnly: true, upright: true)
+        box.Width = w
+        box.Height = h
+        box.Border = border
+        box.Padding = padding
+        items.append(PaintItem(.unlayer))
     }
 
     /// A block split between columns: its background and border in each

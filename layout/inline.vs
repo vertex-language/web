@@ -43,6 +43,8 @@ struct Item {
     var softBreakBefore: bool = false
     /// hyphens: auto may break after this piece: it then shows a hyphen.
     var autoHyphen: bool = false
+    /// text-combine-upright: one em of a vertical line, kept apart.
+    var combined: bool = false
 
     init(kind: ItemKind, box: Box, owner: Box) {
         self.kind = kind
@@ -865,6 +867,23 @@ extension Layout {
             }
             var j = i
             while j < n && !isSpaceByte(bytes[j]) { j += 1 }
+            // text-combine-upright: the word upright, in one em of the line.
+            if combinesUpright(style, bytes, i, j) {
+                var item = Item(kind: .word, box: box, owner: owner)
+                item.text = stringOf(bytes, i, j)
+                item.run = face.Shape(item.text)
+                item.width = style.FontSize
+                item.offset = i
+                item.length = j - i
+                item.breakable = wraps
+                item.decoration = decoration
+                item.decorationColor = decorationColor
+                item.combined = true
+                items.append(item)
+                pendingSpace = false
+                i = j
+                continue
+            }
             // A word with soft hyphens (U+00AD) is a piece per syllable,
             // each holding the hyphen after it, which doesn't show.
             func piece(start: int, end: int) {
@@ -938,6 +957,22 @@ extension Layout {
         }
     }
 
+    /// Whether text-combine-upright takes these bytes: in vertical text, all
+    /// of a word, or with digits one of no more digits than it says.
+    func combinesUpright(style: cascade.ComputedStyle, bytes: [uint8], from: int, to: int) -> bool {
+        let c = style.TextCombineUpright
+        if c == "none" || !style.IsVertical || style.WritingMode.hasPrefix("sideways") || to <= from { return false }
+        if c == "all" { return true }
+        let most = int(c.split(separator: " ").last.map { string($0) } ?? "2") ?? 2
+        if to - from > most { return false }
+        var k = from
+        while k < to {
+            if bytes[k] < 48 || bytes[k] > 57 { return false }
+            k += 1
+        }
+        return true
+    }
+
     /// Makes a line from its items: places them left to right, merges
     /// neighbouring text of one box into fragments, aligns everything
     /// vertically, and applies text-align.
@@ -979,7 +1014,7 @@ extension Layout {
                 // in the same style.
                 // Right-to-left words stay apart: each shows its own
                 // glyphs in order, and the line puts the words in theirs.
-                if let last = fragments.last, last.Kind == .text, last.Box.Id == item.box.Id, last.Owner.Id == item.owner.Id,
+                if let last = fragments.last, last.Kind == .text, last.Box.Id == item.box.Id, last.Owner.Id == item.owner.Id, !last.Combined && !item.combined,
                    levels[levels.count - 1] == item.level, item.level & 1 == 0 {
                     var f = fragments[fragments.count - 1]
                     f.Text += item.text
@@ -997,6 +1032,7 @@ extension Layout {
                     fragments[fragments.count - 1] = f
                 } else {
                     var f = Fragment(kind: .text, box: item.box, owner: item.owner)
+                    f.Combined = item.combined
                     f.X = x
                     f.Width = item.width
                     f.Text = item.text

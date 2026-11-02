@@ -90,6 +90,8 @@ public final class ComputedStyle {
     /// have been swapped into the axes its vertical text is laid out in.
     public var WritingMode: string = "horizontal-tb"
     public var TextOrientation: string = "mixed"
+    /// text-combine-upright: none, all, or "digits n" (inherited).
+    public var TextCombineUpright: string = "none"
     public var AxesSwapped: bool = false
     /// anchor-name's names; position-anchor; position-area's words; what
     /// inset and size properties anchor() set; position-try's fallbacks.
@@ -471,6 +473,7 @@ public final class ComputedStyle {
         TextEmphasisColor = parent.TextEmphasisColor
         TextEmphasisUnder = parent.TextEmphasisUnder
         TextOrientation = parent.TextOrientation
+        TextCombineUpright = parent.TextCombineUpright
         ListStylePosition = parent.ListStylePosition
         Cursor = parent.Cursor
         PointerEvents = parent.PointerEvents
@@ -718,11 +721,21 @@ extension ComputedStyle {
             let pt = PaddingTop; PaddingTop = PaddingLeft; PaddingLeft = PaddingBottom; PaddingBottom = PaddingRight; PaddingRight = pt
             let bt = BorderTopWidth; BorderTopWidth = BorderLeftWidth; BorderLeftWidth = BorderBottomWidth; BorderBottomWidth = BorderRightWidth; BorderRightWidth = bt
             let t = Top; Top = Left; Left = Bottom; Bottom = Right; Right = t
+            let st = BorderTopStyle; BorderTopStyle = BorderLeftStyle; BorderLeftStyle = BorderBottomStyle; BorderBottomStyle = BorderRightStyle; BorderRightStyle = st
+            let ct = BorderTopColor; BorderTopColor = BorderLeftColor; BorderLeftColor = BorderBottomColor; BorderBottomColor = BorderRightColor; BorderRightColor = ct
+            // Its top left corner ends up at the bottom left.
+            BorderRadius = draw.Radii(BorderRadius.BottomLeft, BorderRadius.TopLeft, BorderRadius.TopRight, BorderRadius.BottomRight)
+            BorderRadiusPercent = draw.Radii(BorderRadiusPercent.BottomLeft, BorderRadiusPercent.TopLeft, BorderRadiusPercent.TopRight, BorderRadiusPercent.BottomRight)
         } else {
             let mt = MarginTop; MarginTop = MarginRight; MarginRight = MarginBottom; MarginBottom = MarginLeft; MarginLeft = mt
             let pt = PaddingTop; PaddingTop = PaddingRight; PaddingRight = PaddingBottom; PaddingBottom = PaddingLeft; PaddingLeft = pt
             let bt = BorderTopWidth; BorderTopWidth = BorderRightWidth; BorderRightWidth = BorderBottomWidth; BorderBottomWidth = BorderLeftWidth; BorderLeftWidth = bt
             let t = Top; Top = Right; Right = Bottom; Bottom = Left; Left = t
+            let st = BorderTopStyle; BorderTopStyle = BorderRightStyle; BorderRightStyle = BorderBottomStyle; BorderBottomStyle = BorderLeftStyle; BorderLeftStyle = st
+            let ct = BorderTopColor; BorderTopColor = BorderRightColor; BorderRightColor = BorderBottomColor; BorderBottomColor = BorderLeftColor; BorderLeftColor = ct
+            // Its top left corner ends up at the top right.
+            BorderRadius = draw.Radii(BorderRadius.TopRight, BorderRadius.BottomRight, BorderRadius.BottomLeft, BorderRadius.TopLeft)
+            BorderRadiusPercent = draw.Radii(BorderRadiusPercent.TopRight, BorderRadiusPercent.BottomRight, BorderRadiusPercent.BottomLeft, BorderRadiusPercent.TopLeft)
         }
     }
 

@@ -323,6 +323,8 @@ public struct Fragment {
     public var DecorationColor: draw.Color
     /// Text set right to left: its first character is at its right.
     public var RightToLeft: bool = false
+    /// text-combine-upright: the run upright in one em of the line.
+    public var Combined: bool = false
 
     public init(kind: FragmentKind, box: Box, owner: Box) {
         Kind = kind

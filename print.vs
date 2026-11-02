@@ -81,6 +81,10 @@ extension Page {
             let p = paperFor(sheet)
             return p.Height - p.Top - p.Bottom
         })
+        // The text on each sheet, for a PDF to make selectable.
+        var runs: [SheetText] = []
+        if let r = root { collectText(r, into: &runs) }
+        printedText = []
         var sheets: [draw.Image] = []
         let w = draw.RoundToInt(paper.Width * scale)
         let h = draw.RoundToInt(paper.Height * scale)
@@ -89,6 +93,14 @@ extension Page {
             let top = cuts[i]
             let bottom = cuts[i + 1]
             let sheetPaper = paperFor(i)
+            var onSheet: [SheetText] = []
+            for t in runs where t.y >= top && t.y < bottom {
+                var placed = t
+                placed.x += sheetPaper.Left
+                placed.y = t.y - top + sheetPaper.Top
+                onSheet.append(placed)
+            }
+            printedText.append(onSheet)
             var pixels = [uint8](repeating: 255, count: int(w) * int(h) * 4)
             scroll = draw.Point(0, top)
             root?.ViewportScrollX = 0
@@ -137,7 +149,25 @@ extension Page {
     /// The page as a PDF, each sheet a picture on a page of its paper's size.
     public func PrintPDF(paper: PrintPaper = PrintPaper(), scale: float32 = 2) -> [uint8] {
         let sheets = Print(paper: paper, scale: scale)
-        return pdfOf(sheets, widthPoints: float32(sheets.first?.Width ?? 0) / scale * 0.75, heightPoints: float32(sheets.first?.Height ?? 0) / scale * 0.75)
+        return pdfOf(sheets, text: printedText, widthPoints: float32(sheets.first?.Width ?? 0) / scale * 0.75, heightPoints: float32(sheets.first?.Height ?? 0) / scale * 0.75)
+    }
+
+    /// Each run of horizontal text the boxes hold, where its baseline is on
+    /// the page.
+    func collectText(box: layout.Box, into out: inout [SheetText]) {
+        if !box.Lines.isEmpty && box.Style.Visibility == .visible && !box.Style.IsVertical {
+            let p = layout.PagePosition(box)
+            for line in box.Lines {
+                for f in line.Fragments where f.Kind == .text && f.Owner.Style.Visibility == .visible {
+                    var shows = false
+                    for u in f.Text.unicodeScalars where u.value > 32 { shows = true }
+                    if !shows || f.Width <= 0 { continue }
+                    out.append(SheetText(x: p.x + f.X, y: p.y + f.Y + f.Ascent, width: f.Width, size: f.Owner.Style.FontSize, text: f.Text))
+                }
+            }
+        }
+        for c in box.Children { collectText(c, into: &out) }
+        for c in box.Positioned where c.Parent?.Id != box.Id { collectText(c, into: &out) }
     }
 
     func collectBreaks(box: layout.Box, into out: inout PageBreaks) {
@@ -217,7 +247,71 @@ func zlibOf(data: [uint8]) -> [uint8] {
 }
 
 /// A PDF of pictures, a page each, enough for any reader.
-func pdfOf(sheets: [draw.Image], widthPoints: float32, heightPoints: float32) -> [uint8] {
+/// A run of text on a printed sheet: its baseline's start and width, its
+/// font size, in CSS pixels on the sheet.
+struct SheetText {
+    var x: float32
+    var y: float32
+    var width: float32
+    var size: float32
+    var text: string
+}
+
+/// The PDF objects for a page's hidden text: a Type 0 font whose codes are
+/// UTF-16 units, each a 1000-unit wide glyph, and back to Unicode by its
+/// ToUnicode map, so that a reader can select, search and copy the text
+/// over the picture.
+func pdfTextFont(first: int) -> [(n: int, body: string)] {
+    var cmap = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n"
+    let hex = Array("0123456789ABCDEF".utf8)
+    func byte(b: int) -> string { return string(decoding: [hex[b / 16], hex[b % 16]], as: UTF8.self) }
+    var hi = 0
+    while hi < 256 {
+        let n = 256 - hi < 100 ? 256 - hi : 100
+        cmap += "\(n) beginbfrange\n"
+        var k = 0
+        while k < n {
+            let b = byte(hi + k)
+            cmap += "<\(b)00> <\(b)FF> <\(b)00>\n"
+            k += 1
+        }
+        cmap += "endbfrange\n"
+        hi += n
+    }
+    cmap += "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend"
+    return [
+        (n: first, body: "<< /Type /Font /Subtype /Type0 /BaseFont /Helvetica /Encoding /Identity-H /DescendantFonts [\(first + 1) 0 R] /ToUnicode \(first + 2) 0 R >>"),
+        (n: first + 1, body: "<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Helvetica /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor \(first + 3) 0 R /DW 1000 /CIDToGIDMap /Identity >>"),
+        (n: first + 2, body: "<< /Length \(cmap.utf8.count) >>\nstream\n\(cmap)\nendstream"),
+        (n: first + 3, body: "<< /Type /FontDescriptor /FontName /Helvetica /Flags 32 /FontBBox [0 -200 1000 900] /ItalicAngle 0 /Ascent 900 /Descent -200 /CapHeight 700 /StemV 80 >>"),
+    ]
+}
+
+/// A sheet's text as invisible PDF text, each run scaled to its width.
+func pdfTextOps(runs: [SheetText], heightPoints: float32) -> string {
+    if runs.isEmpty { return "" }
+    let hex = Array("0123456789ABCDEF".utf8)
+    var ops = "\nBT 3 Tr"
+    for r in runs {
+        var units: [uint8] = []
+        var count = 0
+        for u in r.text.unicodeScalars {
+            let v = u.value > 0xFFFF ? 0xFFFD : int(u.value)
+            for b in [v / 256, v % 256] {
+                units.append(hex[b / 16])
+                units.append(hex[b % 16])
+            }
+            count += 1
+        }
+        if count == 0 || r.size <= 0 { continue }
+        let size = r.size * 0.75
+        let stretch = 100 * r.width / (float32(count) * r.size)
+        ops += "\n/F \(size) Tf \(stretch) Tz 1 0 0 1 \(r.x * 0.75) \(heightPoints - r.y * 0.75) Tm <\(string(decoding: units, as: UTF8.self))> Tj"
+    }
+    return ops + " ET"
+}
+
+func pdfOf(sheets: [draw.Image], text: [[SheetText]] = [], widthPoints: float32, heightPoints: float32) -> [uint8] {
     var out: [uint8] = []
     var offsets: [int] = []
     func add(s: string) { out += [uint8](s.utf8) }
@@ -235,12 +329,13 @@ func pdfOf(sheets: [draw.Image], widthPoints: float32, heightPoints: float32) ->
     }
     object(1, body: "<< /Type /Catalog /Pages 2 0 R >>")
     object(2, body: "<< /Type /Pages /Kids [\(kids.joined(separator: " "))] /Count \(sheets.count) >>")
+    let font = 3 + sheets.count * 3
     k = 0
     while k < sheets.count {
         let img = sheets[k]
         let page = 3 + k * 3
-        object(page, body: "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 \(widthPoints) \(heightPoints)] /Contents \(page + 1) 0 R /Resources << /XObject << /I \(page + 2) 0 R >> >> >>")
-        let draws = "q \(widthPoints) 0 0 \(heightPoints) 0 0 cm /I Do Q"
+        object(page, body: "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 \(widthPoints) \(heightPoints)] /Contents \(page + 1) 0 R /Resources << /XObject << /I \(page + 2) 0 R >> /Font << /F \(font) 0 R >> >> >>")
+        let draws = "q \(widthPoints) 0 0 \(heightPoints) 0 0 cm /I Do Q" + (k < text.count ? pdfTextOps(text[k], heightPoints: heightPoints) : "")
         object(page + 1, body: "<< /Length \(draws.utf8.count) >>\nstream\n\(draws)\nendstream")
         // The picture, its pixels without alpha.
         while offsets.count < page + 2 { offsets.append(0) }
@@ -261,6 +356,7 @@ func pdfOf(sheets: [draw.Image], widthPoints: float32, heightPoints: float32) ->
         add("\nendstream\nendobj\n")
         k += 1
     }
+    for o in pdfTextFont(font) { object(o.n, body: o.body) }
     let xref = out.count
     add("xref\n0 \(offsets.count + 1)\n0000000000 65535 f \n")
     for off in offsets {

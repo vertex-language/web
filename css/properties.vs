@@ -103,6 +103,7 @@ public enum Prop: int32 {
     case viewTransitionClass
     case writingMode
     case textOrientation
+    case textCombineUpright
     case perspective
     case imageRendering
     case overflowClipMargin
@@ -441,7 +442,7 @@ let propNames: [string: Prop] = [
     "mask-origin": .maskOrigin, "mask-clip": .maskClip, "-webkit-mask-origin": .maskOrigin, "-webkit-mask-clip": .maskClip,
     "-webkit-text-stroke-width": .textStrokeWidth, "-webkit-text-stroke-color": .textStrokeColor, "paint-order": .paintOrder,
     "transform-box": .transformBox, "timeline-scope": .timelineScope, "position-visibility": .positionVisibility, "position-try-order": .positionTryOrder, "anchor-scope": .anchorScope,
-    "overflow-anchor": .overflowAnchor, "writing-mode": .writingMode, "text-orientation": .textOrientation,
+    "overflow-anchor": .overflowAnchor, "writing-mode": .writingMode, "text-orientation": .textOrientation, "text-combine-upright": .textCombineUpright,
     "perspective": .perspective, "perspective-origin": .perspectiveOrigin, "backface-visibility": .backfaceVisibility,
     "transform-style": .transformStyle,
     "border-image-source": .borderImageSource, "border-image-slice": .borderImageSlice,
@@ -2446,6 +2447,14 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
         case "tb", "tb-rl": return .keyword("vertical-rl")
         default: return nil
         }
+    case .textCombineUpright:
+        // none, all, or digits and how many (2 unless said).
+        if kw == "none" || kw == "all" { return .keyword(kw) }
+        if kw == "digits" {
+            if tokens.count > 1 && tokens[1].Kind == .number { return .keyword("digits \(int(tokens[1].NumberVal))") }
+            return .keyword("digits 2")
+        }
+        return nil
     case .textOrientation:
         switch kw {
         case "mixed", "upright", "sideways": return .keyword(kw)

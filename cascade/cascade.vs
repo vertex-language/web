@@ -1609,6 +1609,7 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
         s.ViewTransitionClasses = names == ["none"] ? [] : names
     case .writingMode: if let k = keywordOf(v) { s.WritingMode = k }
     case .textOrientation: if let k = keywordOf(v) { s.TextOrientation = k }
+    case .textCombineUpright: if let k = keywordOf(v) { s.TextCombineUpright = k }
     case .perspective:
         if case .none = v { s.Perspective = 0 } else if let d = pixels(v, s, ctx) { s.Perspective = math.Max(d, 0) }
     case .perspectiveOrigin:
@@ -2647,6 +2648,7 @@ func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .viewTransitionClass: b.ViewTransitionClasses = a.ViewTransitionClasses
     case .writingMode: b.WritingMode = a.WritingMode
     case .textOrientation: b.TextOrientation = a.TextOrientation
+    case .textCombineUpright: b.TextCombineUpright = a.TextCombineUpright
     case .perspective: b.Perspective = a.Perspective
     case .perspectiveOrigin:
         b.PerspectiveOriginX = a.PerspectiveOriginX

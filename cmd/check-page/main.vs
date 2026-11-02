@@ -1784,6 +1784,49 @@ func testCompositing() {
     let underHit = ho.ElementAt(draw.Point(pinAt.X + 20, pinAt.Y + pinAt.Height - 5))?.GetAttribute("id") ?? "none"
     check(underHit == "pin", "a positioned inline-block in a line is hit over a later block (got \(underHit))")
 
+    // In vertical text a box's border sides and background image keep to
+    // the sides they're on the page.
+    let vb = web.Page()
+    vb.SetViewportSize(draw.Size(200, 200))
+    vb.LoadHTML("""
+    <style>body { margin: 0; background: white } #v { writing-mode: vertical-rl; height: 150px }
+    #vb { width: 40px; height: 40px; border: 5px solid; border-color: rgb(255,0,0) rgb(0,255,0) rgb(0,0,255) rgb(255,128,0); border-top-left-radius: 20px }
+    #vi { width: 40px; height: 40px; background: linear-gradient(rgb(255,0,0), rgb(0,0,255)) }</style>
+    <div id=v><div id=vb></div><div id=vi></div></div>
+    """)
+    var vbp = [uint8](repeating: 0, count: 200 * 200 * 4)
+    vb.Draw(into: &vbp, width: 200, height: 200, scale: 1)
+    let vbAt = vb.BoundsOf(vb.QuerySelector("#vb")!)!
+    let vdx = int32(vbAt.X)
+    let vdy = int32(vbAt.Y)
+    check(pixelAt(vbp, 200, vdx + 25, vdy + 2) == draw.Color(255, 0, 0) && pixelAt(vbp, 200, vdx + 2, vdy + 25) == draw.Color(255, 128, 0)
+          && pixelAt(vbp, 200, vdx + 47, vdy + 25) == draw.Color(0, 255, 0) && pixelAt(vbp, 200, vdx + 25, vdy + 47) == draw.Color(0, 0, 255),
+          "in vertical text a border's colors stay on their sides (got top \(pixelAt(vbp, 200, vdx + 25, vdy + 2)) left \(pixelAt(vbp, 200, vdx + 2, vdy + 25)))")
+    check(pixelAt(vbp, 200, vdx + 1, vdy + 1) == draw.Color.white && pixelAt(vbp, 200, vdx + 48, vdy + 1) != draw.Color.white,
+          "and its round corner stays at the top left")
+    let viAt = vb.BoundsOf(vb.QuerySelector("#vi")!)!
+    let viTop = pixelAt(vbp, 200, int32(viAt.X) + 20, int32(viAt.Y) + 2)
+    let viBottom = pixelAt(vbp, 200, int32(viAt.X) + 20, int32(viAt.Y) + 38)
+    check(viTop.R > 200 && viTop.B < 50 && viBottom.B > 200 && viBottom.R < 50, "and its background image stands upright (got \(viTop) \(viBottom))")
+
+    // text-combine-upright: one em of a vertical line, upright.
+    let tc = web.Page()
+    tc.SetViewportSize(draw.Size(200, 300))
+    tc.LoadHTML("<style>body { margin: 0; font-size: 20px } p { writing-mode: vertical-rl; height: 280px; margin: 0 } .t { text-combine-upright: all } #d { text-combine-upright: digits 2 }</style><p id=a>x<span class=t>2024</span>y</p><p id=d>a 31 b 123</p>")
+    var tcp = [uint8](repeating: 0, count: 200 * 300 * 4)
+    tc.Draw(into: &tcp, width: 200, height: 300, scale: 1)
+    func combinedWidths(id: string) -> [float32] {
+        var out: [float32] = []
+        var b = tc.BoxFor(tc.QuerySelector("#" + id)!)!
+        if let inner = b.VerticalContent { b = inner }
+        for line in b.Lines {
+            for f in line.Fragments where f.Combined { out.append(f.Width) }
+        }
+        return out
+    }
+    check(combinedWidths("a") == [20], "text-combine-upright: all takes one em of the line (got \(combinedWidths("a")))")
+    check(combinedWidths("d") == [20], "digits 2 combines two digits but not three (got \(combinedWidths("d")))")
+
     // shape-outside: url(): text wraps round the image's opaque part.
     let so = web.Page()
     so.SetViewportSize(draw.Size(300, 200))
@@ -1855,6 +1898,14 @@ func testCompositing() {
     check(afterPrint != nil && pr.BoundsOf(pr.QuerySelector(".only")!)!.Width == 300, "and afterwards the page is as it was on screen")
     let pdf = pr.PrintPDF(scale: 1)
     check(pdf.count > 1000 && string(decoding: pdf[0..<5], as: UTF8.self) == "%PDF-", "PrintPDF writes a PDF (\(pdf.count) bytes)")
+    // Its text, hidden over the picture, for a reader to select.
+    let tp = web.Page()
+    tp.SetViewportSize(draw.Size(300, 200))
+    tp.LoadHTML("<style>@page { size: 300px 150px; margin: 10px } body { margin: 0; font-size: 16px } p { margin: 0 0 100px }</style><p>Hello printed world</p><p>Second sheet ünïcode</p>")
+    let tpdf = tp.PrintPDF(scale: 1)
+    let tpText = string(decoding: tpdf, as: UTF8.self)
+    check(tpText.contains("3 Tr") && tpText.contains("<00480065006C006C006F0020007000720069006E00740065006400200077006F0072006C0064> Tj") && tpText.contains("/ToUnicode"),
+          "PrintPDF puts each sheet's text over it, hidden, in Unicode")
 
     // List boxes and suggestions.
     let lb = web.Page()
