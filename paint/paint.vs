@@ -15,7 +15,7 @@ import (
 /// The size a background or mask tile takes in its area: background-
 /// size's (and mask-size's) cover, contain, lengths or auto, for an
 /// image w × h (an area-sized gradient where it has none of its own).
-func layerSize(_ size: cascade.BackgroundSize, _ area: draw.Rect, _ w: float32, _ h: float32, intrinsic: bool) -> (float32, float32) {
+func layerSize(size: cascade.BackgroundSize, area: draw.Rect, w: float32, h: float32, intrinsic: bool) -> (float32, float32) {
     var tw = w
     var th = h
     switch size {
@@ -150,7 +150,7 @@ public struct PaintItem {
     /// What a path item fills.
     public var Outline: draw.Path = draw.Path()
 
-    init(_ kind: PaintKind) {
+    init(kind: PaintKind) {
         Kind = kind
         Rect = draw.Rect.zero
         Color = draw.Color.transparent
@@ -174,7 +174,7 @@ public struct PaintItem {
         Blur = 0
     }
 
-    static func fill(_ r: draw.Rect, _ c: draw.Color, _ radii: draw.Radii) -> PaintItem {
+    static func fill(r: draw.Rect, c: draw.Color, radii: draw.Radii) -> PaintItem {
         var it = PaintItem(.fill)
         it.Rect = r
         it.Color = c
@@ -182,7 +182,7 @@ public struct PaintItem {
         return it
     }
 
-    static func border(_ r: draw.Rect, _ widths: draw.Edges, _ colors: [draw.Color], _ radii: draw.Radii) -> PaintItem {
+    static func border(r: draw.Rect, widths: draw.Edges, colors: [draw.Color], radii: draw.Radii) -> PaintItem {
         var it = PaintItem(.border)
         it.Rect = r
         it.Widths = widths
@@ -191,7 +191,7 @@ public struct PaintItem {
         return it
     }
 
-    static func text(_ x: float32, _ baseline: float32, _ run: font.Run, _ c: draw.Color, _ letterSpacing: float32) -> PaintItem {
+    static func text(x: float32, baseline: float32, run: font.Run, c: draw.Color, letterSpacing: float32) -> PaintItem {
         var it = PaintItem(.text)
         it.X = x
         it.Y = baseline
@@ -201,7 +201,7 @@ public struct PaintItem {
         return it
     }
 
-    static func image(_ r: draw.Rect, _ img: draw.Image, _ opacity: float32) -> PaintItem {
+    static func image(r: draw.Rect, img: draw.Image, opacity: float32) -> PaintItem {
         var it = PaintItem(.image)
         it.Rect = r
         it.Image = img
@@ -209,7 +209,7 @@ public struct PaintItem {
         return it
     }
 
-    static func gradient(_ r: draw.Rect, _ g: draw.LinearGradient, _ radii: draw.Radii) -> PaintItem {
+    static func gradient(r: draw.Rect, g: draw.LinearGradient, radii: draw.Radii) -> PaintItem {
         var it = PaintItem(.gradient)
         it.Rect = r
         it.Gradient = g
@@ -217,7 +217,7 @@ public struct PaintItem {
         return it
     }
 
-    static func tiles(_ area: draw.Rect, _ img: draw.Image, tileWidth: float32, tileHeight: float32,
+    static func tiles(area: draw.Rect, img: draw.Image, tileWidth: float32, tileHeight: float32,
                       originX: float32, originY: float32, repeatX: Bool, repeatY: Bool, opacity: float32, radii: draw.Radii) -> PaintItem {
         var it = PaintItem(.image)
         it.Rect = area
@@ -233,7 +233,7 @@ public struct PaintItem {
         return it
     }
 
-    static func clip(_ r: draw.Rect) -> PaintItem {
+    static func clip(r: draw.Rect) -> PaintItem {
         var it = PaintItem(.clip)
         it.Rect = r
         return it
@@ -298,7 +298,7 @@ public struct Subpage {
 
 /// The display list for a laid-out box tree: what to paint, in the
 /// order CSS paints it, in page coordinates.
-public func Build(_ root: layout.Box, state: State, viewportWidth: float32, viewportHeight: float32, background: draw.Color) -> [PaintItem] {
+public func Build(root: layout.Box, state: State, viewportWidth: float32, viewportHeight: float32, background: draw.Color) -> [PaintItem] {
     let b = DisplayListBuilder()
     b.focused = state.Focused
     b.caret = state.Caret
@@ -345,7 +345,7 @@ final class DisplayListBuilder {
 
     init() {}
 
-    func build(_ root: layout.Box, viewportWidth: float32, viewportHeight: float32, background: draw.Color) -> [PaintItem] {
+    func build(root: layout.Box, viewportWidth: float32, viewportHeight: float32, background: draw.Color) -> [PaintItem] {
         items = []
         self.viewportWidth = viewportWidth
         self.viewportHeight = viewportHeight
@@ -376,7 +376,7 @@ final class DisplayListBuilder {
     /// A mask layer's source and tiling: mask-image over the border box
     /// (mask-origin's default), sized by mask-size, placed by
     /// mask-position, repeated by mask-repeat.
-    func maskTiles(_ layer: inout PaintItem, _ s: cascade.ComputedStyle) {
+    func maskTiles(layer: inout PaintItem, s: cascade.ComputedStyle) {
         let area = layer.MaskRect
         var iw = area.Width
         var ih = area.Height
@@ -415,7 +415,7 @@ final class DisplayListBuilder {
 
     /// The validation bubble under a control: a white card with a
     /// warning mark and the message, a line at a time, over everything.
-    func paintBubble(_ control: draw.Rect, _ text: string) {
+    func paintBubble(control: draw.Rect, text: string) {
         let face = font.Load(font.Spec(families: ["system-ui"], size: 13, weight: 400))
         let lines = text.split(separator: "\n").map { string($0) }
         var width: float32 = 0
@@ -453,7 +453,7 @@ final class DisplayListBuilder {
 
     /// The text a box paints, black and opaque, for masking: what
     /// background-clip: text keeps its background to.
-    func textMask(_ box: layout.Box, x: float32, y: float32) -> [PaintItem] {
+    func textMask(box: layout.Box, x: float32, y: float32) -> [PaintItem] {
         let start = items.count
         let savedStack = stacked
         let savedOpacity = opacity
@@ -479,7 +479,7 @@ final class DisplayListBuilder {
     /// and borders of it and its in-flow block descendants, then its
     /// floats, then its inline content and replaced content, then the
     /// boxes positioned against it.
-    func paintBox(_ box: layout.Box, x parentX: float32, y parentY: float32, skipBackground: Int) {
+    func paintBox(box: layout.Box, x parentX: float32, y parentY: float32, skipBackground: Int) {
         let s = box.Style
         if s.Visibility != .visible && !hasVisibleDescendant(box) { return }
         // Nothing of a fully transparent box or its content shows.
@@ -577,13 +577,13 @@ final class DisplayListBuilder {
     }
 
     /// empty-cells: hide on a cell with nothing in it, borders separate.
-    func isHiddenEmptyCell(_ box: layout.Box) -> bool {
+    func isHiddenEmptyCell(box: layout.Box) -> bool {
         let s = box.Style
         if !s.HideEmptyCells || s.Display != .tableCell || s.BorderCollapse == .collapse { return false }
         return isEmptyContent(box)
     }
 
-    func isEmptyContent(_ box: layout.Box) -> bool {
+    func isEmptyContent(box: layout.Box) -> bool {
         for c in box.Children {
             if c.Kind == .text {
                 if !layout.IsBlank(c.Text) { return false }
@@ -596,7 +596,7 @@ final class DisplayListBuilder {
         return true
     }
 
-        func paintBackgroundAndBorderIfVisible(_ box: layout.Box, x: float32, y: float32, skipBackground: Int) {
+        func paintBackgroundAndBorderIfVisible(box: layout.Box, x: float32, y: float32, skipBackground: Int) {
         if box.Style.Visibility == .visible && box.Id != skipBackground && !isHiddenEmptyCell(box) {
             paintBackgroundAndBorder(box, x: x, y: y)
         }
@@ -614,7 +614,7 @@ final class DisplayListBuilder {
     /// start a stacking context of their own -- positioned boxes,
     /// floats, atomic inlines -- are painted whole in the phase that
     /// owns them, and skipped in the others.
-    func paintPhase(_ box: layout.Box, _ phase: PaintPhase, x parentX: float32, y parentY: float32, skipBackground: Int, isRoot: Bool) {
+    func paintPhase(box: layout.Box, phase: PaintPhase, x parentX: float32, y parentY: float32, skipBackground: Int, isRoot: Bool) {
         let s = box.Style
         let x = parentX + box.X + box.OffsetX
         let y = parentY + box.Y + box.OffsetY
@@ -669,7 +669,7 @@ final class DisplayListBuilder {
         }
     }
 
-    func paintOutline(_ box: layout.Box, x: float32, y: float32) {
+    func paintOutline(box: layout.Box, x: float32, y: float32) {
         let s = box.Style
         if s.Visibility == .visible && s.OutlineWidth > 0 && s.OutlineStyle != "none" && s.OutlineStyle != "hidden" {
             let w = s.OutlineWidth
@@ -685,7 +685,7 @@ final class DisplayListBuilder {
     }
 
     /// Floats that inline layout placed among a box's inline content.
-    func paintFloatsWithin(_ box: layout.Box, x: float32, y: float32, skipBackground: Int) {
+    func paintFloatsWithin(box: layout.Box, x: float32, y: float32, skipBackground: Int) {
         if box.Kind == .text || box.Kind == .lineBreak { return }
         if box.Style.Float != .none {
             paintBox(box, x: x, y: y, skipBackground: skipBackground)
@@ -698,18 +698,18 @@ final class DisplayListBuilder {
         }
     }
 
-    func color(_ c: draw.Color) -> draw.Color {
+    func color(c: draw.Color) -> draw.Color {
         return opacity < 1 ? c.Faded(opacity) : c
     }
 
-    func hasVisibleDescendant(_ box: layout.Box) -> bool {
+    func hasVisibleDescendant(box: layout.Box) -> bool {
         for c in box.Children {
             if c.Style.Visibility == .visible || hasVisibleDescendant(c) { return true }
         }
         return false
     }
 
-    func paintBackgroundAndBorder(_ box: layout.Box, x: float32, y: float32) {
+    func paintBackgroundAndBorder(box: layout.Box, x: float32, y: float32) {
         let s = box.Style
         if !box.ColumnFragments.isEmpty {
             paintFragments(box, x: x, y: y)
@@ -735,7 +735,7 @@ final class DisplayListBuilder {
         }
         // background-clip: where the background shows; background-origin:
         // what the image is positioned and sized in.
-        func area(_ which: string) -> (rect: draw.Rect, radii: draw.Radii) {
+        func area(which: string) -> (rect: draw.Rect, radii: draw.Radii) {
             switch which {
             case "padding-box":
                 return (rect: draw.Rect(x + box.Border.Left, y + box.Border.Top, box.PaddingBoxWidth, box.PaddingBoxHeight), radii: radii.Inset(box.Border))
@@ -748,7 +748,7 @@ final class DisplayListBuilder {
             }
         }
         // The background: its color and its image, in a clip area.
-        func background(_ clip: (rect: draw.Rect, radii: draw.Radii), textClip: bool) {
+        func background(clip: (rect: draw.Rect, radii: draw.Radii), textClip: bool) {
             if s.BackgroundColor.A > 0 {
                 items.append(.fill(clip.rect, color(s.BackgroundColor), clip.radii))
             }
@@ -859,11 +859,11 @@ final class DisplayListBuilder {
 
     /// A box's border-image, or nil where its image isn't loaded: the
     /// border's own style shows then.
-    func borderImage(_ box: layout.Box, x: float32, y: float32) -> PaintItem? {
+    func borderImage(box: layout.Box, x: float32, y: float32) -> PaintItem? {
         let s = box.Style
         let bw = box.Border
         let border: [float32] = [bw.Top, bw.Right, bw.Bottom, bw.Left]
-        func side(_ v: cascade.BorderImageSide, _ i: int, _ base: float32, _ auto: float32) -> float32 {
+        func side(v: cascade.BorderImageSide, i: int, base: float32, auto: float32) -> float32 {
             switch v {
             case .times(let n): return n * border[i]
             case .length(let l): return l.Or(0, base: base)
@@ -917,7 +917,7 @@ final class DisplayListBuilder {
         return it
     }
 
-    func sliceRepeat(_ k: string) -> draw.SliceRepeat {
+    func sliceRepeat(k: string) -> draw.SliceRepeat {
         switch k {
         case "repeat": return .tile
         case "round": return .round
@@ -929,7 +929,7 @@ final class DisplayListBuilder {
     /// A block split between columns: its background and border in each
     /// column's fragment. Sliced, the top edge is the first fragment's
     /// and the bottom the last's; cloned, each has all four.
-    func paintFragments(_ box: layout.Box, x: float32, y: float32) {
+    func paintFragments(box: layout.Box, x: float32, y: float32) {
         let s = box.Style
         let n = box.ColumnFragments.count
         var i = 0
@@ -958,7 +958,7 @@ final class DisplayListBuilder {
         }
     }
 
-    func styleName(_ b: cascade.BorderStyle) -> string {
+    func styleName(b: cascade.BorderStyle) -> string {
         switch b {
         case .dashed: return "dashed"
         case .dotted: return "dotted"
@@ -969,7 +969,7 @@ final class DisplayListBuilder {
 
     /// A border or outline whose sides may be dashed, dotted or double:
     /// the solid sides as one ring, the others drawn side by side.
-    func styledRing(_ rect: draw.Rect, _ widths: draw.Edges, _ colors: [draw.Color], _ radii: draw.Radii, _ styles: [string]) {
+    func styledRing(rect: draw.Rect, widths: draw.Edges, colors: [draw.Color], radii: draw.Radii, styles: [string]) {
         var plain = true
         for st in styles where st != "solid" { plain = false }
         if plain {
@@ -1038,13 +1038,13 @@ final class DisplayListBuilder {
     /// from the middle of the corner before it to the middle of the corner
     /// after, so dashes and dots follow the curve. Dashes are three widths
     /// long and dots one, spaced so that one sits on each corner's middle.
-    func roundedStyledRing(_ rect: draw.Rect, _ widths: draw.Edges, _ colors: [draw.Color], _ radii: draw.Radii, _ styles: [string]) {
+    func roundedStyledRing(rect: draw.Rect, widths: draw.Edges, colors: [draw.Color], radii: draw.Radii, styles: [string]) {
         let w = [widths.Top, widths.Right, widths.Bottom, widths.Left]
         // Corners too big for the box shrink to fit, as a solid ring's do.
         let fit = radii.Fitted(rect.Width, rect.Height)
         let corner = [fit.TopLeft, fit.TopRight, fit.BottomRight, fit.BottomLeft]
         // A side's line, `inset` in from the box's edge.
-        func sideLine(_ side: int, _ inset: float32) -> [draw.Point] {
+        func sideLine(side: int, inset: float32) -> [draw.Point] {
             var pts: [draw.Point] = []
             var half = 0
             while half < 2 {
@@ -1069,7 +1069,7 @@ final class DisplayListBuilder {
             }
             return pts
         }
-        func lengths(_ pts: [draw.Point]) -> [float32] {
+        func lengths(pts: [draw.Point]) -> [float32] {
             var out: [float32] = [0]
             var i = 1
             while i < pts.count {
@@ -1081,7 +1081,7 @@ final class DisplayListBuilder {
             return out
         }
         // The point `at` along the line.
-        func pointAt(_ pts: [draw.Point], _ len: [float32], _ at: float32) -> draw.Point {
+        func pointAt(pts: [draw.Point], len: [float32], at: float32) -> draw.Point {
             var i = 1
             while i < pts.count - 1 && len[i] < at { i += 1 }
             let span = len[i] - len[i - 1]
@@ -1089,7 +1089,7 @@ final class DisplayListBuilder {
             return draw.Point(pts[i - 1].X + (pts[i].X - pts[i - 1].X) * f, pts[i - 1].Y + (pts[i].Y - pts[i - 1].Y) * f)
         }
         // The stretch of the line from `a` to `b`, stroked `width` wide.
-        func stroke(_ pts: [draw.Point], _ len: [float32], _ a: float32, _ b: float32, _ width: float32, _ c: draw.Color) {
+        func stroke(pts: [draw.Point], len: [float32], a: float32, b: float32, width: float32, c: draw.Color) {
             var line = draw.Path()
             let p0 = pointAt(pts, len, a)
             line.MoveTo(p0.X, p0.Y)
@@ -1158,7 +1158,7 @@ final class DisplayListBuilder {
     /// A side's color, with inset, outset, groove and ridge shaded the
     /// way browsers shade them: top and left light for outset, dark for
     /// inset.
-    func borderSideColor(_ s: cascade.ComputedStyle, _ side: Int) -> draw.Color {
+    func borderSideColor(s: cascade.ComputedStyle, side: Int) -> draw.Color {
         let base = s.BorderColor(side)
         var style = s.BorderTopStyle
         if side == 1 { style = s.BorderRightStyle } else if side == 2 { style = s.BorderBottomStyle } else if side == 3 { style = s.BorderLeftStyle }
@@ -1172,12 +1172,12 @@ final class DisplayListBuilder {
         }
     }
 
-    func shade(_ c: draw.Color, _ f: float32) -> draw.Color {
+    func shade(c: draw.Color, f: float32) -> draw.Color {
         if f >= 1 { return c }
         return draw.Color(uint8(float32(c.R) * f), uint8(float32(c.G) * f), uint8(float32(c.B) * f), c.A)
     }
 
-    func paintLine(_ container: layout.Box, _ line: layout.Line, x: float32, y: float32, visible: Bool, firstLine: bool = false) {
+    func paintLine(container: layout.Box, line: layout.Line, x: float32, y: float32, visible: Bool, firstLine: bool = false) {
         let firstLineStyle = firstLine ? container.FirstLineStyle : nil
         // Selected text drawn again in ::selection's color, clipped to
         // where it is selected.
@@ -1308,7 +1308,7 @@ final class DisplayListBuilder {
 
     /// A line of text decoration from (x, y) along width, in a style:
     /// double as two lines, dotted and dashed as marks, wavy as a wave.
-    func decorationLine(_ x: float32, _ y: float32, _ width: float32, _ t: float32, _ c: draw.Color, _ style: string) {
+    func decorationLine(x: float32, y: float32, width: float32, t: float32, c: draw.Color, style: string) {
         switch style {
         case "double":
             items.append(.fill(draw.Rect(x, y, width, t), c, draw.Radii.zero))
@@ -1337,7 +1337,7 @@ final class DisplayListBuilder {
 
     /// The ::selection style text in a box takes: its own element's, or
     /// the nearest ancestor's that has one.
-    func selectionStyle(_ box: layout.Box) -> cascade.ComputedStyle? {
+    func selectionStyle(box: layout.Box) -> cascade.ComputedStyle? {
         var cur: layout.Box? = box
         while let b = cur {
             if let s = b.SelectionStyle { return s }
@@ -1348,7 +1348,7 @@ final class DisplayListBuilder {
 
     /// Where a replaced element's image goes in its content box, as
     /// object-fit and object-position say.
-    func objectRect(_ s: cascade.ComputedStyle, _ inner: draw.Rect, _ iw: float32, _ ih: float32) -> draw.Rect {
+    func objectRect(s: cascade.ComputedStyle, inner: draw.Rect, iw: float32, ih: float32) -> draw.Rect {
         if iw <= 0 || ih <= 0 { return inner }
         var w = inner.Width
         var h = inner.Height
@@ -1372,7 +1372,7 @@ final class DisplayListBuilder {
     }
 
     /// Paints what a control or image shows inside its box.
-    func paintReplaced(_ box: layout.Box, x: float32, y: float32) {
+    func paintReplaced(box: layout.Box, x: float32, y: float32) {
         let s = box.Style
         // appearance: none: a checkbox, radio, range or progress bar draws
         // nothing of its own, only what CSS gives it (its box, ::before).
@@ -1680,7 +1680,7 @@ final class DisplayListBuilder {
 
     /// Stacked boxes by z-index, then in tree order (box ids go in the
     /// order boxes were made).
-    func sortStacked(_ list: inout [Stacked]) {
+    func sortStacked(list: inout [Stacked]) {
         var i = 1
         while i < list.count {
             let b = list[i]
@@ -1698,14 +1698,14 @@ final class DisplayListBuilder {
 
 /// Paints a display list onto a canvas: page coordinates are scaled by
 /// the device scale and shifted by the view's origin and scroll.
-public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32, originX: float32, originY: float32,
+public func Rasterize(items: [PaintItem], on base: draw.Canvas, scale: float32, originX: float32, originY: float32,
                scrollX: float32, scrollY: float32) {
     var canvas = base
     var clips: [draw.IRect] = []
     var dx = originX - scrollX * scale
     var dy = originY - scrollY * scale
     var offsets: [(float32, float32)] = []
-    func device(_ r: draw.Rect) -> draw.IRect {
+    func device(r: draw.Rect) -> draw.IRect {
         let x0 = draw.RoundToInt(r.X * scale + dx)
         let y0 = draw.RoundToInt(r.Y * scale + dy)
         let x1 = draw.RoundToInt((r.X + r.Width) * scale + dx)
@@ -1717,7 +1717,7 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
     var layerBlurs: [float32] = []
     var layerTransforms: [draw.Affine] = []
     var layerItems: [PaintItem] = []
-    func inflate(_ r: draw.IRect, _ by: float32) -> draw.IRect {
+    func inflate(r: draw.IRect, by: float32) -> draw.IRect {
         let d = int32(by + 0.5)
         return draw.IRect(r.X - d, r.Y - d, r.Width + 2 * d, r.Height + 2 * d)
     }
@@ -1975,9 +1975,9 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
 
 /// Cuts a layer to its item's clip-path and keeps it as much as its
 /// mask is opaque, in the canvas's pixels.
-func applyClipAndMask(_ layer: draw.Layer, _ item: PaintItem, scale: float32, dx: float32, dy: float32) {
-    func px(_ v: float32, _ d: float32) -> float32 { return v * scale + d }
-    func device(_ r: draw.Rect) -> draw.IRect {
+func applyClipAndMask(layer: draw.Layer, item: PaintItem, scale: float32, dx: float32, dy: float32) {
+    func px(v: float32, d: float32) -> float32 { return v * scale + d }
+    func device(r: draw.Rect) -> draw.IRect {
         let x0 = draw.RoundToInt(px(r.X, dx))
         let y0 = draw.RoundToInt(px(r.Y, dy))
         return draw.IRect(x0, y0, draw.RoundToInt(px(r.X + r.Width, dx)) - x0, draw.RoundToInt(px(r.Y + r.Height, dy)) - y0)
@@ -2074,8 +2074,8 @@ func applyClipAndMask(_ layer: draw.Layer, _ item: PaintItem, scale: float32, dx
 
 /// The part of a text fragment inside a selection, as byte offsets
 /// into the fragment's text, or nil for none.
-public func SelectedPart(_ f: layout.Fragment, _ node: html.Node, _ range: (start: dom.TextPosition, end: dom.TextPosition),
-                  _ order: [int64: int]) -> (from: int, to: int)? {
+public func SelectedPart(f: layout.Fragment, node: html.Node, range: (start: dom.TextPosition, end: dom.TextPosition),
+                  order: [int64: int]) -> (from: int, to: int)? {
     let o = order[node.Id] ?? 0
     let so = order[range.start.Node.Id] ?? 0
     let eo = order[range.end.Node.Id] ?? 0
@@ -2101,7 +2101,7 @@ public func SelectedPart(_ f: layout.Fragment, _ node: html.Node, _ range: (star
 /// Whether painting reads an attribute itself, as a checkbox's check
 /// or a field's placeholder. `web/cmd/check-deps` keeps this in step
 /// with the code.
-public func ReadsAttribute(_ name: string) -> bool {
+public func ReadsAttribute(name: string) -> bool {
     switch name {
     case "alt", "max", "min", "step", "placeholder", "value", "checked", "data-viewport":
         return true

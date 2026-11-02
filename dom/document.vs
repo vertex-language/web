@@ -47,7 +47,7 @@ public final class Document {
     var listeners: [int64: [listener]] = [:]
     var nextListener = 0
 
-    public init(_ tree: html.Document) {
+    public init(tree: html.Document) {
         Tree = tree
     }
 
@@ -55,13 +55,13 @@ public final class Document {
     public var Title: string { return Tree.Title }
 
     /// The element with an id, or nil.
-    public func ElementById(_ id: string) -> Element? {
+    public func ElementById(id: string) -> Element? {
         guard let n = Tree.ElementById(id) else { return nil }
         return Element(n, self)
     }
 
     /// A handle on a node of this document, for changing it.
-    public func ElementFor(_ node: html.Node) -> Element {
+    public func ElementFor(node: html.Node) -> Element {
         return Element(node, self)
     }
 
@@ -83,18 +83,18 @@ public final class Document {
 
     // MARK: - Making nodes
 
-    public func CreateElement(_ tagName: string) -> html.Node {
+    public func CreateElement(tagName: string) -> html.Node {
         return html.Node(kind: html.NodeKind.element, tagName: lower(tagName))
     }
 
-    public func CreateTextNode(_ text: string) -> html.Node {
+    public func CreateTextNode(text: string) -> html.Node {
         return html.Node(kind: html.NodeKind.text, text: text)
     }
 
     // MARK: - Changing the tree
 
     /// Sets an attribute.
-    public func SetAttribute(_ element: html.Node, _ name: string, _ value: string) {
+    public func SetAttribute(element: html.Node, name: string, value: string) {
         let key = lower(name)
         let old = element.GetAttribute(key)
         if let o = old, o == value { return }
@@ -103,7 +103,7 @@ public final class Document {
     }
 
     /// Removes an attribute, if the element has it.
-    public func RemoveAttribute(_ element: html.Node, _ name: string) {
+    public func RemoveAttribute(element: html.Node, name: string) {
         let key = lower(name)
         guard let old = element.GetAttribute(key) else { return }
         element.RemoveAttribute(key)
@@ -112,7 +112,7 @@ public final class Document {
 
     /// Adds a boolean attribute where it is missing and removes it where
     /// present, or sets it to `force`. Answers whether it is there now.
-    public func ToggleAttribute(_ element: html.Node, _ name: string, force: bool? = nil) -> bool {
+    public func ToggleAttribute(element: html.Node, name: string, force: bool? = nil) -> bool {
         let want = force ?? !element.HasAttribute(name)
         if want {
             if !element.HasAttribute(name) { SetAttribute(element, name, "") }
@@ -123,13 +123,13 @@ public final class Document {
     }
 
     /// Appends a child, taking it from wherever it was first.
-    public func AppendChild(_ parent: html.Node, _ child: html.Node) {
+    public func AppendChild(parent: html.Node, child: html.Node) {
         InsertBefore(parent, child, nil)
     }
 
     /// Inserts a child before another of the parent's children, or last
     /// where `before` is nil.
-    public func InsertBefore(_ parent: html.Node, _ child: html.Node, _ before: html.Node?) {
+    public func InsertBefore(parent: html.Node, child: html.Node, before: html.Node?) {
         if let old = child.Parent {
             RemoveChild(old, child)
         }
@@ -138,14 +138,14 @@ public final class Document {
     }
 
     /// Removes a child, if it is one.
-    public func RemoveChild(_ parent: html.Node, _ child: html.Node) {
+    public func RemoveChild(parent: html.Node, child: html.Node) {
         guard let p = child.Parent, p.Id == parent.Id else { return }
         parent.RemoveChild(child)
         journal.append(MutationRecord(Kind: .childList, Target: parent, Removed: [child]))
     }
 
     /// Replaces a text node's text.
-    public func SetText(_ node: html.Node, _ text: string) {
+    public func SetText(node: html.Node, text: string) {
         if node.Text == text { return }
         let old = node.Text
         node.SetText(text)
@@ -154,7 +154,7 @@ public final class Document {
 
     /// Replaces a node's children with one text node holding text, or
     /// with nothing for empty text. A lone text child is changed in place.
-    public func SetTextContent(_ node: html.Node, _ text: string) {
+    public func SetTextContent(node: html.Node, text: string) {
         if node.Kind == html.NodeKind.text || node.Kind == html.NodeKind.comment {
             SetText(node, text)
             return
@@ -183,7 +183,7 @@ public final class Element {
     public let Node: html.Node
     public let Owner: Document
 
-    public init(_ node: html.Node, _ owner: Document) {
+    public init(node: html.Node, owner: Document) {
         Node = node
         Owner = owner
     }
@@ -191,11 +191,11 @@ public final class Element {
     public var TagName: string { return Node.TagName }
     public var Id: string { return Node.GetAttribute("id") ?? "" }
 
-    public func GetAttribute(_ name: string) -> string? { return Node.GetAttribute(name) }
-    public func HasAttribute(_ name: string) -> bool { return Node.HasAttribute(name) }
-    public func SetAttribute(_ name: string, _ value: string) { Owner.SetAttribute(Node, name, value) }
-    public func RemoveAttribute(_ name: string) { Owner.RemoveAttribute(Node, name) }
-    public func ToggleAttribute(_ name: string, force: bool? = nil) -> bool {
+    public func GetAttribute(name: string) -> string? { return Node.GetAttribute(name) }
+    public func HasAttribute(name: string) -> bool { return Node.HasAttribute(name) }
+    public func SetAttribute(name: string, value: string) { Owner.SetAttribute(Node, name, value) }
+    public func RemoveAttribute(name: string) { Owner.RemoveAttribute(Node, name) }
+    public func ToggleAttribute(name: string, force: bool? = nil) -> bool {
         return Owner.ToggleAttribute(Node, name, force: force)
     }
 
@@ -212,8 +212,8 @@ public final class Element {
         return Element(p, Owner)
     }
 
-    public func AppendChild(_ child: html.Node) { Owner.AppendChild(Node, child) }
-    public func InsertBefore(_ child: html.Node, _ before: html.Node?) { Owner.InsertBefore(Node, child, before) }
+    public func AppendChild(child: html.Node) { Owner.AppendChild(Node, child) }
+    public func InsertBefore(child: html.Node, before: html.Node?) { Owner.InsertBefore(Node, child, before) }
 
     /// Takes the element out of the tree.
     public func Remove() {
@@ -225,21 +225,21 @@ public final class Element {
 public struct ClassList {
     let element: Element
 
-    public init(_ element: Element) {
+    public init(element: Element) {
         self.element = element
     }
 
     public var Values: [string] { return element.Node.Classes() }
-    public func Contains(_ name: string) -> bool { return element.Node.HasClass(name) }
+    public func Contains(name: string) -> bool { return element.Node.HasClass(name) }
 
-    public func Add(_ name: string) {
+    public func Add(name: string) {
         if name.isEmpty || Contains(name) { return }
         var names = Values
         names.append(name)
         write(names)
     }
 
-    public func Remove(_ name: string) {
+    public func Remove(name: string) {
         if !Contains(name) { return }
         var names: [string] = []
         for n in Values where n != name { names.append(n) }
@@ -249,13 +249,13 @@ public struct ClassList {
     /// Adds the class where it is missing and removes it where present,
     /// or adds or removes it as `force` says. Answers whether it is there
     /// now.
-    public func Toggle(_ name: string, force: bool? = nil) -> bool {
+    public func Toggle(name: string, force: bool? = nil) -> bool {
         let want = force ?? !Contains(name)
         if want { Add(name) } else { Remove(name) }
         return want
     }
 
-    func write(_ names: [string]) {
+    func write(names: [string]) {
         var s = ""
         for n in names {
             if !s.isEmpty { s += " " }

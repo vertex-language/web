@@ -9,7 +9,7 @@ import (
 
 var failures = 0
 
-func check(_ ok: bool, _ what: string) {
+func check(ok: bool, what: string) {
     if ok {
         print("ok    \(what)")
     } else {
@@ -18,14 +18,14 @@ func check(_ ok: bool, _ what: string) {
     }
 }
 
-func svgNode(_ source: string) -> html.Node {
+func svgNode(source: string) -> html.Node {
     let doc = html.Parse("<body>" + source + "</body>")
     return doc.ElementsByTagName("svg")[0]
 }
 
 /// The drawing rendered into a size-by-size canvas at its origin, in the
 /// current color given, with an optional CSS fill.
-func render(_ source: string, size: int32 = 20, fill: draw.Color? = nil, fillNone: bool = false) -> [uint8] {
+func render(source: string, size: int32 = 20, fill: draw.Color? = nil, fillNone: bool = false) -> [uint8] {
     let d = svg.Parse(svgNode(source))
     var pixels = [uint8](repeating: 0, count: int(size * size * 4))
     draw.WithCanvas(&pixels, width: size, height: size) { c in
@@ -35,7 +35,7 @@ func render(_ source: string, size: int32 = 20, fill: draw.Color? = nil, fillNon
     return pixels
 }
 
-func at(_ p: [uint8], _ x: int32, _ y: int32, size: int32 = 20) -> (r: uint8, g: uint8, b: uint8, a: uint8) {
+func at(p: [uint8], x: int32, y: int32, size: int32 = 20) -> (r: uint8, g: uint8, b: uint8, a: uint8) {
     let i = int((y * size + x) * 4)
     return (r: p[i], g: p[i + 1], b: p[i + 2], a: p[i + 3])
 }

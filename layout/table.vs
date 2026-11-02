@@ -24,7 +24,7 @@ struct TableGrid {
 
 extension Layout {
     /// Gathers a table's rows, in order, through its row groups.
-    func gridOf(_ table: Box) -> TableGrid {
+    func gridOf(table: Box) -> TableGrid {
         var grid = TableGrid()
         for child in table.Children {
             switch child.Style.Display {
@@ -46,7 +46,7 @@ extension Layout {
         return grid
     }
 
-    func addRow(_ row: Box, group: Box?, to grid: inout TableGrid, wrapAsCell: Bool = false) {
+    func addRow(row: Box, group: Box?, to grid: inout TableGrid, wrapAsCell: Bool = false) {
         var cells: [GridCell] = []
         var column = 0
         if wrapAsCell {
@@ -79,7 +79,7 @@ extension Layout {
     }
 
     /// The narrowest and widest each column can be, from its cells.
-    func columnLimits(_ grid: TableGrid, cbWidth: float32) -> (min: [float32], max: [float32], fixed: [bool]) {
+    func columnLimits(grid: TableGrid, cbWidth: float32) -> (min: [float32], max: [float32], fixed: [bool]) {
         var mins = [float32](repeating: 0, count: grid.columns)
         var maxs = [float32](repeating: 0, count: grid.columns)
         // Columns a cell gives a width: they keep it, and room to spare
@@ -113,7 +113,7 @@ extension Layout {
     }
 
     /// The widths a table wants: its columns' limits plus the spacing.
-    func tableIntrinsicWidths(_ table: Box) -> (min: float32, max: float32) {
+    func tableIntrinsicWidths(table: Box) -> (min: float32, max: float32) {
         let grid = gridOf(table)
         if grid.columns == 0 { return (min: 0, max: 0) }
         let limits = columnLimits(grid, cbWidth: 0)
@@ -131,7 +131,7 @@ extension Layout {
 
     /// Lays out a table's rows and cells in the width the table has, and
     /// answers the content height.
-    func layoutTable(_ table: Box, contentWidth: float32, flow: Flow) -> float32 {
+    func layoutTable(table: Box, contentWidth: float32, flow: Flow) -> float32 {
         let grid = gridOf(table)
         let spacing = table.Style.BorderCollapse == .collapse ? 0 : table.Style.BorderSpacing
         var y: float32 = 0
@@ -294,7 +294,7 @@ extension Layout {
 
     /// Lays out the captions that go under the rows, from y; answers
     /// where they end.
-    func captionsBelow(_ table: Box, _ grid: TableGrid, _ top: float32, cb: ContainingBlock, flow: Flow) -> float32 {
+    func captionsBelow(table: Box, grid: TableGrid, top: float32, cb: ContainingBlock, flow: Flow) -> float32 {
         var y = top
         for caption in grid.captions where caption.Style.CaptionBelow {
             layoutBlock(caption, cb: cb, flow: flow.root(caption))
@@ -307,7 +307,7 @@ extension Layout {
 
     /// Moves a box's content down inside it: for vertical-align in a
     /// cell taller than what it holds.
-    func shiftContent(_ box: Box, by dy: float32) {
+    func shiftContent(box: Box, by dy: float32) {
         var i = 0
         while i < box.Lines.count {
             box.Lines[i].Y += dy

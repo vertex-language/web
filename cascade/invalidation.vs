@@ -15,7 +15,7 @@ final class Mentions {
 
     init() {}
 
-    func add(_ other: Mentions) {
+    func add(other: Mentions) {
         for x in other.ids { ids.insert(x) }
         for x in other.classes { classes.insert(x) }
         for x in other.attributes { attributes.insert(x) }
@@ -41,7 +41,7 @@ final class Features {
 
     init() {}
 
-    func note(_ sel: selector.ComplexSelector) {
+    func note(sel: selector.ComplexSelector) {
         let m = Mentions()
         var sibling = false
         var hasPseudo = false
@@ -54,14 +54,14 @@ final class Features {
         }
     }
 
-    func noteComplex(_ sel: selector.ComplexSelector, _ m: Mentions, _ sibling: inout bool, _ hasPseudo: inout bool) {
+    func noteComplex(sel: selector.ComplexSelector, m: Mentions, sibling: inout bool, hasPseudo: inout bool) {
         for c in sel.Compounds {
             if c.CombinatorWithNext == .adjacentSibling || c.CombinatorWithNext == .generalSibling { sibling = true }
             notePart(c.Part, m, &sibling, &hasPseudo)
         }
     }
 
-    func notePart(_ part: selector.SelectorPart, _ m: Mentions, _ sibling: inout bool, _ hasPseudo: inout bool) {
+    func notePart(part: selector.SelectorPart, m: Mentions, sibling: inout bool, hasPseudo: inout bool) {
         if let id = part.Id { m.ids.insert(id) }
         for c in part.Classes { m.classes.insert(c) }
         for a in part.Attributes { m.attributes.insert(css.lower(a.Name)) }
@@ -91,7 +91,7 @@ final class Features {
     }
 
     /// The attributes `content: attr(name)` reads.
-    func note(_ decls: [css.Longhand]) {
+    func note(decls: [css.Longhand]) {
         for d in decls where d.Prop == .content {
             if case .families(let parts) = d.Value {
                 for part in parts {
@@ -105,7 +105,7 @@ final class Features {
 
 /// Whether the cascade reads an attribute itself, outside any selector:
 /// inline style, and the presentational hints.
-public func ReadsAttribute(_ name: string) -> bool {
+public func ReadsAttribute(name: string) -> bool {
     switch name {
     case "style", "hidden", "width", "height", "align", "bgcolor", "color", "size", "border", "cellspacing", "type":
         return true
@@ -123,7 +123,7 @@ enum Reach: int {
 }
 
 /// The farther of two reaches.
-func wider(_ a: Reach, _ b: Reach) -> Reach {
+func wider(a: Reach, b: Reach) -> Reach {
     return a.rawValue >= b.rawValue ? a : b
 }
 
@@ -135,7 +135,7 @@ extension StyleResolver {
     ///
     /// `reads` answers for the attributes later stages read themselves
     /// (an image's src, a cell's colspan).
-    public func Invalidate(_ records: [dom.MutationRecord], reads: (string) -> bool) -> [html.Node] {
+    public func Invalidate(records: [dom.MutationRecord], reads: (string) -> bool) -> [html.Node] {
         var roots: [html.Node] = []
         var seen = Set<int64>()
         let usesHas = UA.features.usesHas || Author.features.usesHas
@@ -169,7 +169,7 @@ extension StyleResolver {
 
     /// How far an attribute change reaches: nothing, where no selector,
     /// hint or stage looks at what changed.
-    func attributeReach(_ r: dom.MutationRecord, reads: (string) -> bool) -> Reach {
+    func attributeReach(r: dom.MutationRecord, reads: (string) -> bool) -> Reach {
         let name = r.AttributeName
         var reach = Reach.nothing
         if ReadsAttribute(name) || reads(name) { reach = .element }
@@ -198,7 +198,7 @@ extension StyleResolver {
 
     /// How far a change to something the test picks out reaches, by
     /// which selectors mention it.
-    func reachOf(_ mentioned: (Mentions) -> bool) -> Reach {
+    func reachOf(mentioned: (Mentions) -> bool) -> Reach {
         if mentioned(UA.features.has) || mentioned(Author.features.has) { return .document }
         if mentioned(UA.features.siblings) || mentioned(Author.features.siblings) { return .siblings }
         if mentioned(UA.features.all) || mentioned(Author.features.all) { return .element }
@@ -207,14 +207,14 @@ extension StyleResolver {
 }
 
 /// The element at the top of a node's tree.
-func rootElement(_ node: html.Node) -> html.Node {
+func rootElement(node: html.Node) -> html.Node {
     var top = node
     while let p = top.Parent, p.Kind == html.NodeKind.element { top = p }
     return top
 }
 
 /// The words of a class attribute.
-func classesOf(_ s: string) -> [string] {
+func classesOf(s: string) -> [string] {
     var out: [string] = []
     let b = [uint8](s.utf8)
     var i = 0

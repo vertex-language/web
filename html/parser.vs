@@ -125,7 +125,7 @@ public class Parser {
 
     // closeIfOpen pops the stack to below the nearest open `tag`, unless
     // one of the scopes is nearer, in which case nothing is open to close.
-    func closeIfOpen(_ tag: string, within scopes: [string]) {
+    func closeIfOpen(tag: string, within scopes: [string]) {
         var i = stack.count - 1
         while i > 0 {
             let name = stack[i].TagName
@@ -214,7 +214,7 @@ public class Parser {
 }
 
 // The elements whose start tag ends an open paragraph (HTML 13.2.6.4.7).
-func closesParagraph(_ tag: string) -> bool {
+func closesParagraph(tag: string) -> bool {
     switch tag {
     case "address", "article", "aside", "blockquote", "center", "details", "dialog", "dir", "div", "dl",
          "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header",
@@ -226,12 +226,12 @@ func closesParagraph(_ tag: string) -> bool {
     }
 }
 
-func belongsInHead(_ tag: string) -> bool {
+func belongsInHead(tag: string) -> bool {
     return tag == "title" || tag == "meta" || tag == "link" || tag == "style" || tag == "script" ||
         tag == "base" || tag == "noscript"
 }
 
-func isBlank(_ s: string) -> bool {
+func isBlank(s: string) -> bool {
     for b in s.utf8 {
         if !isWhitespace(b) { return false }
     }

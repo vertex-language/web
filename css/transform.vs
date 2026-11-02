@@ -9,7 +9,7 @@ public struct TransformFunction {
     public var Name: string
     public var Args: [Value]
 
-    public init(_ name: string, _ args: [Value]) {
+    public init(name: string, args: [Value]) {
         Name = name
         Args = args
     }
@@ -18,7 +18,7 @@ public struct TransformFunction {
 /// `transform`: none, or a list of transform functions. The 3D ones are
 /// read in their 2D projection: z is dropped, rotateX/Y and perspective
 /// are taken as nothing.
-func parseTransformList(_ tokens: [Token]) -> Value? {
+func parseTransformList(tokens: [Token]) -> Value? {
     if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) == "none" { return Value.none }
     var out: [TransformFunction] = []
     var i = 0
@@ -37,7 +37,7 @@ func parseTransformList(_ tokens: [Token]) -> Value? {
 }
 
 /// The tokens between start and end split at top-level commas.
-func splitArgs(_ tokens: [Token], _ start: int, _ end: int) -> [[Token]] {
+func splitArgs(tokens: [Token], start: int, end: int) -> [[Token]] {
     var out: [[Token]] = []
     var cur: [Token] = []
     var depth = 0
@@ -59,14 +59,14 @@ func splitArgs(_ tokens: [Token], _ start: int, _ end: int) -> [[Token]] {
 }
 
 /// A length argument: a length, a percentage, 0, or calc().
-func transformLength(_ arg: [Token]) -> Value? {
+func transformLength(arg: [Token]) -> Value? {
     if arg.isEmpty { return nil }
     if arg.count == 1 { return parseLengthValue(arg[0], allowAuto: false) }
     return calcValue(arg)
 }
 
 /// An angle argument, in radians; a bare 0 is allowed.
-func transformAngle(_ arg: [Token]) -> float32? {
+func transformAngle(arg: [Token]) -> float32? {
     if arg.count != 1 { return nil }
     let t = arg[0]
     if t.Kind == .number && t.NumberVal == 0 { return 0 }
@@ -74,7 +74,7 @@ func transformAngle(_ arg: [Token]) -> float32? {
     return angleRadians(t.NumberVal, lower(t.Unit))
 }
 
-func angleRadians(_ v: float32, _ unit: string) -> float32? {
+func angleRadians(v: float32, unit: string) -> float32? {
     switch unit {
     case "deg": return v * float32(math.Pi) / 180
     case "rad": return v
@@ -85,7 +85,7 @@ func angleRadians(_ v: float32, _ unit: string) -> float32? {
 }
 
 /// A scale argument: a number, or a percentage of one.
-func transformNumber(_ arg: [Token]) -> float32? {
+func transformNumber(arg: [Token]) -> float32? {
     if arg.count != 1 { return nil }
     if arg[0].Kind == .number { return arg[0].NumberVal }
     if arg[0].Kind == .percentage { return arg[0].NumberVal / 100 }
@@ -95,7 +95,7 @@ func transformNumber(_ arg: [Token]) -> float32? {
 /// A transform function in its 2D form: translate(x, y), scale(x, y),
 /// rotate(a), skew(x, y) or matrix(a..f). An empty name is one that
 /// does nothing in 2D; nil is one that is not valid.
-func transformFunction(_ name: string, _ args: [[Token]]) -> TransformFunction? {
+func transformFunction(name: string, args: [[Token]]) -> TransformFunction? {
     let zero = Value.length(0, .px)
     switch name {
     case "translate", "translatex", "translatey", "translate3d", "translatez":
@@ -191,7 +191,7 @@ func transformFunction(_ name: string, _ args: [[Token]]) -> TransformFunction? 
 }
 
 /// The `translate` property: none, or x [y [z]].
-func parseTranslateProperty(_ tokens: [Token]) -> Value? {
+func parseTranslateProperty(tokens: [Token]) -> Value? {
     if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) == "none" { return Value.none }
     let parts = spaceArgs(tokens)
     if parts.isEmpty || parts.count > 3 { return nil }
@@ -203,7 +203,7 @@ func parseTranslateProperty(_ tokens: [Token]) -> Value? {
 
 /// The `rotate` property: none, an angle, or an axis and an angle (of
 /// which only z shows in 2D).
-func parseRotateProperty(_ tokens: [Token]) -> Value? {
+func parseRotateProperty(tokens: [Token]) -> Value? {
     if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) == "none" { return Value.none }
     var angle: float32? = nil
     var aboutZ = true
@@ -222,7 +222,7 @@ func parseRotateProperty(_ tokens: [Token]) -> Value? {
 }
 
 /// The `scale` property: none, or x [y [z]] as numbers or percentages.
-func parseScaleProperty(_ tokens: [Token]) -> Value? {
+func parseScaleProperty(tokens: [Token]) -> Value? {
     if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) == "none" { return Value.none }
     var nums: [float32] = []
     for t in tokens {
@@ -236,7 +236,7 @@ func parseScaleProperty(_ tokens: [Token]) -> Value? {
 /// `transform-origin`: x and y as lengths, percentages or keywords,
 /// in either order where keywords say which is which; z is dropped.
 /// Kept as an "origin" function of the two.
-func parseTransformOrigin(_ tokens: [Token]) -> Value? {
+func parseTransformOrigin(tokens: [Token]) -> Value? {
     var x: Value? = nil
     var y: Value? = nil
     var pending: [Value] = []
@@ -265,7 +265,7 @@ func parseTransformOrigin(_ tokens: [Token]) -> Value? {
 }
 
 /// Tokens split into space-separated arguments, calc() kept whole.
-func spaceArgs(_ tokens: [Token]) -> [[Token]] {
+func spaceArgs(tokens: [Token]) -> [[Token]] {
     var out: [[Token]] = []
     var i = 0
     while i < tokens.count {

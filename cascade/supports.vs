@@ -12,11 +12,11 @@ import (
 /// the engine parses the declaration, `selector(:has(a))` where it
 /// parses and matches the selector, and those combined with `not`,
 /// `and` and `or`. Anything else (`font-tech()`) doesn't hold.
-public func SupportsCondition(_ text: string) -> bool {
+public func SupportsCondition(text: string) -> bool {
     return supportsCondition(trimSpaces(text), depth: 0)
 }
 
-func supportsCondition(_ text: string, depth: int) -> bool {
+func supportsCondition(text: string, depth: int) -> bool {
     if depth > 16 { return false }
     let t = trimSpaces(text)
     let lowered = css.lower(t)
@@ -37,7 +37,7 @@ func supportsCondition(_ text: string, depth: int) -> bool {
     return supportsInParens(t, depth: depth + 1)
 }
 
-func supportsInParens(_ text: string, depth: int) -> bool {
+func supportsInParens(text: string, depth: int) -> bool {
     let t = trimSpaces(text)
     let b = [uint8](t.utf8)
     let lowered = css.lower(t)
@@ -63,7 +63,7 @@ func supportsInParens(_ text: string, depth: int) -> bool {
 
 /// Whether the engine parses a declaration: a custom property always, a
 /// value with var() where it knows the property.
-func supportsDeclaration(_ text: string) -> bool {
+func supportsDeclaration(text: string) -> bool {
     let decls = css.ParseDeclarations(text)
     guard let d = decls.first else { return false }
     if d.Property.hasPrefix("--") { return true }
@@ -80,7 +80,7 @@ let knownPseudoClasses: Set<string> = [
 ]
 
 /// Whether a selector parses and asks only what the matcher answers.
-func supportsSelector(_ text: string) -> bool {
+func supportsSelector(text: string) -> bool {
     let parsed = selector.ParseSelectors(text)
     if parsed.isEmpty { return false }
     for sel in parsed {
@@ -92,7 +92,7 @@ func supportsSelector(_ text: string) -> bool {
 }
 
 /// Whether the parenthesis at b[0] closes at the end, not before.
-func closesAtEnd(_ b: [uint8]) -> bool {
+func closesAtEnd(b: [uint8]) -> bool {
     var level = 0
     var i = 0
     while i < b.count {
@@ -108,7 +108,7 @@ func closesAtEnd(_ b: [uint8]) -> bool {
 
 /// A condition split at a keyword (and, or) standing between
 /// parenthesized parts; one part where it doesn't.
-func splitKeyword(_ text: string, _ word: string) -> [string] {
+func splitKeyword(text: string, word: string) -> [string] {
     let b = [uint8](text.utf8)
     let w = [uint8](word.utf8)
     var parts: [string] = []

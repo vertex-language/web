@@ -15,7 +15,7 @@ public struct Rule {
     }
 
     /// Looks up a declaration for a specific property name.
-    public func GetDeclaration(_ property: string) -> Declaration? {
+    public func GetDeclaration(property: string) -> Declaration? {
         let lower = toLower(property)
         var i = 0
         while i < Declarations.count {

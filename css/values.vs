@@ -19,7 +19,7 @@ public enum Length: Equatable {
 
     /// The length in pixels against a base for percentages; nil where it
     /// is a keyword.
-    public func Resolve(_ base: float32) -> float32? {
+    public func Resolve(base: float32) -> float32? {
         switch self {
         case .px(let v): return v
         case .percent(let p): return base * p / 100
@@ -29,7 +29,7 @@ public enum Length: Equatable {
     }
 
     /// The length in pixels, or a fallback where it is a keyword.
-    public func Or(_ fallback: float32, base: float32) -> float32 {
+    public func Or(fallback: float32, base: float32) -> float32 {
         return Resolve(base) ?? fallback
     }
 

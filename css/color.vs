@@ -10,7 +10,7 @@ import (
 /// colors, `transparent` and the named colors. `light-dark()` gives its
 /// light color here; the property parser keeps both. Nil for anything else (including `currentcolor`, which
 /// the caller knows and this does not).
-public func ParseColor(_ text: string) -> draw.Color? {
+public func ParseColor(text: string) -> draw.Color? {
     let bytes = asciiLower(trimmed(text))
     let n = bytes.count
     if n == 0 { return nil }
@@ -38,7 +38,7 @@ public var SystemAccent = draw.Color(0x00, 0x7A, 0xFF)
 
 /// The CSS system colors: the platform's accent, and the colors of the
 /// canvas, text, links and controls.
-func systemColor(_ name: string) -> draw.Color? {
+func systemColor(name: string) -> draw.Color? {
     switch name {
     case "accentcolor": return SystemAccent
     case "accentcolortext": return draw.Color.white
@@ -54,7 +54,7 @@ func systemColor(_ name: string) -> draw.Color? {
     }
 }
 
-func parseHex(_ b: [uint8]) -> draw.Color? {
+func parseHex(b: [uint8]) -> draw.Color? {
     var digits: [uint8] = []
     var i = 1
     while i < b.count {
@@ -78,7 +78,7 @@ func parseHex(_ b: [uint8]) -> draw.Color? {
     }
 }
 
-func hexValue(_ c: uint8) -> int {
+func hexValue(c: uint8) -> int {
     if c >= 48 && c <= 57 { return int(c - 48) }
     if c >= 97 && c <= 102 { return int(c - 97 + 10) }
     if c >= 65 && c <= 70 { return int(c - 65 + 10) }
@@ -86,13 +86,13 @@ func hexValue(_ c: uint8) -> int {
 }
 
 /// clampByte is a channel from 0 to 255, rounded.
-func clampByte(_ v: float32) -> uint8 {
+func clampByte(v: float32) -> uint8 {
     return uint8(math.Clamp(v, 0, 255) + 0.5)
 }
 
 /// A decimal number, with an optional sign, point and exponent, read
 /// from bytes[i..<end]; anything else there ends it.
-package func parseNumber(_ b: [uint8], _ start: int, _ end: int) -> float32 {
+package func parseNumber(b: [uint8], start: int, end: int) -> float32 {
     var i = start
     var negative = false
     if i < end && (b[i] == 45 || b[i] == 43) { negative = b[i] == 45; i += 1 }
@@ -128,7 +128,7 @@ package func parseNumber(_ b: [uint8], _ start: int, _ end: int) -> float32 {
     return negative ? -value : value
 }
 
-func startsWith(_ b: [uint8], _ prefix: string) -> bool {
+func startsWith(b: [uint8], prefix: string) -> bool {
     let p = [uint8](prefix.utf8)
     if p.count > b.count { return false }
     var i = 0
@@ -139,7 +139,7 @@ func startsWith(_ b: [uint8], _ prefix: string) -> bool {
     return true
 }
 
-func trimmed(_ s: string) -> [uint8] {
+func trimmed(s: string) -> [uint8] {
     let b = [uint8](s.utf8)
     var start = 0
     var end = b.count
@@ -151,9 +151,9 @@ func trimmed(_ s: string) -> [uint8] {
     return out
 }
 
-func isSpace(_ c: uint8) -> bool { return c == 32 || c == 9 || c == 10 || c == 13 || c == 12 }
+func isSpace(c: uint8) -> bool { return c == 32 || c == 9 || c == 10 || c == 13 || c == 12 }
 
-func asciiLower(_ b: [uint8]) -> [uint8] {
+func asciiLower(b: [uint8]) -> [uint8] {
     var out = b
     var i = 0
     while i < out.count {
@@ -207,12 +207,12 @@ let namedColors: [string: uint32] = [
 ]
 
 /// The number a string spells, as parseNumber reads it.
-public func ParseNumberText(_ s: string) -> float32 {
+public func ParseNumberText(s: string) -> float32 {
     let b = [uint8](s.utf8)
     return parseNumber(b, 0, b.count)
 }
 
 /// The string bytes[start..<end] spell.
-package func stringOf(_ bytes: [uint8], _ start: int, _ end: int) -> string {
+package func stringOf(bytes: [uint8], start: int, end: int) -> string {
     return stringFromBytes(bytes, from: start, to: end)
 }

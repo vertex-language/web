@@ -25,7 +25,7 @@ public struct Coverage {
     public init() {}
 
     /// Adds a sheet's declarations and rules.
-    public mutating func Add(_ sheet: StyleSheet) {
+    public mutating func Add(sheet: StyleSheet) {
         for r in sheet.Rules { add(r) }
         addAtRules(sheet.AtRules)
     }
@@ -33,7 +33,7 @@ public struct Coverage {
     /// At-rules the cascade reads are walked into, as deep as they nest
     /// (whether an @supports holds is the cascade's to say); the rest are
     /// counted with what they hold.
-    mutating func addAtRules(_ ats: [AtRule]) {
+    mutating func addAtRules(ats: [AtRule]) {
         for at in ats {
             switch at.Name {
             case "media", "supports", "layer":
@@ -48,13 +48,13 @@ public struct Coverage {
         }
     }
 
-    func countRules(_ at: AtRule) -> int {
+    func countRules(at: AtRule) -> int {
         var n = at.Rules.count
         for inner in at.AtRules { n += countRules(inner) }
         return n
     }
 
-    mutating func add(_ r: Rule) {
+    mutating func add(r: Rule) {
         Rules += 1
         for d in r.Declarations {
             Declarations += 1
@@ -92,18 +92,18 @@ public struct Coverage {
 
 /// The longhands a property sets: itself, or a shorthand's parts.
 /// Empty for a property the engine doesn't know.
-public func LonghandsOf(_ name: string) -> [Prop] {
+public func LonghandsOf(name: string) -> [Prop] {
     return longhandsOf(name)
 }
 
 /// Whether the engine knows a property: a longhand it computes, or a
 /// shorthand it expands.
-public func IsKnownProperty(_ name: string) -> bool {
+public func IsKnownProperty(name: string) -> bool {
     if propNames[name] != nil { return true }
     return !longhandsOf(name).isEmpty
 }
 
-func ranked(_ counts: [string: int], _ top: int) -> string {
+func ranked(counts: [string: int], top: int) -> string {
     var pairs: [(name: string, count: int)] = []
     for (k, v) in counts { pairs.append((name: k, count: v)) }
     pairs.sort { a, b in a.count != b.count ? a.count > b.count : a.name < b.name }

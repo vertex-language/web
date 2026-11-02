@@ -16,7 +16,7 @@ public struct Attribute: Equatable {
     public var Name: string
     public var Value: string
 
-    public init(_ name: string, _ value: string = "") {
+    public init(name: string, value: string = "") {
         self.Name = name
         self.Value = value
     }

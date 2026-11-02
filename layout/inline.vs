@@ -70,7 +70,7 @@ extension Layout {
     /// Lays out a block's inline content as lines, then as text-wrap-style
     /// and line-clamp ask: balanced lines, a last line not left with one
     /// word, or only so many lines with an ellipsis.
-    func layoutInline(_ box: Box, contentWidth: float32, flow: Flow) -> float32 {
+    func layoutInline(box: Box, contentWidth: float32, flow: Flow) -> float32 {
         var height = layoutInlineOnce(box, contentWidth: contentWidth, flow: flow)
         let wrap = box.Style.TextWrapStyle
         let n = box.Lines.count
@@ -113,9 +113,9 @@ extension Layout {
 
     /// Whether the lines can be laid out again: no floats near, and no
     /// out-of-flow boxes among the content, which a layout places.
-    func canReflow(_ box: Box, _ flow: Flow) -> bool {
+    func canReflow(box: Box, flow: Flow) -> bool {
         if !flow.floats.floats.isEmpty { return false }
-        func clean(_ b: Box) -> bool {
+        func clean(b: Box) -> bool {
             for c in b.Children {
                 if c.Style.IsOutOfFlow { return false }
                 if c.Kind == .inline && !clean(c) { return false }
@@ -126,13 +126,13 @@ extension Layout {
     }
 
     /// Whether the last line is one word under a quarter of the width.
-    func lonelyLastLine(_ box: Box) -> bool {
+    func lonelyLastLine(box: Box) -> bool {
         guard let last = box.Lines.last else { return false }
         return wordsOn(last) <= 1
     }
 
     /// How many words a line holds: runs of text between spaces.
-    func wordsOn(_ line: Line) -> int {
+    func wordsOn(line: Line) -> int {
         var words = 0
         var inWord = false
         for f in line.Fragments where f.Kind == .text {
@@ -148,7 +148,7 @@ extension Layout {
 
     /// Moves the lines over by the room a narrower layout left, as their
     /// alignment says: half for center, all of it for right and end.
-    func shiftForAlignment(_ box: Box, _ room: float32) {
+    func shiftForAlignment(box: Box, room: float32) {
         var d: float32 = 0
         let rtl = box.LinesRightToLeft
         switch box.Style.TextAlign {
@@ -178,7 +178,7 @@ extension Layout {
 
     /// Ends a line with an ellipsis that fits in the width: what
     /// line-clamp leaves at the last line it keeps.
-    func ellipsize(_ line: inout Line, width: float32, box: Box) {
+    func ellipsize(line: inout Line, width: float32, box: Box) {
         let face = box.Style.Face
         let ellipsis = face.Shape("…")
         let limit = box.ContentX + width - ellipsis.Width
@@ -200,7 +200,7 @@ extension Layout {
         line.Fragments = fragments
     }
 
-    func layoutInlineOnce(_ box: Box, contentWidth: float32, flow: Flow) -> float32 {
+    func layoutInlineOnce(box: Box, contentWidth: float32, flow: Flow) -> float32 {
         box.Lines = []
         var items: [Item] = []
         var pendingSpace = false
@@ -441,7 +441,7 @@ extension Layout {
     /// with inline elements' unicode-bidi as the explicit marks it
     /// stands for, through the bidi algorithm. A word takes the highest
     /// level of its characters.
-    func resolveBidi(_ box: Box, _ items: inout [Item]) {
+    func resolveBidi(box: Box, items: inout [Item]) {
         box.BidiLines = false
         box.LinesRightToLeft = box.Style.Direction == .rtl
         var text: [uint32] = []
@@ -555,7 +555,7 @@ extension Layout {
     /// Puts a line's fragments in the order they show (L2), each moved
     /// along with the room before it, and the spans over their
     /// fragments again. Answers how far the line now reaches.
-    func reorderLine(_ box: Box, _ fragments: inout [Fragment], _ levels: [uint8], _ spans: inout [Span],
+    func reorderLine(box: Box, fragments: inout [Fragment], levels: [uint8], spans: inout [Span],
                      indent: float32, end: float32) -> float32 {
         if fragments.isEmpty { return end }
         let rtl = box.LinesRightToLeft
@@ -613,7 +613,7 @@ extension Layout {
     }
 
     /// Gathers the items of a box's inline content, in order.
-    func collectItems(_ box: Box, owner: Box, cb: ContainingBlock, flow: Flow,
+    func collectItems(box: Box, owner: Box, cb: ContainingBlock, flow: Flow,
                       decoration: cascade.TextDecoration, decorationColor: draw.Color,
                       into items: inout [Item], pendingSpace: inout Bool) {
         for child in box.Children {
@@ -680,7 +680,7 @@ extension Layout {
 
     /// A word piece that ends in a soft hyphen, ending a line: the
     /// hyphen shows. Its text stays as the source has it.
-    func hyphenated(_ item: Item) -> Item {
+    func hyphenated(item: Item) -> Item {
         let b = [uint8](item.text.utf8)
         if b.count < 2 || b[b.count - 2] != 0xC2 || b[b.count - 1] != 0xAD { return item }
         var out = item
@@ -691,7 +691,7 @@ extension Layout {
     }
 
     /// Splits a text box into words and spaces as its white-space says.
-    func textItems(_ box: Box, owner: Box, decoration: cascade.TextDecoration, decorationColor: draw.Color,
+    func textItems(box: Box, owner: Box, decoration: cascade.TextDecoration, decorationColor: draw.Color,
                    into items: inout [Item], pendingSpace: inout Bool) {
         let style = owner.Style
         let face = style.Face
@@ -763,7 +763,7 @@ extension Layout {
             while j < n && !isSpaceByte(bytes[j]) { j += 1 }
             // A word with soft hyphens (U+00AD) is a piece per syllable,
             // each holding the hyphen after it, which doesn't show.
-            func piece(_ start: int, _ end: int) {
+            func piece(start: int, end: int) {
                 let text = stringOf(bytes, start, end)
                 var item = Item(kind: .word, box: box, owner: owner)
                 item.text = text
@@ -797,7 +797,7 @@ extension Layout {
     /// Makes a line from its items: places them left to right, merges
     /// neighbouring text of one box into fragments, aligns everything
     /// vertically, and applies text-align.
-    func buildLine(_ box: Box, items: [Item], y: float32, startX: float32, contentWidth: float32, indent: float32,
+    func buildLine(box: Box, items: [Item], y: float32, startX: float32, contentWidth: float32, indent: float32,
                    open: inout [OpenSpan], isFirst: Bool, isLast: Bool) -> Line {
         let strutStyle = box.Style
         let strutFace = strutStyle.Face
@@ -816,7 +816,7 @@ extension Layout {
         }
         var spans: [Span] = []
 
-        func emitSpan(_ o: OpenSpan, endX: float32, isLast: Bool) {
+        func emitSpan(o: OpenSpan, endX: float32, isLast: Bool) {
             let b = o.box
             let face = b.Style.Face
             var sp = Span(Box: b, X: o.startX, Y: 0, Width: endX - o.startX, Height: face.Ascent + face.Descent,
@@ -1139,7 +1139,7 @@ extension Layout {
 
     /// Widens the spaces of a line's text fragments so it fills its free
     /// room. Spaces are the zero glyphs the fragments carry.
-    func justify(_ fragments: inout [Fragment], _ spans: inout [Span], free: float32) {
+    func justify(fragments: inout [Fragment], spans: inout [Span], free: float32) {
         var spaces = 0
         for f in fragments where f.Kind == .text {
             for g in f.Run.Glyphs where g == 0 { spaces += 1 }
@@ -1174,7 +1174,7 @@ extension Layout {
             i += 1
         }
         // A span's edges move by the growth of the fragments before them.
-        func moved(_ x: float32) -> float32 {
+        func moved(x: float32) -> float32 {
             var d: float32 = 0
             var k = 0
             while k < oldX.count {
@@ -1194,7 +1194,7 @@ extension Layout {
     }
 
     /// The widest and narrowest the inline content of a box can be.
-    func inlineIntrinsicWidths(_ box: Box) -> (min: float32, max: float32) {
+    func inlineIntrinsicWidths(box: Box) -> (min: float32, max: float32) {
         var items: [Item] = []
         var pendingSpace = false
         let cb = ContainingBlock(width: 0, height: nil)
@@ -1250,7 +1250,7 @@ extension Layout {
 /// A word cut in two at the last character boundary where the first
 /// part fits a width; the head is empty where not even one character
 /// fits.
-func splitWord(_ item: Item, fitting width: float32) -> (head: Item, tail: Item) {
+func splitWord(item: Item, fitting width: float32) -> (head: Item, tail: Item) {
     let bytes = [uint8](item.text.utf8)
     let face = item.owner.Style.Face
     let spacing = item.owner.Style.LetterSpacing
@@ -1282,7 +1282,7 @@ func splitWord(_ item: Item, fitting width: float32) -> (head: Item, tail: Item)
     return (head: head, tail: tail)
 }
 
-func lastIndex(_ list: [OpenSpan], of box: Box) -> int? {
+func lastIndex(list: [OpenSpan], of box: Box) -> int? {
     var i = list.count - 1
     while i >= 0 {
         if list[i].box.Id == box.Id { return i }
@@ -1291,7 +1291,7 @@ func lastIndex(_ list: [OpenSpan], of box: Box) -> int? {
     return nil
 }
 
-func spaces(_ n: int) -> string {
+func spaces(n: int) -> string {
     var out = ""
     var i = 0
     while i < n {

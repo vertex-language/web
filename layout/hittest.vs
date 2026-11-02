@@ -21,7 +21,7 @@ public struct Hit {
 
 /// The innermost box under a page point. A transformed box is tested
 /// where it paints: the point is taken back through its transform.
-public func HitTest(_ box: Box, _ px: float32, _ py: float32, originX: float32, originY: float32) -> Hit? {
+public func HitTest(box: Box, px: float32, py: float32, originX: float32, originY: float32) -> Hit? {
     if box.Style.HasTransform {
         let x = originX + box.X + box.OffsetX
         let y = originY + box.Y + box.OffsetY
@@ -33,7 +33,7 @@ public func HitTest(_ box: Box, _ px: float32, _ py: float32, originX: float32, 
     return hitTestBox(box, px, py, originX: originX, originY: originY)
 }
 
-func hitTestBox(_ box: Box, _ px: float32, _ py: float32, originX: float32, originY: float32) -> Hit? {
+func hitTestBox(box: Box, px: float32, py: float32, originX: float32, originY: float32) -> Hit? {
     let x = originX + box.X + box.OffsetX
     let y = originY + box.Y + box.OffsetY
     // clip-path cuts what takes the pointer as it cuts what shows.
@@ -128,7 +128,7 @@ func hitTestBox(_ box: Box, _ px: float32, _ py: float32, originX: float32, orig
 
 /// The byte offset in a text fragment nearest a horizontal position:
 /// glyph by glyph, rounding to the nearer edge.
-func offsetInRun(_ f: Fragment, at x: float32, letterSpacing: float32) -> int {
+func offsetInRun(f: Fragment, at x: float32, letterSpacing: float32) -> int {
     let bytes = [uint8](f.Text.utf8)
     // Glyphs and bytes line up only for ASCII; for anything else the
     // run is measured by prefix.
@@ -164,7 +164,7 @@ func offsetInRun(_ f: Fragment, at x: float32, letterSpacing: float32) -> int {
 }
 
 /// The page position of a box: its corner with every ancestor's added.
-public func PagePosition(_ box: Box) -> (x: float32, y: float32) {
+public func PagePosition(box: Box) -> (x: float32, y: float32) {
     var x: float32 = 0
     var y: float32 = 0
     var cur: Box? = box

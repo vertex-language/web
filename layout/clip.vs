@@ -26,17 +26,17 @@ public struct ClipRegion {
     /// nonzero or evenodd, for polygons and paths.
     public var EvenOdd: bool = false
 
-    init(_ kind: string) {
+    init(kind: string) {
         Kind = kind
     }
 
     /// Whether a point on the page is inside.
-    public func Contains(_ px: float32, _ py: float32) -> bool {
+    public func Contains(px: float32, py: float32) -> bool {
         switch Kind {
         case "inset":
             if px < Rect.X || py < Rect.Y || px >= Rect.X + Rect.Width || py >= Rect.Y + Rect.Height { return false }
             let r = Radii.Fitted(Rect.Width, Rect.Height)
-            func corner(_ cx: float32, _ cy: float32, _ rad: float32) -> bool {
+            func corner(cx: float32, cy: float32, rad: float32) -> bool {
                 if rad <= 0 { return true }
                 let dx = (px - cx) / rad
                 let dy = (py - cy) / rad
@@ -64,7 +64,7 @@ public struct ClipRegion {
 
 /// Whether contours (each starting at an index in starts) cover a point,
 /// by nonzero winding or even-odd.
-func windingAt(_ points: [draw.Point], _ starts: [int], _ px: float32, _ py: float32, _ evenOdd: bool) -> bool {
+func windingAt(points: [draw.Point], starts: [int], px: float32, py: float32, evenOdd: bool) -> bool {
     var winding = 0
     var c = 0
     while c < starts.count {
@@ -90,7 +90,7 @@ func windingAt(_ points: [draw.Point], _ starts: [int], _ px: float32, _ py: flo
 /// page, or nil for none. Percentages are of the reference box (the
 /// border box unless the clip-path names another), a circle's of its
 /// diagonal over root two.
-public func ClipRegionOf(_ box: Box, x: float32, y: float32) -> ClipRegion? {
+public func ClipRegionOf(box: Box, x: float32, y: float32) -> ClipRegion? {
     guard let cp = box.Style.ClipPath else { return nil }
     // The reference box, and its corners.
     var ref = draw.Rect(x, y, box.Width, box.Height)
@@ -114,7 +114,7 @@ public func ClipRegionOf(_ box: Box, x: float32, y: float32) -> ClipRegion? {
     let w = ref.Width
     let h = ref.Height
     let a = cp.Args
-    func at(_ i: int, _ base: float32) -> float32 { return i < a.count ? a[i].Or(0, base: base) : 0 }
+    func at(i: int, base: float32) -> float32 { return i < a.count ? a[i].Or(0, base: base) : 0 }
     switch cp.Kind {
     case "box":
         var r = ClipRegion("inset")
@@ -144,7 +144,7 @@ public func ClipRegionOf(_ box: Box, x: float32, y: float32) -> ClipRegion? {
         let bottomSide = ref.Y + h - r.CY
         // A radius: a length, or the distance to the nearest or the
         // farthest side (each axis's own for an ellipse).
-        func radius(_ i: int, _ base: float32, _ near: float32, _ far: float32) -> float32 {
+        func radius(i: int, base: float32, near: float32, far: float32) -> float32 {
             if a[i] == .auto { return near }
             if a[i] == .none { return far }
             return a[i].Or(0, base: base)
@@ -183,7 +183,7 @@ public func ClipRegionOf(_ box: Box, x: float32, y: float32) -> ClipRegion? {
         var cy: float32 = 0
         // A point's coordinates: of the box from its corner, or by from
         // the pen.
-        func point(_ rel: bool) -> (float32, float32) {
+        func point(rel: bool) -> (float32, float32) {
             let px = at(k, w)
             let py = at(k + 1, h)
             k += 2

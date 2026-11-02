@@ -2,16 +2,16 @@ package css
 
 import "unicode/utf8"
 
-func stringFromBytes(_ bytes: [uint8], from start: int, to end: int) -> string {
+func stringFromBytes(bytes: [uint8], from start: int, to end: int) -> string {
     if start >= end { return "" }
     return utf8.Decode(bytes, start, end)
 }
 
-func bytesFromString(_ text: string) -> [uint8] {
+func bytesFromString(text: string) -> [uint8] {
     return [uint8](text.utf8)
 }
 
-func toLower(_ s: string) -> string {
+func toLower(s: string) -> string {
     var b = [uint8](s.utf8)
     var i = 0
     var changed = false
@@ -29,25 +29,25 @@ func toLower(_ s: string) -> string {
 
 
 
-func isWhitespace(_ b: uint8) -> bool {
+func isWhitespace(b: uint8) -> bool {
     return b == 32 || b == 9 || b == 10 || b == 13 || b == 12
 }
 
-func isIdentStart(_ b: uint8) -> bool {
+func isIdentStart(b: uint8) -> bool {
     return (b >= 97 && b <= 122) || // 'a'...'z'
            (b >= 65 && b <= 90) ||  // 'A'...'Z'
            b == 95 || b == 45       // '_', '-'
 }
 
-func isIdentChar(_ b: uint8) -> bool {
+func isIdentChar(b: uint8) -> bool {
     return isIdentStart(b) || (b >= 48 && b <= 57) // '0'...'9'
 }
 
-func isDigit(_ b: uint8) -> bool {
+func isDigit(b: uint8) -> bool {
     return b >= 48 && b <= 57
 }
 
-func trimString(_ s: string) -> string {
+func trimString(s: string) -> string {
     let bytes = bytesFromString(s)
     if bytes.isEmpty { return "" }
     var start = 0

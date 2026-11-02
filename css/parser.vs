@@ -288,7 +288,7 @@ public class Parser {
 /// A nested rule's selector with its parents': `&` stands for them, and a
 /// selector without one is a descendant of them. More than one parent is
 /// `:is(a, b)`.
-func composeSelector(_ sel: string, _ parents: [string]) -> string {
+func composeSelector(sel: string, parents: [string]) -> string {
     let parent = parents.count == 1 ? parents[0] : ":is(" + parents.joined(separator: ", ") + ")"
     if sel.contains("&") {
         var out = ""
@@ -302,7 +302,7 @@ func composeSelector(_ sel: string, _ parents: [string]) -> string {
 
 /// Whether a token in a declaration block begins a nested rule rather than
 /// a declaration: `&`, `.`, `#id`, `:`, `[`, and the combinators.
-func startsNestedRule(_ t: Token) -> bool {
+func startsNestedRule(t: Token) -> bool {
     switch t.Kind {
     case .hash, .colon, .openBracket, .atKeyword:
         return true

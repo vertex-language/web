@@ -13,7 +13,7 @@ let animationProps: [Prop] = [
 ]
 
 /// A time in seconds: `200ms`, `.3s`, or 0.
-func timeOf(_ t: Token) -> float32? {
+func timeOf(t: Token) -> float32? {
     if t.Kind == .number && t.NumberVal == 0 { return 0 }
     if t.Kind != .dimension { return nil }
     switch lower(t.Unit) {
@@ -25,7 +25,7 @@ func timeOf(_ t: Token) -> float32? {
 
 /// A timing function at tokens[i] as normalized text, and how many
 /// tokens it took; nil where none starts there.
-func timingAt(_ tokens: [Token], _ i: int) -> (string, int)? {
+func timingAt(tokens: [Token], i: int) -> (string, int)? {
     let t = tokens[i]
     if t.Kind == .ident {
         switch lower(t.Value) {
@@ -57,12 +57,12 @@ func timingAt(_ tokens: [Token], _ i: int) -> (string, int)? {
 }
 
 /// The items of a comma list, each its tokens.
-func commaItems(_ tokens: [Token]) -> [[Token]] {
+func commaItems(tokens: [Token]) -> [[Token]] {
     return splitArgs(tokens, 0, tokens.count)
 }
 
 /// One transition-* or animation-* longhand.
-func parseAnimationLonghand(_ prop: Prop, _ tokens: [Token]) -> Value? {
+func parseAnimationLonghand(prop: Prop, tokens: [Token]) -> Value? {
     var items: [string] = []
     for item in commaItems(tokens) {
         if item.isEmpty { return nil }
@@ -96,7 +96,7 @@ func parseAnimationLonghand(_ prop: Prop, _ tokens: [Token]) -> Value? {
 }
 
 /// `transition: [property || duration || timing || delay]#`.
-func parseTransitionShorthand(_ tokens: [Token]) -> [(Prop, Value)]? {
+func parseTransitionShorthand(tokens: [Token]) -> [(Prop, Value)]? {
     var props: [string] = []
     var durations: [string] = []
     var timings: [string] = []
@@ -138,7 +138,7 @@ func parseTransitionShorthand(_ tokens: [Token]) -> [(Prop, Value)]? {
 
 /// `animation: [duration || timing || delay || count || direction ||
 /// fill-mode || play-state || name]#`.
-func parseAnimationShorthand(_ tokens: [Token]) -> [(Prop, Value)]? {
+func parseAnimationShorthand(tokens: [Token]) -> [(Prop, Value)]? {
     var lists: [[string]] = [[], [], [], [], [], [], [], []]
     for item in commaItems(tokens) {
         var name = "none"

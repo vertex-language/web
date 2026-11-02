@@ -24,7 +24,7 @@ public class Event {
     var stopped = false
     var stoppedImmediately = false
 
-    public init(_ type: string, bubbles: bool = true) {
+    public init(type: string, bubbles: bool = true) {
         Type = type
         Bubbles = bubbles
     }
@@ -61,7 +61,7 @@ public class MouseEvent: Event {
     public let Alt: bool
     public let Meta: bool
 
-    public init(_ type: string, X: float32 = 0, Y: float32 = 0, Clicks: int32 = 1, Button: int32 = 0, Pressed: bool = false,
+    public init(type: string, X: float32 = 0, Y: float32 = 0, Clicks: int32 = 1, Button: int32 = 0, Pressed: bool = false,
                 Shift: bool = false, Control: bool = false, Alt: bool = false, Meta: bool = false, bubbles: bool = true) {
         self.X = X
         self.Y = Y
@@ -83,7 +83,7 @@ public final class InputEvent: Event {
     /// What was typed, where something was.
     public let Data: string
 
-    public init(_ type: string, Value: string, Data: string = "") {
+    public init(type: string, Value: string, Data: string = "") {
         self.Value = Value
         self.Data = Data
         super.init(type)
@@ -104,7 +104,7 @@ public final class KeyboardEvent: Event {
     /// Whether an input method is composing text: the key is its.
     public let IsComposing: bool
 
-    public init(_ type: string, Key: string, Code: string, Shift: bool = false, Control: bool = false, Alt: bool = false,
+    public init(type: string, Key: string, Code: string, Shift: bool = false, Control: bool = false, Alt: bool = false,
                 Meta: bool = false, Repeat: bool = false, IsComposing: bool = false) {
         self.Key = Key
         self.Code = Code
@@ -123,7 +123,7 @@ public final class SubmitEvent: Event {
     /// The button that submitted it, where one did.
     public let Submitter: html.Node?
 
-    public init(_ type: string, Submitter: html.Node?) {
+    public init(type: string, Submitter: html.Node?) {
         self.Submitter = Submitter
         super.init(type)
     }
@@ -135,7 +135,7 @@ public final class ToggleEvent: Event {
     public let OldState: string
     public let NewState: string
 
-    public init(_ type: string, OldState: string, NewState: string) {
+    public init(type: string, OldState: string, NewState: string) {
         self.OldState = OldState
         self.NewState = NewState
         super.init(type, bubbles: false)
@@ -149,7 +149,7 @@ public final class TransitionEvent: Event {
     /// Seconds the transition had run, not counting its delay.
     public let ElapsedTime: float64
 
-    public init(_ type: string, PropertyName: string, ElapsedTime: float64) {
+    public init(type: string, PropertyName: string, ElapsedTime: float64) {
         self.PropertyName = PropertyName
         self.ElapsedTime = ElapsedTime
         super.init(type)
@@ -162,7 +162,7 @@ public final class AnimationEvent: Event {
     public let AnimationName: string
     public let ElapsedTime: float64
 
-    public init(_ type: string, AnimationName: string, ElapsedTime: float64) {
+    public init(type: string, AnimationName: string, ElapsedTime: float64) {
         self.AnimationName = AnimationName
         self.ElapsedTime = ElapsedTime
         super.init(type)
@@ -171,7 +171,7 @@ public final class AnimationEvent: Event {
 
 /// Focus coming to or leaving an element. focus and blur do not bubble.
 public final class FocusEvent: Event {
-    public init(_ type: string) {
+    public init(type: string) {
         super.init(type, bubbles: false)
     }
 }
@@ -191,7 +191,7 @@ public final class PointerEvent: MouseEvent {
     public let TiltX: float32
     public let TiltY: float32
 
-    public override init(_ type: string, X: float32 = 0, Y: float32 = 0, Clicks: int32 = 1, Button: int32 = 0, Pressed: bool = false,
+    public override init(type: string, X: float32 = 0, Y: float32 = 0, Clicks: int32 = 1, Button: int32 = 0, Pressed: bool = false,
                          Shift: bool = false, Control: bool = false, Alt: bool = false, Meta: bool = false, bubbles: bool = true) {
         let p = CurrentPointer
         PointerType = p.Kind
@@ -235,19 +235,19 @@ public final class DataTransfer {
 
     public var Types: [string] { return items.map { $0.type } }
 
-    public func SetData(_ type: string, _ data: string) {
+    public func SetData(type: string, data: string) {
         let t = type.lowercased() == "text" ? "text/plain" : type.lowercased()
         items.removeAll(where: { $0.type == t })
         items.append((type: t, data: data))
     }
 
-    public func GetData(_ type: string) -> string {
+    public func GetData(type: string) -> string {
         let t = type.lowercased() == "text" ? "text/plain" : type.lowercased()
         for i in items where i.type == t { return i.data }
         return ""
     }
 
-    public func ClearData(_ type: string? = nil) {
+    public func ClearData(type: string? = nil) {
         if let t = type { items.removeAll(where: { $0.type == t.lowercased() }) } else { items = [] }
     }
 }
@@ -257,7 +257,7 @@ public final class DataTransfer {
 public final class DragEvent: MouseEvent {
     public let Data: DataTransfer
 
-    public init(_ type: string, X: float32, Y: float32, Data: DataTransfer, bubbles: bool = true) {
+    public init(type: string, X: float32, Y: float32, Data: DataTransfer, bubbles: bool = true) {
         self.Data = Data
         super.init(type, X: X, Y: Y, Clicks: 0, Button: 0, Pressed: type != "dragend" && type != "drop", bubbles: bubbles)
     }
@@ -275,7 +275,7 @@ public final class WheelEvent: Event {
     public let Alt: bool
     public let Meta: bool
 
-    public init(_ type: string, X: float32 = 0, Y: float32 = 0, DeltaX: float32 = 0, DeltaY: float32 = 0,
+    public init(type: string, X: float32 = 0, Y: float32 = 0, DeltaX: float32 = 0, DeltaY: float32 = 0,
                 Shift: bool = false, Control: bool = false, Alt: bool = false, Meta: bool = false) {
         self.X = X
         self.Y = Y
@@ -296,7 +296,7 @@ public final class CompositionEvent: Event {
     /// (compositionend).
     public let Data: string
 
-    public init(_ type: string, Data: string = "") {
+    public init(type: string, Data: string = "") {
         self.Data = Data
         super.init(type)
     }
@@ -321,7 +321,7 @@ extension Document {
     /// bubbling, to any element inside it.
     /// `capture`: called as the event comes down to an element inside node,
     /// before that element's own listeners, rather than as it bubbles.
-    public func AddEventListener(_ node: html.Node, _ type: string, capture: bool = false, _ handler: (Event) -> void) -> ListenerID {
+    public func AddEventListener(node: html.Node, type: string, capture: bool = false, handler: (Event) -> void) -> ListenerID {
         nextListener += 1
         var list = listeners[node.Id] ?? []
         list.append(listener(id: nextListener, type: type, handler: handler, capture: capture))
@@ -330,7 +330,7 @@ extension Document {
     }
 
     /// Removes one listener.
-    public func RemoveEventListener(_ node: html.Node, _ id: ListenerID) {
+    public func RemoveEventListener(node: html.Node, id: ListenerID) {
         guard let list = listeners[node.Id] else { return }
         var kept: [listener] = []
         for l in list where l.id != id.value { kept.append(l) }
@@ -354,7 +354,7 @@ extension Document {
     /// the event bubbles, the other listeners of each ancestor -- until one
     /// stops it. Answers whether the default action should be taken -- no
     /// listener prevented it.
-    public func Dispatch(_ event: Event, to target: html.Node) -> bool {
+    public func Dispatch(event: Event, to target: html.Node) -> bool {
         event.Target = target
         if listeners.isEmpty { return true }
         var path: [html.Node] = []
@@ -391,7 +391,7 @@ extension Document {
 
     /// Calls node's listeners for the event: the capturing ones, the
     /// others, or (capture nil, at the target) the capturing then the others.
-    func run(_ event: Event, at node: html.Node, capture: bool?) {
+    func run(event: Event, at node: html.Node, capture: bool?) {
         guard let list = listeners[node.Id] else { return }
         event.CurrentTarget = node
         for pass in capture == nil ? [true, false] : [capture!] {

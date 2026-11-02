@@ -27,7 +27,7 @@ public struct Submission {
 }
 
 /// Whether an element edits text: a textarea, or an input of a text type.
-public func IsTextControl(_ node: html.Node) -> bool {
+public func IsTextControl(node: html.Node) -> bool {
     if node.TagName == "textarea" { return true }
     if node.TagName != "input" { return false }
     let type = lower(node.GetAttribute("type") ?? "text")
@@ -38,24 +38,24 @@ public func IsTextControl(_ node: html.Node) -> bool {
 }
 
 /// Whether an input is a button: submit, button, reset or image.
-public func IsButtonInput(_ node: html.Node) -> bool {
+public func IsButtonInput(node: html.Node) -> bool {
     let type = lower(node.GetAttribute("type") ?? "text")
     return type == "submit" || type == "button" || type == "reset" || type == "image"
 }
 
 /// The input's type, lowercased; "text" when it names none.
-public func InputType(_ node: html.Node) -> string {
+public func InputType(node: html.Node) -> string {
     return lower(node.GetAttribute("type") ?? "text")
 }
 
 /// The form controls under a node, in document order.
-public func Controls(_ node: html.Node) -> [html.Node] {
+public func Controls(node: html.Node) -> [html.Node] {
     var out: [html.Node] = []
     collectControls(node, &out)
     return out
 }
 
-func collectControls(_ node: html.Node, _ out: inout [html.Node]) {
+func collectControls(node: html.Node, out: inout [html.Node]) {
     for c in node.Children where c.Kind == html.NodeKind.element {
         let tag = c.TagName
         if tag == "input" || tag == "textarea" || tag == "select" || tag == "button" {
@@ -67,13 +67,13 @@ func collectControls(_ node: html.Node, _ out: inout [html.Node]) {
 
 /// The elements Tab moves through, in document order: enabled controls,
 /// links with an href, and anything with a tabindex.
-public func FocusOrder(_ root: html.Node) -> [html.Node] {
+public func FocusOrder(root: html.Node) -> [html.Node] {
     var out: [html.Node] = []
     collectFocusable(root, &out)
     return out
 }
 
-func collectFocusable(_ node: html.Node, _ out: inout [html.Node]) {
+func collectFocusable(node: html.Node, out: inout [html.Node]) {
     for c in node.Children where c.Kind == html.NodeKind.element {
         if c.HasAttribute("disabled") { continue }
         let tag = c.TagName
@@ -91,7 +91,7 @@ func collectFocusable(_ node: html.Node, _ out: inout [html.Node]) {
 }
 
 /// The value a select submits: its selected option's, or its first's.
-public func SelectedValue(_ select: html.Node) -> string {
+public func SelectedValue(select: html.Node) -> string {
     let options = Descendants(select, tag: "option")
     var first: html.Node? = nil
     for o in options {
@@ -103,13 +103,13 @@ public func SelectedValue(_ select: html.Node) -> string {
 }
 
 /// The text a button stands for: its value attribute, or its text.
-public func ButtonValue(_ button: html.Node) -> string {
+public func ButtonValue(button: html.Node) -> string {
     return button.GetAttribute("value") ?? trimSpaces(button.InnerText())
 }
 
 /// The control a label is for: the element its `for` names, or the
 /// first control inside it.
-public func LabelTarget(_ label: html.Node, in doc: html.Document?) -> html.Node? {
+public func LabelTarget(label: html.Node, in doc: html.Document?) -> html.Node? {
     if let id = label.GetAttribute("for"), let d = doc {
         return d.ElementById(id)
     }
@@ -120,7 +120,7 @@ public func LabelTarget(_ label: html.Node, in doc: html.Document?) -> html.Node
 /// builds them: named, enabled controls; checked boxes and radios;
 /// only the button that submitted it. `value` answers a text control's
 /// current text.
-public func FormData(_ form: html.Node, submitter: html.Node?, value: (html.Node) -> string) -> [FormField] {
+public func FormData(form: html.Node, submitter: html.Node?, value: (html.Node) -> string) -> [FormField] {
     var fields: [FormField] = []
     for c in Controls(form) {
         guard let name = c.GetAttribute("name"), !name.isEmpty else { continue }
@@ -156,7 +156,7 @@ public struct Range {
     public var Max: float64
     public var Step: float64
 
-    public init(_ node: html.Node) {
+    public init(node: html.Node) {
         Min = float64(node.GetAttribute("min") ?? "") ?? 0
         Max = float64(node.GetAttribute("max") ?? "") ?? 100
         if Max < Min { Max = Min }
@@ -167,13 +167,13 @@ public struct Range {
 
     /// Value is text read as the range's value: clamped, snapped to a step
     /// from Min, and the midpoint when it isn't a number (HTML's default).
-    public func Value(_ text: string) -> float64 {
+    public func Value(text: string) -> float64 {
         let v = float64(text) ?? (Min + (Max - Min) / 2)
         return Snap(v)
     }
 
     /// Snap clamps v to the range and onto its steps.
-    public func Snap(_ v: float64) -> float64 {
+    public func Snap(v: float64) -> float64 {
         var x = v < Min ? Min : (v > Max ? Max : v)
         if Step > 0 {
             x = Min + ((x - Min) / Step).rounded() * Step
@@ -183,12 +183,12 @@ public struct Range {
     }
 
     /// Fraction is how far along the track v is, 0…1.
-    public func Fraction(_ v: float64) -> float64 {
+    public func Fraction(v: float64) -> float64 {
         return Max > Min ? (v - Min) / (Max - Min) : 0
     }
 
     /// Text is v as a control's value: no trailing zeros.
-    public func Text(_ v: float64) -> string {
+    public func Text(v: float64) -> string {
         if v == v.rounded() && abs(v) < 1e15 { return "\(Int(v))" }
         var s = "\(v)"
         if s.contains("e") { return s }

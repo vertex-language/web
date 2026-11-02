@@ -136,7 +136,7 @@ extension Cursor {
 /// paste do nothing.
 public protocol Clipboard {
     func ReadText() -> string
-    func WriteText(_ text: string)
+    func WriteText(text: string)
 }
 
 /// An HTML page: parses, styles, lays out and paints what it is given,
@@ -309,7 +309,7 @@ public final class Page {
     /// Shows an HTML page. Its <style> elements and <link rel=stylesheet>
     /// references are read; relative references resolve against baseURL
     /// or the configuration's.
-    public func LoadHTML(_ source: string, baseURL: string? = nil) {
+    public func LoadHTML(source: string, baseURL: string? = nil) {
         if let b = baseURL { self.baseURL = b }
         let doc = html.Parse(source)
         load(doc)
@@ -317,7 +317,7 @@ public final class Page {
 
     /// Shows an HTML file from disk; its folder is the base for what it
     /// refers to.
-    public func LoadFile(_ path: string) throws {
+    public func LoadFile(path: string) throws {
         let bytes = try fs.ReadFile(fs.Path(path))
         LoadBytes(bytes, baseURL: fetch.Directory(of: path))
     }
@@ -325,11 +325,11 @@ public final class Page {
     /// Shows an HTML page from its bytes, decoded as the HTML standard
     /// says: by a byte order mark, the Content-Type's charset, a <meta
     /// charset>, or as UTF-8.
-    public func LoadBytes(_ bytes: [uint8], contentType: string? = nil, baseURL: string? = nil) {
+    public func LoadBytes(bytes: [uint8], contentType: string? = nil, baseURL: string? = nil) {
         LoadHTML(html.Decode(bytes, contentType: contentType), baseURL: baseURL)
     }
 
-    func load(_ doc: html.Document) {
+    func load(doc: html.Document) {
         frames = [:]
         files = [:]
         target = nil
@@ -413,7 +413,7 @@ public final class Page {
     /// Sets the stylesheets the program gives the page, after the
     /// document's own: a .vsx app's compiled .vss, in cascade order. The
     /// page restyles; setting the sheets it has costs nothing.
-    public func SetStyleSheets(_ sheets: [string]) {
+    public func SetStyleSheets(sheets: [string]) {
         if sheets == programSheets { return }
         programSheets = sheets
         resolver.Author = cascade.RuleSet()
@@ -427,7 +427,7 @@ public final class Page {
 
     /// Adds a stylesheet: its rules, and the fonts its @font-face rules
     /// name, registered from the files they point at.
-    func addSheet(_ sheet: css.StyleSheet, media: string = "", depth: int = 0) {
+    func addSheet(sheet: css.StyleSheet, media: string = "", depth: int = 0) {
         // @import brings another sheet in first, as it precedes the rules.
         if depth < 8 {
             for at in sheet.AtRules where at.Name == "import" {
@@ -477,7 +477,7 @@ public final class Page {
 
     /// A URL made absolute against the page's base: absolute ones and
     /// fragments are left alone.
-    public func Resolve(_ url: string) -> string {
+    public func Resolve(url: string) -> string {
         return fetch.Resolve(url, against: baseURL)
     }
 
@@ -486,7 +486,7 @@ public final class Page {
 
     /// Adds an image the page may refer to by URL, as when the host
     /// fetches it; the page is laid out again with it.
-    public func SetImage(_ url: string, _ image: draw.Image) {
+    public func SetImage(url: string, image: draw.Image) {
         images[url] = image
         needsStyle = true
     }
@@ -549,7 +549,7 @@ public final class Page {
 
     /// Whether the user asked for less motion, as the system says:
     /// what `@media (prefers-reduced-motion)` asks.
-    public func SetReducedMotion(_ reduce: bool) {
+    public func SetReducedMotion(reduce: bool) {
         if cascade.PrefersReducedMotion == reduce { return }
         cascade.PrefersReducedMotion = reduce
         needsStyle = true
@@ -560,7 +560,7 @@ public final class Page {
     public var IsDark: bool { return resolver.Dark }
 
     /// Resizes the viewport.
-    public func SetViewportSize(_ size: draw.Size) {
+    public func SetViewportSize(size: draw.Size) {
         let widthChanged = self.size.Width != size.Width
         let heightChanged = self.size.Height != size.Height
         self.size = size
@@ -578,7 +578,7 @@ public final class Page {
 
     public func ScrollOffset() -> draw.Point { return scroll }
 
-    public func SetScrollOffset(_ offset: draw.Point) {
+    public func SetScrollOffset(offset: draw.Point) {
         // Laid out first: before the first layout the page has no height,
         // and the offset would be clamped to nothing.
         update()
@@ -706,17 +706,17 @@ public final class Page {
     // MARK: - Callbacks
 
     /// Called with the resolved URL when the user follows a link.
-    public func OnNavigate(_ handler: (string) -> Void) { onNavigate = handler }
+    public func OnNavigate(handler: (string) -> Void) { onNavigate = handler }
     /// Called when a form is submitted: by its button, or Enter in a field.
-    public func OnSubmit(_ handler: (dom.Submission) -> Void) { onSubmit = handler }
+    public func OnSubmit(handler: (dom.Submission) -> Void) { onSubmit = handler }
     /// Called when a button outside a form is pressed, with its name and value.
-    public func OnAction(_ handler: (string, string) -> Void) { onAction = handler }
-    public func OnTitleChanged(_ handler: (string) -> Void) { onTitle = handler }
+    public func OnAction(handler: (string, string) -> Void) { onAction = handler }
+    public func OnTitleChanged(handler: (string) -> Void) { onTitle = handler }
     /// Called with a link's URL as the pointer moves onto it, and nil off it.
-    public func OnHoverLink(_ handler: (string?) -> Void) { onHoverLink = handler }
+    public func OnHoverLink(handler: (string?) -> Void) { onHoverLink = handler }
     /// Asked whether a resolved URL has been visited, for `:visited`.
     /// Call `VisitedChanged()` when an answer changes.
-    public func IsVisited(_ handler: (string) -> bool) { isVisited = handler; needsStyle = true }
+    public func IsVisited(handler: (string) -> bool) { isVisited = handler; needsStyle = true }
     /// The host's visited set changed: links are matched again.
     public func VisitedChanged() {
         if resolver.UsesVisited { needsStyle = true }
@@ -865,7 +865,7 @@ public final class Page {
     /// element's box, this puts the page's overlays back on top. Answers
     /// false when the element isn't in the display list.
     @discardableResult
-    public func DrawOver(_ node: html.Node, into pixels: inout [uint8], width: int32, height: int32, scale: float32,
+    public func DrawOver(node: html.Node, into pixels: inout [uint8], width: int32, height: int32, scale: float32,
                          clip: draw.IRect, at origin: draw.Point = draw.Point.zero) -> bool {
         update()
         let list = displayList
@@ -920,25 +920,25 @@ public final class Page {
     // MARK: - Finding things
 
     /// The element under a point in the viewport, or nil.
-    public func ElementAt(_ p: draw.Point) -> html.Node? {
+    public func ElementAt(p: draw.Point) -> html.Node? {
         update()
         return hitAt(p)?.Node
     }
 
-    func hitAt(_ p: draw.Point) -> layout.Hit? {
+    func hitAt(p: draw.Point) -> layout.Hit? {
         guard let r = root else { return nil }
         return layout.HitTest(r, p.X + scroll.X, p.Y + scroll.Y, originX: 0, originY: 0)
     }
 
     /// The layout box of an element, once laid out.
-    public func BoxFor(_ node: html.Node) -> layout.Box? {
+    public func BoxFor(node: html.Node) -> layout.Box? {
         update()
         return builder.byNode[node.Id]
     }
 
     /// Where an element's border box is in the page's view, scrolled as
     /// it is shown; nil before it is laid out, or when it isn't.
-    public func BoundsOf(_ node: html.Node) -> draw.Rect? {
+    public func BoundsOf(node: html.Node) -> draw.Rect? {
         guard let box = BoxFor(node) else { return nil }
         let p = layout.PagePosition(box)
         return draw.Rect(p.x - scroll.X, p.y - scroll.Y, box.Width, box.Height)
@@ -950,12 +950,12 @@ public final class Page {
         return root
     }
 
-    public func QuerySelector(_ sel: string) -> html.Node? {
+    public func QuerySelector(sel: string) -> html.Node? {
         guard let doc = Document else { return nil }
         return selector.QuerySelector(sel, in: doc.Root)
     }
 
-    public func QuerySelectorAll(_ sel: string) -> [html.Node] {
+    public func QuerySelectorAll(sel: string) -> [html.Node] {
         guard let doc = Document else { return [] }
         return selector.QuerySelectorAll(sel, in: doc.Root)
     }
@@ -992,7 +992,7 @@ public final class Page {
         return out
     }
 
-    func collectSelectedText(_ box: layout.Box, _ range: (start: dom.TextPosition, end: dom.TextPosition), _ out: inout string, _ lineBroken: inout bool) {
+    func collectSelectedText(box: layout.Box, range: (start: dom.TextPosition, end: dom.TextPosition), out: inout string, lineBroken: inout bool) {
         if box.Kind == .replaced { return }
         if !box.Lines.isEmpty {
             for line in box.Lines {
@@ -1060,7 +1060,7 @@ public final class Page {
         needsPaint = true
     }
 
-    func findTextBoxes(_ box: layout.Box, _ first: inout layout.Box?, _ last: inout layout.Box?) {
+    func findTextBoxes(box: layout.Box, first: inout layout.Box?, last: inout layout.Box?) {
         if box.Kind == .text {
             if !layout.IsBlank(box.Text) {
                 if first == nil { first = box }
@@ -1072,7 +1072,7 @@ public final class Page {
     }
 
     /// Gives an element focus, as clicking it or tabbing to it would.
-    public func Focus(_ node: html.Node?) {
+    public func Focus(node: html.Node?) {
         if focused?.Id == node?.Id { return }
         let before = focused
         focused = node
@@ -1107,7 +1107,7 @@ public final class Page {
     }
 
     /// Scrolls so that an element is at the top of the viewport.
-    public func ScrollTo(_ node: html.Node) {
+    public func ScrollTo(node: html.Node) {
         update()
         guard let b = builder.byNode[node.Id] else { return }
         let pos = layout.PagePosition(b)
@@ -1118,7 +1118,7 @@ public final class Page {
     }
 
     /// Scrolls just enough to show an element.
-    public func ScrollIntoViewIfNeeded(_ node: html.Node) {
+    public func ScrollIntoViewIfNeeded(node: html.Node) {
         update()
         guard let b = builder.byNode[node.Id] else { return }
         let pos = layout.PagePosition(b)
@@ -1132,12 +1132,12 @@ public final class Page {
     }
 
     /// The text a form control holds now.
-    public func ValueOf(_ node: html.Node) -> string {
+    public func ValueOf(node: html.Node) -> string {
         syncValues()
         return valueOf(node)
     }
 
-    func valueOf(_ node: html.Node) -> string {
+    func valueOf(node: html.Node) -> string {
         if let v = values[node.Id] { return v }
         if node.TagName == "textarea" { return node.InnerText() }
         let raw = node.GetAttribute("value") ?? ""
@@ -1151,7 +1151,7 @@ public final class Page {
 
     /// Sets a form control's value as the user would: input and change
     /// fire at it. What a host's picker answers with.
-    public func SetControlValue(_ node: html.Node, _ value: string) {
+    public func SetControlValue(node: html.Node, value: string) {
         var v = value
         if node.TagName == "input" {
             let type = dom.InputType(node)
@@ -1164,7 +1164,7 @@ public final class Page {
 
     /// The files a file input holds, as its picker chose them: their
     /// names show, and change fires.
-    public func SetFiles(_ node: html.Node, _ paths: [string]) {
+    public func SetFiles(node: html.Node, paths: [string]) {
         files[node.Id] = paths
         let names = paths.map { p -> string in
             let parts = p.split(separator: "/")
@@ -1178,19 +1178,19 @@ public final class Page {
     }
 
     /// The paths a file input holds.
-    public func FilesOf(_ node: html.Node) -> [string] { return files[node.Id] ?? [] }
+    public func FilesOf(node: html.Node) -> [string] { return files[node.Id] ?? [] }
 
     /// Called when a color well is clicked, with the element and its
     /// color; the host shows a picker and answers with SetControlValue.
-    public func OnPickColor(_ handler: (html.Node, string) -> Void) { onPickColor = handler }
+    public func OnPickColor(handler: (html.Node, string) -> Void) { onPickColor = handler }
     /// Called when a file input's button is clicked, with the element,
     /// whether it takes several and its accept; answer with SetFiles.
-    public func OnPickFiles(_ handler: (html.Node, bool, string) -> Void) { onPickFiles = handler }
+    public func OnPickFiles(handler: (html.Node, bool, string) -> Void) { onPickFiles = handler }
     /// Called when a date or time field is clicked, with the element, its
     /// type and its value; answer with SetControlValue.
-    public func OnPickDate(_ handler: (html.Node, string, string) -> Void) { onPickDate = handler }
+    public func OnPickDate(handler: (html.Node, string, string) -> Void) { onPickDate = handler }
 
-    func setValue(_ node: html.Node, _ value: string) {
+    func setValue(node: html.Node, value: string) {
         values[node.Id] = value
         userEdited.insert(node.Id)
         showCaret()
@@ -1201,7 +1201,7 @@ public final class Page {
 
     /// Dispatches an event to a node's element -- a text node's parent --
     /// and answers whether the default action should be taken.
-    func dispatch(_ event: dom.Event, to node: html.Node?) -> bool {
+    func dispatch(event: dom.Event, to node: html.Node?) -> bool {
         guard let doc = Document, doc.HasEventListeners else { return true }
         var cur = node
         while let n = cur, n.Kind != html.NodeKind.element { cur = n.Parent }
@@ -1217,7 +1217,7 @@ public final class Page {
 
     /// Puts the caret somewhere, extending the field's selection from
     /// its anchor or collapsing it there.
-    func moveCaret(_ to: int, extend: bool) {
+    func moveCaret(to: int, extend: bool) {
         caret = to
         if !extend { fieldAnchor = to }
         showCaret()
@@ -1233,7 +1233,7 @@ public final class Page {
 
 /// The <style> elements and <link rel=stylesheet> elements under a
 /// node, in document order; not those inside <template>.
-func collectSheets(_ node: html.Node, _ out: inout [html.Node]) {
+func collectSheets(node: html.Node, out: inout [html.Node]) {
     for c in node.Children where c.Kind == html.NodeKind.element {
         if c.TagName == "template" { continue }
         if c.TagName == "style" {
@@ -1247,7 +1247,7 @@ func collectSheets(_ node: html.Node, _ out: inout [html.Node]) {
 }
 
 /// The URL an @import names: its first string or url().
-func importURL(_ params: string) -> string {
+func importURL(params: string) -> string {
     let b = [uint8](params.utf8)
     if b.count > 4 && startsWithBytes(b, "url(") {
         var j = 4
@@ -1282,19 +1282,19 @@ struct DecodedImage {
 
 /// Decodes a job's bytes. Isolated to no actor: it runs where its task
 /// prefers, which LoadImages makes the thread pool.
-func decodeOffMain(_ job: ImageJob) async -> DecodedImage {
+func decodeOffMain(job: ImageJob) async -> DecodedImage {
     if let doc = svg.ParseDocument(job.bytes) {
         return DecodedImage(src: job.src, url: job.url, image: nil, vector: doc)
     }
     return DecodedImage(src: job.src, url: job.url, image: decodeImage(job.bytes))
 }
 
-func decodeImage(_ bytes: [uint8]) -> draw.Image? {
+func decodeImage(bytes: [uint8]) -> draw.Image? {
     guard let decoded = format.Decode(bytes) else { return nil }
     return drawable(decoded)
 }
 
-func drawable(_ img: image.RGBA) -> draw.Image {
+func drawable(img: image.RGBA) -> draw.Image {
     return draw.Image(width: int32(img.Width), height: int32(img.Height), pixels: img.Pixels)
 }
 
@@ -1303,10 +1303,10 @@ extension Page {
     /// tried yet: a background, mask, border or list image in an inline
     /// style, or one a .vsx component's style gives after the page
     /// loaded. Answers whether a list image loaded, which layout needs.
-    func loadStyleImages(_ box: layout.Box) -> bool {
+    func loadStyleImages(box: layout.Box) -> bool {
         var wanted: [string] = []
         var markers: [string] = []
-        func visit(_ b: layout.Box) {
+        func visit(b: layout.Box) {
             let s = b.Style
             if let bg = s.BackgroundImage, !bg.URL.isEmpty { wanted.append(bg.URL) }
             if !s.MaskURL.isEmpty { wanted.append(s.MaskURL) }
@@ -1327,7 +1327,7 @@ extension Page {
 
     /// Loads an image: a data: URL here and now (an SVG one as a
     /// drawing), else through the fetcher, or later where images defer.
-    func loadImage(_ src: string) {
+    func loadImage(src: string) {
         if src.hasPrefix("data:") {
             guard let bytes = format.DataURLBytes(src) else { return }
             if let doc = svg.ParseDocument(bytes) {
@@ -1351,11 +1351,11 @@ extension Page {
     /// What a control's validation would say, as a browser's bubble
     /// does: "Please fill out this field.", and the like; empty where it
     /// meets its constraints.
-    public func ValidationMessage(_ node: html.Node) -> string {
+    public func ValidationMessage(node: html.Node) -> string {
         return selector.ValidationMessage(node, context)
     }
 
-    func showValidationBubble(_ node: html.Node) {
+    func showValidationBubble(node: html.Node) {
         bubbleNode = node
         bubbleText = selector.ValidationMessage(node, context)
         bubbleSince = -1

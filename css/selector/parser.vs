@@ -145,7 +145,7 @@ public struct ComplexSelector {
 }
 
 /// Parses a selector string like "div.container > h1#title, a[href^='https']"
-public func ParseSelectors(_ selectorString: string) -> [ComplexSelector] {
+public func ParseSelectors(selectorString: string) -> [ComplexSelector] {
     let rawList = splitByComma(selectorString)
     var selectors: [ComplexSelector] = []
 
@@ -162,7 +162,7 @@ public func ParseSelectors(_ selectorString: string) -> [ComplexSelector] {
     return selectors
 }
 
-func parseComplexSelector(_ selStr: string) -> ComplexSelector? {
+func parseComplexSelector(selStr: string) -> ComplexSelector? {
     let bytes = bytesFrom(selStr)
     var pos = 0
     let len = bytes.count
@@ -297,7 +297,7 @@ func parseComplexSelector(_ selStr: string) -> ComplexSelector? {
     return ComplexSelector(compounds: compounds)
 }
 
-func parseAttrSelector(_ bytes: [uint8], _ pos: inout int) -> AttrSelector {
+func parseAttrSelector(bytes: [uint8], pos: inout int) -> AttrSelector {
     let len = bytes.count
     // Skip spaces
     while pos < len && isSpace(bytes[pos]) { pos += 1 }
@@ -349,24 +349,24 @@ func parseAttrSelector(_ bytes: [uint8], _ pos: inout int) -> AttrSelector {
     return AttrSelector(name: attrName, value: val, op: op)
 }
 
-func bytesFrom(_ s: string) -> [uint8] {
+func bytesFrom(s: string) -> [uint8] {
     return [uint8](s.utf8)
 }
 
-func strFrom(_ bytes: [uint8], _ start: int, _ end: int) -> string {
+func strFrom(bytes: [uint8], start: int, end: int) -> string {
     if start >= end { return "" }
     return utf8.Decode(bytes, start, end)
 }
 
-func isSpace(_ b: uint8) -> bool {
+func isSpace(b: uint8) -> bool {
     return b == 32 || b == 9 || b == 10 || b == 13
 }
 
-func isIdent(_ b: uint8) -> bool {
+func isIdent(b: uint8) -> bool {
     return (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || (b >= 48 && b <= 57) || b == 45 || b == 95
 }
 
-func trim(_ s: string) -> string {
+func trim(s: string) -> string {
     let b = bytesFrom(s)
     if b.isEmpty { return "" }
     var st = 0
@@ -376,7 +376,7 @@ func trim(_ s: string) -> string {
     return strFrom(b, st, en)
 }
 
-func splitByComma(_ s: string) -> [string] {
+func splitByComma(s: string) -> [string] {
     var out: [string] = []
     var current: [uint8] = []
     var inQuotes = false
@@ -406,7 +406,7 @@ func splitByComma(_ s: string) -> [string] {
 }
 
 /// The A and B of An+B: `2n+1`, `odd`, `even`, `3`, `-n+2`, `n`.
-func parseNth(_ text: string) -> (a: int, b: int) {
+func parseNth(text: string) -> (a: int, b: int) {
     let lower = toLower(trim(text))
     if lower == "odd" { return (a: 2, b: 1) }
     if lower == "even" { return (a: 2, b: 0) }
@@ -456,7 +456,7 @@ func parseNth(_ text: string) -> (a: int, b: int) {
 }
 
 /// Where " of " stands in an nth argument, in bytes; nil where it doesn't.
-func ofIndex(_ text: string) -> int? {
+func ofIndex(text: string) -> int? {
     let b = bytesFrom(toLower(text))
     var i = 0
     while i + 4 <= b.count {

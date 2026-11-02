@@ -315,7 +315,7 @@ public struct Longhand {
     /// side left to right, and right to left it is the other side.
     public var FlipsInRightToLeft: bool = false
 
-    public init(_ prop: Prop, _ value: Value, important: bool = false) {
+    public init(prop: Prop, value: Value, important: bool = false) {
         self.Prop = prop
         self.Value = value
         self.Important = important
@@ -408,7 +408,7 @@ let propNames: [string: Prop] = [
 /// Parses a declaration from a stylesheet into the longhands it sets.
 /// A property the engine does not know, or a value it cannot read,
 /// sets nothing, which is how a browser treats them too.
-public func Longhands(_ d: Declaration) -> [Longhand] {
+public func Longhands(d: Declaration) -> [Longhand] {
     var out = longhands(d)
     if isInlineLogical(d.Property) {
         var i = 0
@@ -422,14 +422,14 @@ public func Longhands(_ d: Declaration) -> [Longhand] {
 
 /// Whether a property name is one of the inline-start and inline-end
 /// ones, whose sides swap right to left.
-func isInlineLogical(_ name: string) -> bool {
+func isInlineLogical(name: string) -> bool {
     if name.hasSuffix("inline-size") { return false }
     return name.contains("inline") || name.hasPrefix("border-start-") || name.hasPrefix("border-end-")
 }
 
 /// The other side of a physical property, as right to left puts an
 /// inline-start one: left for right, a top-left corner for a top-right.
-public func MirroredProp(_ p: Prop) -> Prop {
+public func MirroredProp(p: Prop) -> Prop {
     switch p {
     case .marginLeft: return .marginRight
     case .marginRight: return .marginLeft
@@ -451,7 +451,7 @@ public func MirroredProp(_ p: Prop) -> Prop {
     }
 }
 
-func longhands(_ d: Declaration) -> [Longhand] {
+func longhands(d: Declaration) -> [Longhand] {
     guard let tokens = substituteEnv(d.Tokens) else { return [] }
     if tokens.isEmpty { return [] }
     let important = d.Important
@@ -480,7 +480,7 @@ func longhands(_ d: Declaration) -> [Longhand] {
     }
 
     var out: [Longhand] = []
-    func set(_ p: Prop, _ v: Value) { out.append(Longhand(p, v, important: important)) }
+    func set(p: Prop, v: Value) { out.append(Longhand(p, v, important: important)) }
 
     switch name {
     case "margin":
@@ -861,7 +861,7 @@ let borderWidthProps: [Prop] = [.borderTopWidth, .borderRightWidth, .borderBotto
 let borderStyleProps: [Prop] = [.borderTopStyle, .borderRightStyle, .borderBottomStyle, .borderLeftStyle]
 let borderColorProps: [Prop] = [.borderTopColor, .borderRightColor, .borderBottomColor, .borderLeftColor]
 
-func logicalProp(_ name: string) -> Prop? {
+func logicalProp(name: string) -> Prop? {
     switch name {
     case "margin-inline-start": return .marginLeft
     case "margin-inline-end": return .marginRight
@@ -896,7 +896,7 @@ func logicalProp(_ name: string) -> Prop? {
 }
 
 /// The start and end sides a two-sided logical shorthand sets.
-func logicalPair(_ name: string) -> [Prop] {
+func logicalPair(name: string) -> [Prop] {
     switch name {
     case "margin-inline": return [.marginLeft, .marginRight]
     case "margin-block": return [.marginTop, .marginBottom]
@@ -909,7 +909,7 @@ func logicalPair(_ name: string) -> [Prop] {
 }
 
 /// The longhands a property name stands for, for `inherit` and `initial`.
-func longhandsOf(_ name: string) -> [Prop] {
+func longhandsOf(name: string) -> [Prop] {
     if let p = propNames[name] { return [p] }
     switch name {
     case "margin": return [.marginTop, .marginRight, .marginBottom, .marginLeft]
@@ -965,7 +965,7 @@ func longhandsOf(_ name: string) -> [Prop] {
 
 // MARK: - Values
 
-package func lower(_ s: string) -> string {
+package func lower(s: string) -> string {
     let b = [uint8](s.utf8)
     var i = 0
     var needs = false
@@ -983,7 +983,7 @@ package func lower(_ s: string) -> string {
     return stringOf(out, 0, out.count)
 }
 
-func joinWords(_ words: [string]) -> string {
+func joinWords(words: [string]) -> string {
     var out = ""
     var i = 0
     while i < words.count {
@@ -994,7 +994,7 @@ func joinWords(_ words: [string]) -> string {
     return out
 }
 
-func unitOf(_ s: string) -> Unit? {
+func unitOf(s: string) -> Unit? {
     switch s {
     case "px": return .px
     case "em": return .em
@@ -1024,7 +1024,7 @@ func unitOf(_ s: string) -> Unit? {
 
 /// A length token as a value: px, relative units, absolute units scaled
 /// to px, percentages, and unitless zero.
-func parseLengthValue(_ t: Token, allowAuto: Bool) -> Value? {
+func parseLengthValue(t: Token, allowAuto: Bool) -> Value? {
     switch t.Kind {
     case .dimension:
         if let u = unitOf(t.Unit) { return .length(t.NumberVal, u) }
@@ -1056,14 +1056,14 @@ func parseLengthValue(_ t: Token, allowAuto: Bool) -> Value? {
 
 /// calc(...): a sum of terms, each a length or a number times a
 /// length; min(), max() and clamp() of lengths in one unit are folded.
-func parseCalc(_ tokens: [Token], _ start: int, _ end: int) -> Value? {
+func parseCalc(tokens: [Token], start: int, end: int) -> Value? {
     var terms: [CalcTerm] = []
     if !calcSum(tokens, start, end, &terms, sign: 1) { return nil }
     if terms.isEmpty { return nil }
     return .calc(terms)
 }
 
-func calcSum(_ tokens: [Token], _ start: int, _ end: int, _ terms: inout [CalcTerm], sign: float32) -> bool {
+func calcSum(tokens: [Token], start: int, end: int, terms: inout [CalcTerm], sign: float32) -> bool {
     var p = start
     guard let sum = calcExpr(tokens, &p, end), p == end else { return false }
     for t in sum { terms.append(CalcTerm(Number: t.Number * sign, Unit: t.Unit)) }
@@ -1075,7 +1075,7 @@ func calcSum(_ tokens: [Token], _ start: int, _ end: int, _ terms: inout [CalcTe
 // below. Each part is a sum of terms, one per unit.
 
 /// A sum: products joined by + and -.
-func calcExpr(_ tokens: [Token], _ p: inout int, _ end: int) -> [CalcTerm]? {
+func calcExpr(tokens: [Token], p: inout int, end: int) -> [CalcTerm]? {
     guard var sum = calcProduct(tokens, &p, end) else { return nil }
     while p < end {
         let t = tokens[p]
@@ -1096,7 +1096,7 @@ func calcExpr(_ tokens: [Token], _ p: inout int, _ end: int) -> [CalcTerm]? {
 }
 
 /// A product: values joined by * and /.
-func calcProduct(_ tokens: [Token], _ p: inout int, _ end: int) -> [CalcTerm]? {
+func calcProduct(tokens: [Token], p: inout int, end: int) -> [CalcTerm]? {
     guard var value = calcValueTerm(tokens, &p, end) else { return nil }
     while p < end && tokens[p].Kind == .delim && (tokens[p].Value == "*" || tokens[p].Value == "/") {
         let divide = tokens[p].Value == "/"
@@ -1118,7 +1118,7 @@ func calcProduct(_ tokens: [Token], _ p: inout int, _ end: int) -> [CalcTerm]? {
 
 /// One value: a number, length or percentage, a parenthesized or
 /// nested calc(), or min(), max() or clamp().
-func calcValueTerm(_ tokens: [Token], _ p: inout int, _ end: int) -> [CalcTerm]? {
+func calcValueTerm(tokens: [Token], p: inout int, end: int) -> [CalcTerm]? {
     if p >= end { return nil }
     let t = tokens[p]
     if t.Kind == .delim && (t.Value == "-" || t.Value == "+") {
@@ -1175,7 +1175,7 @@ func calcValueTerm(_ tokens: [Token], _ p: inout int, _ end: int) -> [CalcTerm]?
 }
 
 /// The number a sum is when it has no units, or nil.
-func calcPlainNumber(_ v: [CalcTerm]) -> float32? {
+func calcPlainNumber(v: [CalcTerm]) -> float32? {
     var n: float32 = 0
     for t in v {
         if t.Unit != nil { return nil }
@@ -1184,14 +1184,14 @@ func calcPlainNumber(_ v: [CalcTerm]) -> float32? {
     return n
 }
 
-func calcScale(_ v: [CalcTerm], _ k: float32) -> [CalcTerm] {
+func calcScale(v: [CalcTerm], k: float32) -> [CalcTerm] {
     var out: [CalcTerm] = []
     for t in v { out.append(CalcTerm(Number: t.Number * k, Unit: t.Unit)) }
     return out
 }
 
 /// Two sums as one, like units added together.
-func calcAdd(_ a: [CalcTerm], _ b: [CalcTerm]) -> [CalcTerm] {
+func calcAdd(a: [CalcTerm], b: [CalcTerm]) -> [CalcTerm] {
     var out = a
     for t in b {
         var merged = false
@@ -1219,7 +1219,7 @@ let mathFunctions: [string] = [
 
 /// A math function's value where its arguments are each one term in one
 /// unit (or unitless), or nil.
-func foldMinMax(_ name: string, _ tokens: [Token], _ start0: int, _ end: int) -> CalcTerm? {
+func foldMinMax(name: string, tokens: [Token], start0: int, end: int) -> CalcTerm? {
     var start = start0
     // round()'s strategy comes first, as a keyword.
     var strategy = "nearest"
@@ -1331,7 +1331,7 @@ func foldMinMax(_ name: string, _ tokens: [Token], _ start0: int, _ end: int) ->
 }
 
 /// A calc(), min(), max() or clamp() at the start of a value.
-func calcValue(_ tokens: [Token]) -> Value? {
+func calcValue(tokens: [Token]) -> Value? {
     if tokens.isEmpty || tokens[0].Kind != .function { return nil }
     let name = lower(tokens[0].Value)
     let end = closeParen(tokens, from: 1)
@@ -1348,11 +1348,11 @@ func calcValue(_ tokens: [Token]) -> Value? {
 }
 
 /// One to four lengths, as the sides shorthands take them.
-func fourSides(_ tokens: [Token], allowAuto: Bool) -> [Value]? {
+func fourSides(tokens: [Token], allowAuto: Bool) -> [Value]? {
     return fourValues(tokens) { t in parseLengthValue(t, allowAuto: allowAuto) }
 }
 
-func fourValues(_ tokens: [Token], _ parse: (Token) -> Value?) -> [Value]? {
+func fourValues(tokens: [Token], parse: (Token) -> Value?) -> [Value]? {
     var vals: [Value] = []
     var i = 0
     while i < tokens.count {
@@ -1383,7 +1383,7 @@ func fourValues(_ tokens: [Token], _ parse: (Token) -> Value?) -> [Value]? {
     }
 }
 
-func parseBorderWidth(_ t: Token) -> Value? {
+func parseBorderWidth(t: Token) -> Value? {
     if t.Kind == .ident {
         switch lower(t.Value) {
         case "thin": return .length(1, .px)
@@ -1396,7 +1396,7 @@ func parseBorderWidth(_ t: Token) -> Value? {
     return parseLengthValue(t, allowAuto: false)
 }
 
-func parseBorderStyle(_ t: Token) -> Value? {
+func parseBorderStyle(t: Token) -> Value? {
     if t.Kind != .ident { return nil }
     switch lower(t.Value) {
     case "none", "hidden", "solid", "dashed", "dotted", "double", "groove", "ridge", "inset", "outset":
@@ -1408,7 +1408,7 @@ func parseBorderStyle(_ t: Token) -> Value? {
 
 /// A color at tokens[i], and how many tokens it took; nil where there
 /// is none there.
-func parseColorAt(_ tokens: [Token], _ i: int) -> (Value, int)? {
+func parseColorAt(tokens: [Token], i: int) -> (Value, int)? {
     let t = tokens[i]
     switch t.Kind {
     case .hash:
@@ -1457,7 +1457,7 @@ let colorFunctionNames: [string] = [
 
 /// container-name: none, or names (not the CSS-wide keywords, `and`,
 /// `or`, `not`), kept space-separated.
-func parseContainerName(_ tokens: [Token]) -> Value? {
+func parseContainerName(tokens: [Token]) -> Value? {
     if tokens.isEmpty { return nil }
     if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) == "none" { return .string("") }
     var names: [string] = []
@@ -1470,12 +1470,12 @@ func parseContainerName(_ tokens: [Token]) -> Value? {
     return .string(names.joined(separator: " "))
 }
 
-func parseColorValue(_ t: Token) -> Value? {
+func parseColorValue(t: Token) -> Value? {
     if let m = parseColorAt([t], 0) { return m.0 }
     return nil
 }
 
-func parseOverflow(_ t: Token) -> Value? {
+func parseOverflow(t: Token) -> Value? {
     if t.Kind != .ident { return nil }
     switch lower(t.Value) {
     case "visible", "hidden", "scroll", "auto", "clip", "overlay":
@@ -1490,7 +1490,7 @@ struct BorderParts {
     var color: Value = .initial
 }
 
-func parseBorderShorthand(_ tokens: [Token]) -> BorderParts {
+func parseBorderShorthand(tokens: [Token]) -> BorderParts {
     var parts = BorderParts()
     var i = 0
     while i < tokens.count {
@@ -1509,7 +1509,7 @@ func parseBorderShorthand(_ tokens: [Token]) -> BorderParts {
     return parts
 }
 
-func parseFontShorthand(_ tokens: [Token], _ out: inout [Longhand], _ important: Bool) {
+func parseFontShorthand(tokens: [Token], out: inout [Longhand], important: Bool) {
     // [style || weight]* size [/ line-height]? family
     var i = 0
     var style: Value = .initial
@@ -1558,7 +1558,7 @@ func parseFontShorthand(_ tokens: [Token], _ out: inout [Longhand], _ important:
     }
 }
 
-func parseFlexShorthand(_ tokens: [Token], _ out: inout [Longhand], _ important: Bool) {
+func parseFlexShorthand(tokens: [Token], out: inout [Longhand], important: Bool) {
     var grow: Value = .number(1)
     var shrink: Value = .number(1)
     var basis: Value = .length(0, .px)
@@ -1586,7 +1586,7 @@ func parseFlexShorthand(_ tokens: [Token], _ out: inout [Longhand], _ important:
     out.append(Longhand(.flexBasis, basis, important: important))
 }
 
-func parseFontSizeValue(_ t: Token) -> Value? {
+func parseFontSizeValue(t: Token) -> Value? {
     if t.Kind == .ident {
         switch lower(t.Value) {
         case "xx-small": return .length(9, .px)
@@ -1606,7 +1606,7 @@ func parseFontSizeValue(_ t: Token) -> Value? {
     return parseLengthValue(t, allowAuto: false)
 }
 
-func parseLineHeightValue(_ t: Token) -> Value? {
+func parseLineHeightValue(t: Token) -> Value? {
     if t.Kind == .ident && lower(t.Value) == "normal" { return .normal }
     if t.Kind == .number { return .number(t.NumberVal) }
     return parseLengthValue(t, allowAuto: false)
@@ -1614,7 +1614,7 @@ func parseLineHeightValue(_ t: Token) -> Value? {
 
 /// Family names, comma-separated; a quoted name is one token, an
 /// unquoted one may be several.
-func parseFamilies(_ tokens: [Token]) -> [string] {
+func parseFamilies(tokens: [Token]) -> [string] {
     var out: [string] = []
     var current: [string] = []
     for t in tokens {
@@ -1631,7 +1631,7 @@ func parseFamilies(_ tokens: [Token]) -> [string] {
     return out
 }
 
-func parseShadows(_ tokens: [Token]) -> Value? {
+func parseShadows(tokens: [Token]) -> Value? {
     if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) == "none" { return .none }
     var shadows: [ShadowValue] = []
     var lengths: [Value] = []
@@ -1677,7 +1677,7 @@ func parseShadows(_ tokens: [Token]) -> Value? {
 }
 
 /// The value of one longhand, read from its tokens.
-func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
+func parseValue(prop: Prop, tokens: [Token]) -> Value? {
     let t = tokens[0]
     let kw = t.Kind == .ident ? lower(t.Value) : ""
     switch prop {
@@ -2346,7 +2346,7 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
 
 /// A basic shape's arguments: inset(), circle(), ellipse() or
 /// polygon(), with the shapes' "at" positions and inset's "round".
-func parseClipShape(_ name: string, _ tokens: [Token]) -> ClipShape? {
+func parseClipShape(name: string, tokens: [Token]) -> ClipShape? {
     var i = 0
     // One length or percentage, calc() too, or nil.
     func length() -> Value? {
@@ -2468,7 +2468,7 @@ func parseClipShape(_ name: string, _ tokens: [Token]) -> ClipShape? {
             let relative = word() == "by"
             guard word() == "to" || word() == "by" else { return nil }
             i += 1
-            func letter(_ l: string) -> string { return relative ? l.lowercased() : l }
+            func letter(l: string) -> string { return relative ? l.lowercased() : l }
             switch command {
             case "move", "line", "smooth", "arc":
                 guard let x = length(), let y = length() else { return nil }
@@ -2531,7 +2531,7 @@ public var ImageSetDensity: float32 = 2
 /// token: the candidate for ImageSetDensity -- the least dense at or
 /// above it, else the densest -- as `.list([.url, .number(density)])`,
 /// or a gradient candidate as itself.
-func imageSetValue(_ tokens: [Token], _ i: int) -> Value? {
+func imageSetValue(tokens: [Token], i: int) -> Value? {
     let end = closeParen(tokens, from: i + 1)
     var best: Value? = nil
     var bestDensity: float32 = -1
@@ -2574,11 +2574,11 @@ func imageSetValue(_ tokens: [Token], _ i: int) -> Value? {
     return b
 }
 
-func isImageSetName(_ name: string) -> bool {
+func isImageSetName(name: string) -> bool {
     return name == "image-set" || name == "-webkit-image-set"
 }
 
-func isGradientName(_ name: string) -> bool {
+func isGradientName(name: string) -> bool {
     return name == "linear-gradient" || name == "-webkit-linear-gradient" || name == "repeating-linear-gradient" ||
         name == "radial-gradient" || name == "-webkit-radial-gradient" || name == "repeating-radial-gradient" ||
         name == "conic-gradient" || name == "repeating-conic-gradient"
@@ -2586,7 +2586,7 @@ func isGradientName(_ name: string) -> bool {
 
 /// The index of the paren closing a function whose arguments start at
 /// `from`, or the token count.
-func closeParen(_ tokens: [Token], from: int) -> int {
+func closeParen(tokens: [Token], from: int) -> int {
     var depth = 1
     var i = from
     while i < tokens.count {
@@ -2603,7 +2603,7 @@ func closeParen(_ tokens: [Token], from: int) -> int {
 /// A linear-gradient's arguments: an angle or a direction, then color
 /// stops with optional positions. A radial gradient is drawn as a
 /// linear one from its centre color outward, which is near enough.
-func parseGradient(_ tokens: [Token], _ start: int, _ end: int) -> draw.LinearGradient? {
+func parseGradient(tokens: [Token], start: int, end: int) -> draw.LinearGradient? {
     // Split the arguments at top-level commas.
     var args: [[Token]] = []
     var current: [Token] = []
@@ -2841,7 +2841,7 @@ func parseGradient(_ tokens: [Token], _ start: int, _ end: int) -> draw.LinearGr
 /// color space: sixteen steps a pair, drawn as sRGB between them. Stops
 /// whose positions wait on the line's length get steps without one,
 /// which FixStops spreads evenly between them.
-func interpolatedStops(_ stops: [draw.GradientStop], _ space: string, _ hueMethod: string) -> [draw.GradientStop] {
+func interpolatedStops(stops: [draw.GradientStop], space: string, hueMethod: string) -> [draw.GradientStop] {
     if stops.count < 2 { return stops }
     let steps = 16
     var out: [draw.GradientStop] = [stops[0]]
@@ -2867,7 +2867,7 @@ func interpolatedStops(_ stops: [draw.GradientStop], _ space: string, _ hueMetho
 
 /// A gradient stop's length in pixels: absolute units, and em and rem
 /// at the default 16px (a stop knows no font size).
-func stopLength(_ n: float32, _ unit: string) -> float32? {
+func stopLength(n: float32, unit: string) -> float32? {
     switch unit {
     case "px": return n
     case "pt": return n * 4 / 3
@@ -2881,7 +2881,7 @@ func stopLength(_ n: float32, _ unit: string) -> float32? {
     }
 }
 
-func unitName(_ u: Unit) -> string {
+func unitName(u: Unit) -> string {
     switch u {
     case .px: return "px"
     case .em: return "em"
@@ -2892,7 +2892,7 @@ func unitName(_ u: Unit) -> string {
 
 /// A radial gradient's first argument -- its shape, size and `at`
 /// position -- or nil with isHead false where it's already a stop.
-func parseRadialHead(_ head: [Token]) -> (draw.RadialShape, bool)? {
+func parseRadialHead(head: [Token]) -> (draw.RadialShape, bool)? {
     var r = draw.RadialShape()
     if head.isEmpty { return nil }
     if parseColorAt(head, 0) != nil { return (r, false) }
@@ -2954,7 +2954,7 @@ func parseRadialHead(_ head: [Token]) -> (draw.RadialShape, bool)? {
     return (r, true)
 }
 
-func parseBackgroundSize(_ tokens: [Token]) -> Value? {
+func parseBackgroundSize(tokens: [Token]) -> Value? {
     if tokens.isEmpty { return nil }
     if tokens[0].Kind == .ident {
         let kw = lower(tokens[0].Value)
@@ -2969,7 +2969,7 @@ func parseBackgroundSize(_ tokens: [Token]) -> Value? {
     return .keyword(joinWords(words))
 }
 
-func parseBackgroundPosition(_ tokens: [Token]) -> Value? {
+func parseBackgroundPosition(tokens: [Token]) -> Value? {
     var words: [string] = []
     for t in tokens {
         if t.Kind == .ident { words.append(lower(t.Value)) }
@@ -2981,7 +2981,7 @@ func parseBackgroundPosition(_ tokens: [Token]) -> Value? {
 
 /// Grid tracks: lengths, fr, auto, minmax(), repeat(n, ...) and
 /// repeat(auto-fill|auto-fit, ...) written as a negative repeat count.
-func parseTracks(_ tokens: [Token], _ start: int, _ end: int) -> [GridTrack] {
+func parseTracks(tokens: [Token], start: int, end: int) -> [GridTrack] {
     var out: [GridTrack] = []
     var i = start
     while i < end {
@@ -3061,7 +3061,7 @@ func parseTracks(_ tokens: [Token], _ start: int, _ end: int) -> [GridTrack] {
 
 /// A calc()'s value as a track: pixels and a percentage of the grid,
 /// font-relative units taken at 16px as the other track lengths are.
-func trackOfCalc(_ v: Value?) -> GridTrack? {
+func trackOfCalc(v: Value?) -> GridTrack? {
     guard let v = v else { return nil }
     var px: float32 = 0
     var pct: float32 = 0
@@ -3082,7 +3082,7 @@ func trackOfCalc(_ v: Value?) -> GridTrack? {
 }
 
 /// grid-column / grid-row: `2`, `span 2`, `1 / 3`, `1 / span 2`, `auto`.
-func parsePlacement(_ tokens: [Token]) -> GridPlacement {
+func parsePlacement(tokens: [Token]) -> GridPlacement {
     if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) != "auto" {
         // An area's name: its lines on this axis.
         var p = GridPlacement.auto
@@ -3116,13 +3116,13 @@ func parsePlacement(_ tokens: [Token]) -> GridPlacement {
 }
 
 /// One of grid-area's slash-separated parts, or an auto side.
-func gridAreaSide(_ parts: [[Token]], _ k: int, end: bool) -> GridPlacement {
+func gridAreaSide(parts: [[Token]], k: int, end: bool) -> GridPlacement {
     return k < parts.count ? parsePlacementSide(parts[k], end: end) : GridPlacement(start: 0, span: 0)
 }
 
 /// grid-column-start and the like: a line, or `span n`; for the end
 /// side the line is the placement's End.
-func parsePlacementSide(_ tokens: [Token], end: bool) -> GridPlacement {
+func parsePlacementSide(tokens: [Token], end: bool) -> GridPlacement {
     var p = GridPlacement(start: 0, span: 0)
     if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) != "auto" {
         p.Span = 1
@@ -3147,7 +3147,7 @@ func parsePlacementSide(_ tokens: [Token], end: bool) -> GridPlacement {
 public var EnvironmentVariables: [string: string] = [:]
 
 /// The tokens of a piece of CSS.
-public func Tokenize(_ text: string) -> [Token] {
+public func Tokenize(text: string) -> [Token] {
     let scanner = Scanner(source: text)
     var out: [Token] = []
     while true {
@@ -3160,7 +3160,7 @@ public func Tokenize(_ text: string) -> [Token] {
 
 /// Tokens with every env(name, fallback) replaced by its value; nil
 /// where one names nothing and has no fallback.
-func substituteEnv(_ tokens: [Token]) -> [Token]? {
+func substituteEnv(tokens: [Token]) -> [Token]? {
     var has = false
     for t in tokens where t.Kind == .function && lower(t.Value) == "env" { has = true }
     if !has { return tokens }
@@ -3198,7 +3198,7 @@ func substituteEnv(_ tokens: [Token]) -> [Token]? {
 /// run of dots (no area); kept as the rows' cells, space-separated and
 /// joined by "|". Nil where the rows differ in length or an area isn't
 /// a rectangle.
-func parseTemplateAreas(_ tokens: [Token]) -> Value? {
+func parseTemplateAreas(tokens: [Token]) -> Value? {
     if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) == "none" { return .string("") }
     var rows: [[string]] = []
     for t in tokens {
@@ -3249,7 +3249,7 @@ func parseTemplateAreas(_ tokens: [Token]) -> Value? {
 
 /// grid-template (and grid's template forms): none; rows / columns; or
 /// rows of area strings, each with its height, then / columns.
-func parseGridTemplate(_ tokens: [Token]) -> [(Prop, Value)]? {
+func parseGridTemplate(tokens: [Token]) -> [(Prop, Value)]? {
     if tokens.count == 1 && tokens[0].Kind == .ident && lower(tokens[0].Value) == "none" {
         return [(.gridTemplateRows, Value.none), (.gridTemplateColumns, Value.none), (.gridTemplateAreas, .string(""))]
     }

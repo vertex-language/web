@@ -15,7 +15,7 @@ typealias Length = css.Length
 
 var failures = 0
 
-func check(_ ok: bool, _ what: string) {
+func check(ok: bool, what: string) {
     if ok {
         print("ok    \(what)")
     } else {
@@ -24,7 +24,7 @@ func check(_ ok: bool, _ what: string) {
     }
 }
 
-func styleOf(_ source: string, _ sel: string) -> cascade.ComputedStyle? {
+func styleOf(source: string, sel: string) -> cascade.ComputedStyle? {
     let doc = html.Parse(source)
     let resolver = cascade.StyleResolver(ua: cascade.UserAgentRules())
     for style in doc.ElementsByTagName("style") {
@@ -54,12 +54,12 @@ final class Laid {
         self.root = root
         self.builder = builder
     }
-    func box(_ id: string) -> layout.Box? {
+    func box(id: string) -> layout.Box? {
         guard let node = doc.ElementById(id) else { return nil }
         return builder.byNode[node.Id]
     }
     /// A box's border-box rect relative to the viewport.
-    func rect(_ id: string) -> draw.Rect? {
+    func rect(id: string) -> draw.Rect? {
         guard let b = box(id) else { return nil }
         var x = b.X
         var y = b.Y
@@ -73,7 +73,7 @@ final class Laid {
     }
 }
 
-func layoutOf(_ source: string, width: float32 = 800, height: float32 = 600, images: [string: draw.Image] = [:]) -> Laid? {
+func layoutOf(source: string, width: float32 = 800, height: float32 = 600, images: [string: draw.Image] = [:]) -> Laid? {
     let doc = html.Parse(source)
     let resolver = cascade.StyleResolver(ua: cascade.UserAgentRules())
     resolver.ViewportWidth = width
@@ -89,7 +89,7 @@ func layoutOf(_ source: string, width: float32 = 800, height: float32 = 600, ima
     return Laid(doc: doc, root: root, builder: builder)
 }
 
-func near(_ a: float32, _ b: float32, _ tolerance: float32 = 0.5) -> bool {
+func near(a: float32, b: float32, tolerance: float32 = 0.5) -> bool {
     let d = a - b
     return d < tolerance && d > -tolerance
 }
@@ -360,7 +360,7 @@ func testPseudoElements() {
 func testTextAlignLast() {
     print("text-align-last")
     guard let l = layoutOf("<body style='margin:0;font:10px Helvetica'><p id=r style='margin:0;width:200px;text-align-last:right'>one</p><p id=j style='margin:0;width:200px;text-align:justify;text-align-last:justify'>a b</p><p id=c style='margin:0;width:60px;text-align:justify;text-align-last:center'>aaa bbb ccc ddd e</p><p id=d style='margin:0;width:200px;text-align:center'>x<br>y</p></body>") else { check(false, "layout"); return }
-    func frags(_ id: string, _ line: int) -> [layout.Fragment] {
+    func frags(id: string, line: int) -> [layout.Fragment] {
         let b = l.box(id)!
         return line < b.Lines.count ? b.Lines[line].Fragments : []
     }
@@ -420,7 +420,7 @@ func testCounters() {
     <p id=q>say <q>a <q>b</q> c</q></p><p class=fr id=fq><q>a <q>b</q></q></p>
     <ol class=m><li id=m1>x</li><li id=m2>y</li></ol>
     """) else { check(false, "layout"); return }
-    func text(_ id: string) -> string {
+    func text(id: string) -> string {
         var out = ""
         // The first line, in the box or its first block.
         guard var b = l.box(id) else { return out }
@@ -619,7 +619,7 @@ func testColumns() {
 
     // Four lines in columns three lines tall: widows (2 by default)
     // brings a second line over; widows: 1 lets one go alone.
-    func secondColumnLines(_ widows: string) -> int {
+    func secondColumnLines(widows: string) -> int {
         guard let w = layoutOf("<body style='margin:0'><div style='width:200px;height:60px;column-count:2;column-gap:0;column-fill:auto;font-size:16px;line-height:20px'><p id=p style='margin:0;\(widows)'>a<br>b<br>c<br>d</p></div></body>") else { return -1 }
         var n = 0
         for line in w.box("p")!.Lines where line.X >= 100 { n += 1 }
@@ -648,7 +648,7 @@ func testColumns() {
 }
 
 /// A box's line's fragments' texts, left to right.
-func lineTexts(_ b: layout.Box, _ line: int) -> [string] {
+func lineTexts(b: layout.Box, line: int) -> [string] {
     var frags = b.Lines[line].Fragments
     frags.sort { $0.X < $1.X }
     var out: [string] = []

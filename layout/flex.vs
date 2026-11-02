@@ -17,7 +17,7 @@ extension Layout {
     /// Lays out a flex container's items: rows or columns, one line or
     /// wrapped, grown and shrunk into the space, aligned. Answers the
     /// content height.
-    func layoutFlex(_ box: Box, contentWidth: float32, flow: Flow) -> float32 {
+    func layoutFlex(box: Box, contentWidth: float32, flow: Flow) -> float32 {
         let s = box.Style
         let isRow = s.FlexDirection.IsRow
         let reverse = s.FlexDirection.IsReverse
@@ -224,7 +224,7 @@ extension Layout {
 
     /// The main size an item wants when nothing sets it: its widest
     /// content for a row, its laid-out height for a column.
-    func contentSize(_ child: Box, isRow: Bool, cb: ContainingBlock, flow: Flow) -> float32 {
+    func contentSize(child: Box, isRow: Bool, cb: ContainingBlock, flow: Flow) -> float32 {
         if isRow {
             return intrinsicWidths(child).max
         }
@@ -235,18 +235,18 @@ extension Layout {
         return child.Height
     }
 
-    func mainMargin(_ b: Box, isRow: Bool) -> float32 {
+    func mainMargin(b: Box, isRow: Bool) -> float32 {
         return isRow ? b.Margin.Horizontal : b.Margin.Vertical
     }
 
-    func alignFor(_ child: Box, container: cascade.ComputedStyle) -> cascade.AlignItems {
+    func alignFor(child: Box, container: cascade.ComputedStyle) -> cascade.AlignItems {
         if child.Style.AlignSelf != .auto { return child.Style.AlignSelf }
         return container.AlignItems == .auto ? .stretch : container.AlignItems
     }
 
     /// Grows or shrinks a line's items into the space, freezing those
     /// that hit their bounds, as the specification's loop does.
-    func resolveFlexibleLengths(_ items: inout [FlexItem], _ line: [Int], space: float32, isRow: Bool) {
+    func resolveFlexibleLengths(items: inout [FlexItem], line: [Int], space: float32, isRow: Bool) {
         var sumOuter: float32 = 0
         for idx in line {
             items[idx].main = items[idx].basis
@@ -308,7 +308,7 @@ extension Layout {
 
     /// Lays out a block with its border-box width set and, when given,
     /// its height; the content decides the rest.
-    func layoutFixed(_ box: Box, width: float32, height: float32?, cb: ContainingBlock, flow: Flow) {
+    func layoutFixed(box: Box, width: float32, height: float32?, cb: ContainingBlock, flow: Flow) {
         if box.Kind == .replaced {
             sizeReplaced(box, cb: cb)
             if let h = height { box.Height = h }
@@ -337,7 +337,7 @@ extension Layout {
         }
     }
 
-    func sortByOrder(_ items: inout [FlexItem]) {
+    func sortByOrder(items: inout [FlexItem]) {
         var i = 1
         while i < items.count {
             let it = items[i]
@@ -352,7 +352,7 @@ extension Layout {
     }
 }
 
-func reversed(_ list: [Int]) -> [Int] {
+func reversed(list: [Int]) -> [Int] {
     var out: [Int] = []
     var i = list.count - 1
     while i >= 0 {

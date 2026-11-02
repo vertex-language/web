@@ -16,7 +16,7 @@ extension Layout {
     /// made as items need them, items placed where they ask or in the
     /// next free cell row by row, then sized to their cells. Answers the
     /// content height.
-    func layoutGrid(_ box: Box, contentWidth: float32, flow: Flow) -> float32 {
+    func layoutGrid(box: Box, contentWidth: float32, flow: Flow) -> float32 {
         let s = box.Style
         let columnGap = s.ColumnGap.Or(0, base: contentWidth)
         let rowGap = s.RowGap.Or(0, base: contentWidth)
@@ -99,11 +99,11 @@ extension Layout {
         // Placement: explicit positions first, then the rest row by row.
         var items: [GridItem] = []
         var occupied: [[Bool]] = []
-        func occupy(_ r: int, _ c: int) {
+        func occupy(r: int, c: int) {
             while occupied.count <= r { occupied.append([Bool](repeating: false, count: columnCount)) }
             if c < columnCount { occupied[r][c] = true }
         }
-        func isFree(_ r: int, _ c: int, _ rs: int, _ cs: int) -> Bool {
+        func isFree(r: int, c: int, rs: int, cs: int) -> Bool {
             var rr = r
             while rr < r + rs {
                 var cc = c
@@ -443,7 +443,7 @@ extension Layout {
     }
 
     /// Tracks with a repeat(auto-fill) expanded to as many as fit.
-    func expandAutoFill(_ tracks: [css.GridTrack], available: float32, gap: float32) -> [css.GridTrack] {
+    func expandAutoFill(tracks: [css.GridTrack], available: float32, gap: float32) -> [css.GridTrack] {
         var marker = -1
         var i = 0
         while i < tracks.count {
@@ -484,7 +484,7 @@ extension Layout {
     /// How a grid item sits across its area: its justify-self, else the
     /// container's justify-items; normal is stretch, except for a
     /// replaced element with a size of its own, which starts.
-    func justifyFor(_ child: Box, container: cascade.ComputedStyle) -> string {
+    func justifyFor(child: Box, container: cascade.ComputedStyle) -> string {
         var j = child.Style.JustifySelf
         if j == "auto" { j = container.JustifyItems }
         if j == "normal" || j == "legacy" { return child.Kind == .replaced ? "start" : "stretch" }

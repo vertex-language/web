@@ -6,7 +6,7 @@ package main
 
 import "web/css"
 
-func list(_ names: [string]) -> string {
+func list(names: [string]) -> string {
     return "[" + names.map { "\"\($0)\"" }.joined(separator: ", ") + "]"
 }
 

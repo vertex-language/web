@@ -14,7 +14,7 @@ import (
 
 var failures = 0
 
-func check(_ ok: bool, _ what: string) {
+func check(ok: bool, what: string) {
     if ok {
         print("ok    \(what)")
     } else {
@@ -23,12 +23,12 @@ func check(_ ok: bool, _ what: string) {
     }
 }
 
-func pixelAt(_ pixels: [uint8], _ w: int32, _ x: int32, _ y: int32) -> draw.Color {
+func pixelAt(pixels: [uint8], w: int32, x: int32, y: int32) -> draw.Color {
     let i = int((y * w + x) * 4)
     return draw.Color(pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3])
 }
 
-func countDark(_ pixels: [uint8], _ w: int32, _ r: draw.IRect) -> int {
+func countDark(pixels: [uint8], w: int32, r: draw.IRect) -> int {
     var n = 0
     var y = r.Y
     while y < r.Bottom {
@@ -177,7 +177,7 @@ func testPageInput() {
     view4.LoadHTML("<body style='margin:0'><style>.r::placeholder{color:red}.h::placeholder{opacity:0}</style><input placeholder='MMMMMM' style='display:block;border:0;padding:0;height:20px;font-size:16px'><input class=r placeholder='MMMMMM' style='display:block;border:0;padding:0;height:20px;font-size:16px'><input class=h placeholder='MMMMMM' style='display:block;border:0;padding:0;height:20px;font-size:16px'></body>")
     var px4 = [uint8](repeating: 0, count: 200 * 100 * 4)
     view4.Draw(into: &px4, width: 200, height: 100, scale: 1)
-    func inks(_ y: int32, _ want: (draw.Color) -> bool) -> int {
+    func inks(y: int32, want: (draw.Color) -> bool) -> int {
         var n = 0
         var yy = y
         while yy < y + 20 {
@@ -195,7 +195,7 @@ func testPageInput() {
     check(inks(40, { c in c.R < 250 }) == 0, "and opacity: 0 hides it")
 }
 
-func near(_ a: float32, _ b: float32, _ tolerance: float32 = 0.5) -> bool {
+func near(a: float32, b: float32, tolerance: float32 = 0.5) -> bool {
     let d = a - b
     return d < tolerance && d > -tolerance
 }
@@ -466,7 +466,7 @@ func testTransforms() {
     """)
     var px = [uint8](repeating: 0, count: 300 * 200 * 4)
     view.Draw(into: &px, width: 300, height: 200, scale: 1)
-    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 300, x, y) }
+    func at(x: int32, y: int32) -> draw.Color { return pixelAt(px, 300, x, y) }
     check(at(110, 15) == draw.Color(255, 0, 0) && at(5, 5) == draw.Color(255, 255, 255),
           "translate() moves a box, by lengths and percentages of itself (got \(at(110, 15)))")
     check(at(20, 88) == draw.Color(0, 0, 255) && at(20, 112) == draw.Color(0, 0, 255) && at(2, 105) == draw.Color(255, 255, 255),
@@ -475,7 +475,7 @@ func testTransforms() {
           "the scale property grows it from transform-origin (got \(at(235, 35)))")
     check(at(35, 180) == draw.Color(0, 0, 0) && at(5, 180) == draw.Color(255, 255, 255),
           "the translate property moves an in-flow box, calc() and all (got \(at(35, 180)))")
-    func idAt(_ x: float32, _ y: float32) -> string { return view.ElementAt(draw.Point(x, y))?.GetAttribute("id") ?? "" }
+    func idAt(x: float32, y: float32) -> string { return view.ElementAt(draw.Point(x, y))?.GetAttribute("id") ?? "" }
     check(idAt(110, 15) == "t" && idAt(5, 5) != "t", "a click lands on a translated box where it is drawn")
     check(idAt(20, 90) == "r" && idAt(35, 105) != "r", "and on a rotated one")
     check(idAt(235, 35) == "s", "and on a scaled one")
@@ -506,8 +506,8 @@ func testAnimations() {
     _ = doc.AddEventListener(a, "transitionend", { e in events.append("end") })
     _ = doc.AddEventListener(b, "animationend", { e in events.append("animationend") })
     _ = doc.AddEventListener(b, "animationiteration", { e in events.append("iteration") })
-    func width(_ n: html.Node) -> float32 { return view.BoxFor(n)!.Width }
-    func opacity(_ n: html.Node) -> float32 { return view.BoxFor(n)!.Style.Opacity }
+    func width(n: html.Node) -> float32 { return view.BoxFor(n)!.Width }
+    func opacity(n: html.Node) -> float32 { return view.BoxFor(n)!.Style.Opacity }
 
     _ = view.Advance(time: 0)
     check(opacity(a) == 1 && width(a) == 10, "nothing moves before a change")
@@ -606,7 +606,7 @@ func testContainerQueries() {
     <div class=sz><div class=v id=v></div></div>
     <div class=l id=l></div>
     """)
-    func box(_ id: string) -> layout.Box { return view.BoxFor(view.QuerySelector("#" + id)!)! }
+    func box(id: string) -> layout.Box { return view.BoxFor(view.QuerySelector("#" + id)!)! }
     check(box("t1").Width == 30 && box("t1").Height == 10, "a named query holds in a wide container (got \(box("t1").Width) \(box("t1").Height))")
     check(box("t2").Width == 10 && box("t2").Height == 20, "and an unnamed range query in a narrow one (got \(box("t2").Width) \(box("t2").Height))")
     check(box("t2").Style.MarginLeft == .px(5) && box("t1").Style.MarginLeft == .px(0), "style() asks the container's custom properties")
@@ -644,8 +644,8 @@ func testFrames() {
     """, baseURL: "/site/")
     var px = [uint8](repeating: 0, count: 400 * 500 * 4)
     func draw() { view.Draw(into: &px, width: 400, height: 500, scale: 1) }
-    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 400, x, y) }
-    func box(_ id: string) -> layout.Box? { return view.BoxFor(view.QuerySelector("#" + id)!) }
+    func at(x: int32, y: int32) -> draw.Color { return pixelAt(px, 400, x, y) }
+    func box(id: string) -> layout.Box? { return view.BoxFor(view.QuerySelector("#" + id)!) }
     draw()
     check(at(70, 40) == draw.Color(0, 0, 255), "an iframe shows its document (got \(at(70, 40)))")
     check(at(30, 65) == draw.Color(255, 0, 0), "and srcdoc (got \(at(30, 65)))")
@@ -683,7 +683,7 @@ func testFocusVisibleAndTarget() {
     </style>
     <button id=b>b</button><input id=i><a id=l href="#t">go</a><div id=t></div>
     """)
-    func w(_ id: string) -> float32 { return view.BoxFor(view.QuerySelector("#" + id)!)!.Width }
+    func w(id: string) -> float32 { return view.BoxFor(view.QuerySelector("#" + id)!)!.Width }
     _ = view.Handle(.pointerDown(web.Pointer(draw.Point(10, 10))))
     _ = view.Handle(.pointerUp(web.Pointer(draw.Point(10, 10))))
     check(w("b") == 100, "a button clicked into focus shows no :focus-visible (got \(w("b")))")
@@ -717,7 +717,7 @@ func testPseudoElements() {
     <p id=sel>select me</p>
     """)
     var px = [uint8](repeating: 0, count: 400 * 300 * 4)
-    func count(_ c: draw.Color, _ r: draw.Rect) -> int {
+    func count(c: draw.Color, r: draw.Rect) -> int {
         var n = 0
         var y = int32(r.Y)
         while y < int32(r.Y + r.Height) {
@@ -730,7 +730,7 @@ func testPseudoElements() {
         }
         return n
     }
-    func bounds(_ id: string) -> draw.Rect { return view.BoundsOf(view.QuerySelector("#" + id)!)! }
+    func bounds(id: string) -> draw.Rect { return view.BoundsOf(view.QuerySelector("#" + id)!)! }
     view.Draw(into: &px, width: 400, height: 300, scale: 1)
     let li = bounds("li")
     check(count(draw.Color(255, 0, 0), draw.Rect(0, li.Y, 40, li.Height)) > 4, "::marker colors the bullet")
@@ -773,8 +773,8 @@ func testDecorations() {
     """)
     var px = [uint8](repeating: 0, count: 400 * 300 * 4)
     view.Draw(into: &px, width: 400, height: 300, scale: 1)
-    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 400, x, y) }
-    func count(_ c: draw.Color, _ x0: int32, _ y0: int32, _ x1: int32, _ y1: int32) -> int {
+    func at(x: int32, y: int32) -> draw.Color { return pixelAt(px, 400, x, y) }
+    func count(c: draw.Color, x0: int32, y0: int32, x1: int32, y1: int32) -> int {
         var n = 0
         var y = y0
         while y < y1 { var x = x0; while x < x1 { if at(x, y) == c { n += 1 }; x += 1 }; y += 1 }
@@ -821,13 +821,13 @@ func testDecorations() {
     """)
     view.Draw(into: &px, width: 400, height: 300, scale: 1)
     // Points on the top-left corner's arc, `inset` in from the edge.
-    func arc(_ left: float32, _ inset: float32, _ degrees: float32) -> draw.Color {
+    func arc(left: float32, inset: float32, degrees: float32) -> draw.Color {
         let a = degrees * float32(math.Pi) / 180
         return at(int32(left + 30 + (30 - inset) * math.Cos(a)), int32(30 + (30 - inset) * math.Sin(a)))
     }
     // Black, or nearly: the curve's edges are smoothed.
-    func dark(_ c: draw.Color) -> bool { return c.R < 60 && c.G < 60 && c.B < 60 }
-    func marked(_ left: float32, _ inset: float32) -> (ink: int, paper: int) {
+    func dark(c: draw.Color) -> bool { return c.R < 60 && c.G < 60 && c.B < 60 }
+    func marked(left: float32, inset: float32) -> (ink: int, paper: int) {
         var ink = 0
         var paper = 0
         var d: float32 = 182
@@ -895,8 +895,8 @@ func testGridAreasAndLogical() {
     <div id=l></div>
     <div id=a><div id=ay>y</div></div>
     """)
-    func box(_ id: string) -> layout.Box { return view.BoxFor(view.QuerySelector("#" + id)!)! }
-    func at(_ id: string) -> draw.Rect { return view.BoundsOf(view.QuerySelector("#" + id)!)! }
+    func box(id: string) -> layout.Box { return view.BoxFor(view.QuerySelector("#" + id)!)! }
+    func at(id: string) -> draw.Rect { return view.BoundsOf(view.QuerySelector("#" + id)!)! }
     check(at("h").X == 0 && at("h").Y == 0 && at("h").Width == 300 && at("h").Height == 20, "a named area spans its cells (got \(at("h")))")
     check(at("s").X == 0 && at("s").Y == 20 && at("s").Width == 100 && at("s").Height == 50, "grid-template sets rows, areas and columns (got \(at("s")))")
     check(at("m").X == 100 && at("m").Y == 20 && at("m").Width == 200, "and source order doesn't matter (got \(at("m")))")
@@ -926,8 +926,8 @@ func testTextWrap() {
     <p id=w>a    b</p>
     <p id=pr>aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj kkkk llll mmmm</p>
     """)
-    func box(_ id: string) -> layout.Box { return view.BoxFor(view.QuerySelector("#" + id)!)! }
-    func widths(_ b: layout.Box) -> [float32] {
+    func box(id: string) -> layout.Box { return view.BoxFor(view.QuerySelector("#" + id)!)! }
+    func widths(b: layout.Box) -> [float32] {
         return b.Lines.map { l in
             var right: float32 = 0
             for f in l.Fragments where f.Kind == .text && !layout.IsBlank(f.Text) { right = f.X + f.Width }
@@ -975,13 +975,13 @@ func testScrollbarsZoomAndContainment() {
     <textarea id=ta></textarea>
     <div id=cv><p id=cvp>hidden</p></div><div id=cs><p>sized</p></div><div id=cp><p>clipped</p></div>
     """)
-    func box(_ id: string) -> layout.Box? { return view.BoxFor(view.QuerySelector("#" + id)!) }
+    func box(id: string) -> layout.Box? { return view.BoxFor(view.QuerySelector("#" + id)!) }
     check(box("z")!.Width == 102 && box("z")!.Height == 20 && box("z")!.Border.Left == 2, "zoom doubles lengths and borders (got \(box("z")!.Width) \(box("z")!.Height))")
     check(box("zc")!.Width == 32 && box("zc")!.Height == 20, "and rem and em inside it (got \(box("zc")!.Width) \(box("zc")!.Height))")
     check(box("dk")!.Style.Color == draw.Color(2, 2, 2) && box("lt")!.Style.Color == draw.Color(1, 1, 1), "color-scheme picks light-dark()'s color")
     var px = [uint8](repeating: 0, count: 400 * 300 * 4)
     view.Draw(into: &px, width: 400, height: 300, scale: 1)
-    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 400, x, y) }
+    func at(x: int32, y: int32) -> draw.Color { return pixelAt(px, 400, x, y) }
     check(at(354, 5) == draw.Color(255, 0, 0) && at(354, 50) == draw.Color(0, 0, 255), "scrollbar-color's thumb and track (got \(at(354, 5)) \(at(354, 50)))")
     check(at(8, 208) != draw.Color(0, 117, 255), "appearance: none draws no checkbox of its own")
     _ = view.Handle(.pointerDown(web.Pointer(draw.Point(196, 187))))
@@ -1010,7 +1010,7 @@ func testSmoothScrollAndSnap() {
     <div id=h><span>a</span><span>b</span><span>c</span></div>
     <a id=l href="#">link</a><div id=tall></div>
     """)
-    func box(_ id: string) -> layout.Box { return view.BoxFor(view.QuerySelector("#" + id)!)! }
+    func box(id: string) -> layout.Box { return view.BoxFor(view.QuerySelector("#" + id)!)! }
     _ = view.Advance(time: 0)
     _ = view.Handle(.pointerMoved(draw.Point(50, 50)))
     _ = view.Handle(.wheel(web.Wheel(draw.Point(0, -30), precise: true)))
@@ -1057,8 +1057,8 @@ func testDialogsAndPopovers() {
     <form id=f><input id=req required><button id=go>go</button></form>
     """)
     let doc = view.Document!
-    func node(_ id: string) -> html.Node { return view.QuerySelector("#" + id)! }
-    func click(_ id: string) {
+    func node(id: string) -> html.Node { return view.QuerySelector("#" + id)! }
+    func click(id: string) {
         let r = view.BoundsOf(node(id))!
         _ = view.Handle(.pointerDown(web.Pointer(draw.Point(r.X + 2, r.Y + 2))))
         _ = view.Handle(.pointerUp(web.Pointer(draw.Point(r.X + 2, r.Y + 2))))
@@ -1102,7 +1102,7 @@ func testDialogsAndPopovers() {
     click("go")
     check(submitted == 0 && events == ["invalid"] && view.FocusedElement === node("req"), "a required field left empty stops the submit, fires invalid and takes focus")
     check(view.ValidationMessage(node("req")) == "Please fill out this field.", "and says why (got \(view.ValidationMessage(node("req"))))")
-    func orangeUnder(_ id: string) -> bool {
+    func orangeUnder(id: string) -> bool {
         var bp = [uint8](repeating: 0, count: 400 * 300 * 4)
         view.Draw(into: &bp, width: 400, height: 300, scale: 1)
         let r = view.BoundsOf(node(id))!
@@ -1146,7 +1146,7 @@ func testDragAndDrop() {
     <div id=dst style="width: 100px"></div><div id=no style="width: 100px"></div>
     """)
     let doc = view.Document!
-    func node(_ id: string) -> html.Node { return view.QuerySelector("#" + id)! }
+    func node(id: string) -> html.Node { return view.QuerySelector("#" + id)! }
     var log: [string] = []
     var dropped = ""
     var clicks = 0
@@ -1199,8 +1199,8 @@ func testInputTypes() {
     <input id=dt type=datetime-local value=2026-12-31T23:59><input id=bad type=date value=2026-13-01>
     <input id=c type=color value=#ff0000><input id=f type=file>
     """)
-    func node(_ id: string) -> html.Node { return view.QuerySelector("#" + id)! }
-    func key(_ id: string, _ code: string) {
+    func node(id: string) -> html.Node { return view.QuerySelector("#" + id)! }
+    func key(id: string, code: string) {
         view.Focus(node(id))
         _ = view.Handle(.keyDown(web.Key(Key: code, Code: code)))
     }
@@ -1483,7 +1483,7 @@ func testCompositing() {
     """)
     var px = [uint8](repeating: 0, count: 300 * 120 * 4)
     view.Draw(into: &px, width: 300, height: 120, scale: 1)
-    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 300, x, y) }
+    func at(x: int32, y: int32) -> draw.Color { return pixelAt(px, 300, x, y) }
     let white = draw.Color(255, 255, 255)
     check(at(20, 20) == draw.Color(255, 0, 0) && at(2, 2) == white && at(37, 37) == white,
           "clip-path: circle() keeps the circle (got \(at(20, 20)) \(at(2, 2)))")
@@ -1514,7 +1514,7 @@ func testCompositing() {
     """)
     var mp = [uint8](repeating: 0, count: 200 * 60 * 4)
     more.Draw(into: &mp, width: 200, height: 60, scale: 1)
-    func m(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(mp, 200, x, y) }
+    func m(x: int32, y: int32) -> draw.Color { return pixelAt(mp, 200, x, y) }
     check(m(5, 5) == draw.Color(255, 0, 0) && m(35, 35) == draw.Color(255, 255, 255), "path() keeps its triangle (got \(m(5, 5)) \(m(35, 35)))")
     check(m(55, 5) == draw.Color(0, 0, 255) && m(85, 35) == draw.Color(255, 255, 255), "shape() with percentages (got \(m(55, 5)) \(m(85, 35)))")
     check(m(130, 30) == draw.Color(0, 128, 0) && m(105, 30) == draw.Color(255, 255, 255), "a geometry box alone clips to that box (got \(m(130, 30)) \(m(105, 30)))")
@@ -1531,7 +1531,7 @@ func testCompositing() {
     """)
     var kp = [uint8](repeating: 0, count: 100 * 40 * 4)
     mk.Draw(into: &kp, width: 100, height: 40, scale: 1)
-    func k(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(kp, 100, x, y) }
+    func k(x: int32, y: int32) -> draw.Color { return pixelAt(kp, 100, x, y) }
     check(k(20, 20) == draw.Color(255, 0, 0) && k(5, 5) == draw.Color(255, 255, 255) && k(35, 20) == draw.Color(255, 255, 255),
           "mask-size and mask-position place one tile, no-repeat (got \(k(20, 20)) \(k(5, 5)) \(k(35, 20)))")
     check(k(52, 20).G < 40 && k(88, 20).G > 215, "mask-mode: luminance keeps what is bright (got \(k(52, 20)) \(k(88, 20)))")
@@ -1563,7 +1563,7 @@ func testBorderImage() {
     """)
     var px = [uint8](repeating: 0, count: 260 * 70 * 4)
     view.Draw(into: &px, width: 260, height: 70, scale: 1)
-    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 260, x, y) }
+    func at(x: int32, y: int32) -> draw.Color { return pixelAt(px, 260, x, y) }
     let white = draw.Color(255, 255, 255)
     check(at(5, 15) == draw.Color(0, 0, 255) && at(20, 30) == white,
           "a gradient border image takes the border's place, the middle left empty (got \(at(5, 15)) \(at(20, 30)))")
@@ -1608,7 +1608,7 @@ func testColumnsPaint() {
     """)
     var px = [uint8](repeating: 0, count: 300 * 100 * 4)
     view.Draw(into: &px, width: 300, height: 100, scale: 1)
-    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 300, x, y) }
+    func at(x: int32, y: int32) -> draw.Color { return pixelAt(px, 300, x, y) }
     check(at(150, 5) == draw.Color(255, 0, 0) && at(140, 5) != draw.Color(255, 0, 0), "column-rule runs down the middle of the gap (got \(at(150, 5)) \(at(140, 5)))")
     check(countDark(px, 300, draw.IRect(160, 0, 140, 40)) > 20, "the text goes on in the second column")
     check(view.ElementAt(draw.Point(170, 10))?.GetAttribute("id") == "p", "a click on text in the second column lands on its paragraph")
@@ -1722,7 +1722,7 @@ func testGradientLengths() {
     """)
     var px = [uint8](repeating: 0, count: 100 * 60 * 4)
     view.Draw(into: &px, width: 100, height: 60, scale: 1)
-    func at(_ x: int32, _ y: int32) -> draw.Color { return pixelAt(px, 100, x, y) }
+    func at(x: int32, y: int32) -> draw.Color { return pixelAt(px, 100, x, y) }
     let red = draw.Color(255, 0, 0)
     let blue = draw.Color(0, 0, 255)
     check(at(10, 10) == red && at(30, 10) == blue, "a stop at 20px is 20 pixels along (got \(at(10, 10)) \(at(30, 10)))")

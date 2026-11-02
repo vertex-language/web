@@ -15,7 +15,7 @@ import (
 /// scheme, `../x` climbs, `?q` keeps its path. A base with no scheme is
 /// a file path, and resolves the same way. A fragment alone is left for
 /// the page to scroll to, and what doesn't parse is left as it is.
-public func Resolve(_ reference: string, against base: string) -> string {
+public func Resolve(reference: string, against base: string) -> string {
     if reference.isEmpty { return base }
     if reference.hasPrefix("#") || base.isEmpty { return reference }
     guard let r = try? url.Parse(reference) else { return reference }
@@ -25,7 +25,7 @@ public func Resolve(_ reference: string, against base: string) -> string {
 }
 
 /// The scheme of a URL, lowercase, or "" for a path.
-public func Scheme(_ address: string) -> string {
+public func Scheme(address: string) -> string {
     guard let u = try? url.Parse(address) else { return "" }
     return u.Scheme
 }
@@ -40,7 +40,7 @@ public func Directory(of path: string) -> string {
 }
 
 /// A file URL's path, its escapes decoded, or the path itself.
-public func FilePath(_ address: string) -> string {
+public func FilePath(address: string) -> string {
     if address.hasPrefix("file:"), let u = try? url.Parse(address) {
         return url.PathUnescape(u.Path)
     }
@@ -57,13 +57,13 @@ public struct Fetcher {
         Handler = nil
     }
 
-    public init(_ handler: (string) -> [uint8]?) {
+    public init(handler: (string) -> [uint8]?) {
         Handler = handler
     }
 
     /// The resource's bytes, or nil. Without a handler, file paths and
     /// file: URLs are read from disk, and other schemes answer nil.
-    public func Fetch(_ url: string) -> [uint8]? {
+    public func Fetch(url: string) -> [uint8]? {
         if let h = Handler {
             return h(url)
         }
@@ -76,7 +76,7 @@ public struct Fetcher {
     }
 }
 
-func stringOf(_ bytes: [uint8], _ start: int, _ end: int) -> string {
+func stringOf(bytes: [uint8], start: int, end: int) -> string {
     if start >= end { return "" }
     return utf8.Decode(bytes, start, end)
 }

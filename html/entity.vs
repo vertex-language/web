@@ -1,7 +1,7 @@
 package html
 
 /// Escapes special HTML characters (`&`, `<`, `>`, `"`, `'`).
-public func Escape(_ text: string) -> string {
+public func Escape(text: string) -> string {
     var out = ""
     for b in text.utf8 {
         switch b {
@@ -19,7 +19,7 @@ public func Escape(_ text: string) -> string {
 }
 
 /// Decodes standard HTML entities in text (e.g. `&amp;`, `&lt;`, `&#65;`).
-public func Unescape(_ text: string) -> string {
+public func Unescape(text: string) -> string {
     let bytes = bytesFromString(text)
     var out: [uint8] = []
     var i = 0
@@ -100,7 +100,7 @@ let namedEntities: [string: uint32] = [
 ]
 
 /// The bytes of a code point in UTF-8.
-func utf8Of(_ cp: uint32) -> string {
+func utf8Of(cp: uint32) -> string {
     var b: [uint8] = []
     if cp < 0x80 {
         b.append(uint8(cp))
@@ -123,7 +123,7 @@ func utf8Of(_ cp: uint32) -> string {
 /// What a numeric reference stands for, as HTML's parser maps it: the
 /// C1 controls as windows-1252 reads those bytes, and nothing that
 /// isn't a character as U+FFFD.
-func numericReference(_ n: uint32) -> uint32 {
+func numericReference(n: uint32) -> uint32 {
     if n == 0 || n > 0x10FFFF || (n >= 0xD800 && n <= 0xDFFF) { return 0xFFFD }
     if n >= 0x80 && n <= 0x9F {
         let w1252: [uint32] = [0x20AC, 0x81, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x8D, 0x017D, 0x8F,
@@ -133,7 +133,7 @@ func numericReference(_ n: uint32) -> uint32 {
     return n
 }
 
-func decodeNamedOrNumericEntity(_ name: string) -> string? {
+func decodeNamedOrNumericEntity(name: string) -> string? {
     if let cp = namedEntities[name] { return utf8Of(cp) }
 
     // Numeric entity: &#123; or &#x1F;

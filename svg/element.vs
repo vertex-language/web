@@ -16,17 +16,17 @@ final class element {
     var attributes: [string: string] = [:]
     var Children: [element] = []
 
-    init(_ name: string) {
+    init(name: string) {
         TagName = name
     }
 
-    func GetAttribute(_ name: string) -> string? {
+    func GetAttribute(name: string) -> string? {
         return attributes[name]
     }
 }
 
 /// The element for an HTML one, with its element children.
-func fromHTML(_ n: html.Node) -> element {
+func fromHTML(n: html.Node) -> element {
     let e = element(n.TagName)
     for a in n.Attributes { e.attributes[a.Name] = a.Value }
     for c in n.Children where c.Kind == html.NodeKind.element {
@@ -38,7 +38,7 @@ func fromHTML(_ n: html.Node) -> element {
 /// The element for an XML one. Elements of other namespaces (an editor's
 /// own, say) keep a name no SVG element has, so nothing draws them; an
 /// XLink attribute is named xlink:..., as HTML names it.
-func fromXML(_ x: xml.Element) -> element {
+func fromXML(x: xml.Element) -> element {
     let space = x.Name.Space
     var name = x.Name.Local.lowercased()
     if space != svgNamespace && space != "" { name = "\(space):\(name)" }

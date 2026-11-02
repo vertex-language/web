@@ -48,7 +48,7 @@ public struct Token {
 
 /// The text a run of tokens spells, with a space wherever the source had
 /// one and strings quoted again.
-public func Serialize(_ tokens: [Token]) -> string {
+public func Serialize(tokens: [Token]) -> string {
     var out = ""
     var i = 0
     while i < tokens.count {

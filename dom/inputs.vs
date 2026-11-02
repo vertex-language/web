@@ -7,12 +7,12 @@ import "web/html"
 // day, a minute, a month or a week as the arrow keys do.
 
 /// The input types whose value is a date or a time.
-public func IsDateTimeType(_ type: string) -> bool {
+public func IsDateTimeType(type: string) -> bool {
     return type == "date" || type == "time" || type == "datetime-local" || type == "month" || type == "week"
 }
 
 /// What an empty date or time field shows: its format.
-public func FormatHint(_ type: string) -> string {
+public func FormatHint(type: string) -> string {
     switch type {
     case "date": return "yyyy-mm-dd"
     case "time": return "--:--"
@@ -26,7 +26,7 @@ public func FormatHint(_ type: string) -> string {
 /// A value as its type allows it: a date or time in its format, a color
 /// as #rrggbb, a number that parses; "" (or the color black) where it
 /// doesn't.
-public func SanitizedValue(_ type: string, _ value: string) -> string {
+public func SanitizedValue(type: string, value: string) -> string {
     switch type {
     case "date": return parseDate(value) != nil ? value : ""
     case "month": return parseMonth(value) != nil ? value : ""
@@ -50,7 +50,7 @@ public func SanitizedValue(_ type: string, _ value: string) -> string {
     }
 }
 
-func digits(_ s: string) -> int? {
+func digits(s: string) -> int? {
     if s.isEmpty { return nil }
     var n = 0
     for c in s.utf8 {
@@ -60,7 +60,7 @@ func digits(_ s: string) -> int? {
     return n
 }
 
-func daysIn(_ year: int, _ month: int) -> int {
+func daysIn(year: int, month: int) -> int {
     switch month {
     case 2: return (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 ? 29 : 28
     case 4, 6, 9, 11: return 30
@@ -68,7 +68,7 @@ func daysIn(_ year: int, _ month: int) -> int {
     }
 }
 
-func parseDate(_ s: string) -> (y: int, m: int, d: int)? {
+func parseDate(s: string) -> (y: int, m: int, d: int)? {
     let p = s.split(separator: "-").map { string($0) }
     guard p.count == 3, p[0].count >= 4, p[1].count == 2, p[2].count == 2,
           let y = digits(p[0]), let m = digits(p[1]), let d = digits(p[2]) else { return nil }
@@ -76,27 +76,27 @@ func parseDate(_ s: string) -> (y: int, m: int, d: int)? {
     return (y: y, m: m, d: d)
 }
 
-func parseMonth(_ s: string) -> (y: int, m: int)? {
+func parseMonth(s: string) -> (y: int, m: int)? {
     let p = s.split(separator: "-").map { string($0) }
     guard p.count == 2, p[0].count >= 4, p[1].count == 2, let y = digits(p[0]), let m = digits(p[1]), m >= 1 && m <= 12 else { return nil }
     return (y: y, m: m)
 }
 
-func parseWeek(_ s: string) -> (y: int, w: int)? {
+func parseWeek(s: string) -> (y: int, w: int)? {
     let p = s.split(separator: "-").map { string($0) }
     guard p.count == 2, p[0].count >= 4, p[1].count == 3, p[1].hasPrefix("W"), let y = digits(p[0]),
           let w = digits(string(p[1].dropFirst())), w >= 1 && w <= 53 else { return nil }
     return (y: y, w: w)
 }
 
-func parseTime(_ s: string) -> (h: int, m: int)? {
+func parseTime(s: string) -> (h: int, m: int)? {
     let p = s.split(separator: ":").map { string($0) }
     guard p.count >= 2, p[0].count == 2, p[1].count == 2, let h = digits(p[0]), let m = digits(p[1]), h < 24 && m < 60 else { return nil }
     return (h: h, m: m)
 }
 
 /// Days since 1970-01-01 of a civil date (Howard Hinnant's algorithm).
-func daysFromCivil(_ y0: int, _ m: int, _ d: int) -> int {
+func daysFromCivil(y0: int, m: int, d: int) -> int {
     let y = m <= 2 ? y0 - 1 : y0
     let era = (y >= 0 ? y : y - 399) / 400
     let yoe = y - era * 400
@@ -106,7 +106,7 @@ func daysFromCivil(_ y0: int, _ m: int, _ d: int) -> int {
     return era * 146097 + doe - 719468
 }
 
-func civilFromDays(_ z0: int) -> (y: int, m: int, d: int) {
+func civilFromDays(z0: int) -> (y: int, m: int, d: int) {
     let z = z0 + 719468
     let era = (z >= 0 ? z : z - 146096) / 146097
     let doe = z - era * 146097
@@ -118,7 +118,7 @@ func civilFromDays(_ z0: int) -> (y: int, m: int, d: int) {
     return (y: yoe + era * 400 + (m <= 2 ? 1 : 0), m: m, d: d)
 }
 
-func pad(_ n: int, _ width: int) -> string {
+func pad(n: int, width: int) -> string {
     var s = "\(n)"
     while s.count < width { s = "0" + s }
     return s
@@ -126,7 +126,7 @@ func pad(_ n: int, _ width: int) -> string {
 
 /// A date or time value moved by steps (a day, a minute, a month, a
 /// week), from today's "zero" where it is empty.
-public func StepDateTime(_ type: string, _ value: string, by steps: int) -> string {
+public func StepDateTime(type: string, value: string, by steps: int) -> string {
     switch type {
     case "date":
         let d = parseDate(value) ?? (y: 2026, m: 1, d: 1)
@@ -165,7 +165,7 @@ public func StepDateTime(_ type: string, _ value: string, by steps: int) -> stri
 
 /// A number field's value moved by steps of its step attribute (1 where
 /// it gives none), kept within min and max.
-public func StepNumber(_ node: html.Node, _ value: string, by steps: int) -> string {
+public func StepNumber(node: html.Node, value: string, by steps: int) -> string {
     let step = number(node.GetAttribute("step") ?? "") ?? 1
     var v = number(value) ?? (number(node.GetAttribute("min") ?? "") ?? 0) - (steps > 0 ? step : -step)
     v += step * float64(steps)
@@ -176,7 +176,7 @@ public func StepNumber(_ node: html.Node, _ value: string, by steps: int) -> str
     return "\(v)"
 }
 
-func number(_ s: string) -> float64? {
+func number(s: string) -> float64? {
     if s.isEmpty { return nil }
     var seen = false
     for c in s.utf8 {

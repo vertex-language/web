@@ -15,7 +15,7 @@ import (
 extension Page {
     /// Opens a dialog as a modal: in the top layer, the page behind it
     /// inert; the first focusable element in it takes focus.
-    public func ShowModal(_ dialog: html.Node) {
+    public func ShowModal(dialog: html.Node) {
         guard dialog.TagName == "dialog", !modal.contains(dialog.Id) else { return }
         Document?.SetAttribute(dialog, "open", "")
         modal.insert(dialog.Id)
@@ -25,7 +25,7 @@ extension Page {
     }
 
     /// Opens a dialog in place, not modal.
-    public func Show(_ dialog: html.Node) {
+    public func Show(dialog: html.Node) {
         guard dialog.TagName == "dialog", !dialog.HasAttribute("open") else { return }
         Document?.SetAttribute(dialog, "open", "")
         topLayerChanged()
@@ -33,7 +33,7 @@ extension Page {
 
     /// Closes a dialog, with a return value where one is given; close
     /// fires at it.
-    public func Close(_ dialog: html.Node, returnValue: string? = nil) {
+    public func Close(dialog: html.Node, returnValue: string? = nil) {
         guard dialog.TagName == "dialog", dialog.HasAttribute("open") else { return }
         if let v = returnValue { dialogReturnValues[dialog.Id] = v }
         Document?.RemoveAttribute(dialog, "open")
@@ -52,18 +52,18 @@ extension Page {
 
     /// Asks a dialog to close, as Escape does: cancel fires first, and a
     /// listener may keep it open.
-    public func RequestClose(_ dialog: html.Node) {
+    public func RequestClose(dialog: html.Node) {
         guard dialog.HasAttribute("open") else { return }
         if !dispatch(dom.Event("cancel", bubbles: false), to: dialog) { return }
         Close(dialog)
     }
 
     /// Whether a popover is showing.
-    public func IsPopoverOpen(_ el: html.Node) -> bool { return popovers.contains(el.Id) }
+    public func IsPopoverOpen(el: html.Node) -> bool { return popovers.contains(el.Id) }
 
     /// Shows a popover: in the top layer; an auto popover first closes
     /// the auto popovers it isn't inside.
-    public func ShowPopover(_ el: html.Node) {
+    public func ShowPopover(el: html.Node) {
         guard el.HasAttribute("popover"), !popovers.contains(el.Id) else { return }
         if !dispatch(dom.ToggleEvent("beforetoggle", OldState: "closed", NewState: "open"), to: el) { return }
         if popoverKind(el) == "auto" {
@@ -78,7 +78,7 @@ extension Page {
         _ = dispatch(dom.ToggleEvent("toggle", OldState: "closed", NewState: "open"), to: el)
     }
 
-    public func HidePopover(_ el: html.Node) {
+    public func HidePopover(el: html.Node) {
         guard popovers.contains(el.Id) else { return }
         _ = dispatch(dom.ToggleEvent("beforetoggle", OldState: "open", NewState: "closed"), to: el)
         popovers.remove(el.Id)
@@ -88,23 +88,23 @@ extension Page {
         _ = dispatch(dom.ToggleEvent("toggle", OldState: "open", NewState: "closed"), to: el)
     }
 
-    public func TogglePopover(_ el: html.Node) {
+    public func TogglePopover(el: html.Node) {
         if popovers.contains(el.Id) { HidePopover(el) } else { ShowPopover(el) }
     }
 
     /// popover's kind: "auto" (the default), "manual" or "hint".
-    func popoverKind(_ el: html.Node) -> string {
+    func popoverKind(el: html.Node) -> string {
         let v = lower(el.GetAttribute("popover") ?? "")
         if v == "manual" || v == "hint" { return v }
         return "auto"
     }
 
-    func enterTopLayer(_ el: html.Node) {
+    func enterTopLayer(el: html.Node) {
         topLayer.removeAll(where: { $0 == el.Id })
         topLayer.append(el.Id)
     }
 
-    func leaveTopLayer(_ el: html.Node) {
+    func leaveTopLayer(el: html.Node) {
         topLayer.removeAll(where: { $0 == el.Id })
     }
 
@@ -132,7 +132,7 @@ extension Page {
         return findNode(doc.Tree.Root, id)
     }
 
-    func isInside(_ n: html.Node, _ ancestor: html.Node) -> bool {
+    func isInside(n: html.Node, ancestor: html.Node) -> bool {
         var cur: html.Node? = n
         while let c = cur {
             if c.Id == ancestor.Id { return true }
@@ -142,7 +142,7 @@ extension Page {
     }
 
     /// Focuses the first focusable element in a dialog: autofocus first.
-    func focusInside(_ dialog: html.Node) {
+    func focusInside(dialog: html.Node) {
         let order = dom.FocusOrder(dialog)
         for n in order where n.HasAttribute("autofocus") {
             Focus(n)
@@ -153,7 +153,7 @@ extension Page {
 
     /// A button's popovertarget or commandfor, acted on; answers whether
     /// it had one.
-    func invoke(_ button: html.Node) -> bool {
+    func invoke(button: html.Node) -> bool {
         guard let doc = Document else { return false }
         if let id = button.GetAttribute("commandfor"), let target = doc.Tree.ElementById(id) {
             let command = lower(button.GetAttribute("command") ?? "")
@@ -203,7 +203,7 @@ extension Page {
     /// A press somewhere: auto popovers it is outside of close, and a
     /// modal dialog with closedby=any closes when the press is on its
     /// backdrop. Answers whether the press was taken by that.
-    func lightDismiss(_ target: html.Node?) -> bool {
+    func lightDismiss(target: html.Node?) -> bool {
         if let m = topModal {
             if let t = target, isInside(t, m) { return false }
             if lower(m.GetAttribute("closedby") ?? "") == "any" { RequestClose(m) }
@@ -227,7 +227,7 @@ extension Page {
     /// Constraint validation before a submit: invalid fires at each
     /// control that fails, the first takes focus, and the form isn't
     /// sent. Answers whether it may be.
-    func validate(_ form: html.Node, submitter: html.Node?) -> bool {
+    func validate(form: html.Node, submitter: html.Node?) -> bool {
         if form.HasAttribute("novalidate") { return true }
         if let s = submitter, s.HasAttribute("formnovalidate") { return true }
         var first: html.Node? = nil
@@ -246,7 +246,7 @@ extension Page {
     }
 }
 
-func findNode(_ n: html.Node, _ id: int64) -> html.Node? {
+func findNode(n: html.Node, id: int64) -> html.Node? {
     if n.Id == id { return n }
     for c in n.Children {
         if let f = findNode(c, id) { return f }
@@ -255,7 +255,7 @@ func findNode(_ n: html.Node, _ id: int64) -> html.Node? {
 }
 
 /// Every element under a node, in tree order.
-func allElements(_ n: html.Node) -> [html.Node] {
+func allElements(n: html.Node) -> [html.Node] {
     var out: [html.Node] = []
     for c in n.Children where c.Kind == html.NodeKind.element {
         out.append(c)

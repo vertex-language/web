@@ -41,7 +41,7 @@ struct OpenedBlock {
 extension Layout {
     /// The columns' count, width and gap in a content width, as
     /// Multi-column 1 §3.4 works them out.
-    func columnGeometry(_ box: Box, _ available: float32) -> (count: int, width: float32, gap: float32) {
+    func columnGeometry(box: Box, available: float32) -> (count: int, width: float32, gap: float32) {
         let s = box.Style
         let gap = s.ColumnGapNormal ? s.FontSize : s.ColumnGap.Or(0, base: available)
         var n = 1
@@ -58,7 +58,7 @@ extension Layout {
     }
 
     /// Lays out a multi-column block's content and answers its height.
-    func layoutColumns(_ box: Box, contentWidth: float32, flow: Flow) -> float32 {
+    func layoutColumns(box: Box, contentWidth: float32, flow: Flow) -> float32 {
         let g = columnGeometry(box, contentWidth)
         _ = box.HasInlineChildren
             ? layoutInline(box, contentWidth: g.width, flow: flow)
@@ -128,7 +128,7 @@ extension Layout {
     /// height), moved into their columns with this set's top at `at`.
     /// Answers how many columns it took, how tall it is, and each
     /// piece's move by its box and line.
-    func fillColumns(_ box: Box, _ pieces: [ColumnPiece], start: float32, at: float32, _ g: (count: int, width: float32, gap: float32),
+    func fillColumns(box: Box, pieces: [ColumnPiece], start: float32, at: float32, g: (count: int, width: float32, gap: float32),
                      single: bool) -> (columns: int, height: float32, moves: [int64: (dx: float32, dy: float32)]) {
         var total: float32 = 0
         var tallest: float32 = 0
@@ -179,7 +179,7 @@ extension Layout {
     /// column starts, and how many there are: a new column where a piece
     /// would reach past the height or a break is forced, moved earlier
     /// to keep a block's orphans and widows.
-    func placeColumns(_ pieces: [ColumnPiece], _ start: float32, _ limit: float32) -> (columns: [int], starts: [float32], count: int) {
+    func placeColumns(pieces: [ColumnPiece], start: float32, limit: float32) -> (columns: [int], starts: [float32], count: int) {
         var cols = [int](repeating: 0, count: pieces.count)
         var starts: [float32] = [start]
         var col = 0
@@ -224,7 +224,7 @@ extension Layout {
     }
 
     /// Whether a break-before or break-after value forces a break.
-    func forcesBreak(_ v: string) -> bool {
+    func forcesBreak(v: string) -> bool {
         switch v {
         case "column", "page", "left", "right", "recto", "verso", "all", "region": return true
         default: return false
@@ -233,8 +233,8 @@ extension Layout {
 
     /// The pieces of a box's content in order, its border box's corner at
     /// left, top in the container's coordinates.
-    func collectColumnPieces(_ box: Box, left: float32, top: float32, _ out: inout [ColumnPiece], _ opened: inout [OpenedBlock],
-                             _ force: inout bool, chain: [Box]) {
+    func collectColumnPieces(box: Box, left: float32, top: float32, out: inout [ColumnPiece], opened: inout [OpenedBlock],
+                             force: inout bool, chain: [Box]) {
         if !box.Lines.isEmpty {
             var i = 0
             while i < box.Lines.count {
@@ -260,8 +260,8 @@ extension Layout {
         }
     }
 
-    func collectChild(_ child: Box, left: float32, top: float32, _ out: inout [ColumnPiece], _ opened: inout [OpenedBlock],
-                      _ force: inout bool, chain: [Box]) {
+    func collectChild(child: Box, left: float32, top: float32, out: inout [ColumnPiece], opened: inout [OpenedBlock],
+                      force: inout bool, chain: [Box]) {
         if forcesBreak(child.Style.BreakBefore) { force = true }
         let childLeft = left + child.X
         let childTop = top + child.Y
@@ -283,7 +283,7 @@ extension Layout {
 
     /// Whether a box's lines and children may go to different columns:
     /// a block that lays out in the container's flow.
-    func opensForColumns(_ box: Box) -> bool {
+    func opensForColumns(box: Box) -> bool {
         let s = box.Style
         if box.Kind != .block || box.IsFormattingRoot || s.BreakInsideAvoid || s.Float != .none { return false }
         if s.HasTransform || s.IsPositioned || s.HasCompositing || s.Opacity < 1 { return false }
@@ -292,7 +292,7 @@ extension Layout {
 
     /// Pieces by their tops, in order where they tie: floats among the
     /// lines they sit beside.
-    func sortedByTop(_ pieces: [ColumnPiece]) -> [ColumnPiece] {
+    func sortedByTop(pieces: [ColumnPiece]) -> [ColumnPiece] {
         var out = pieces
         var i = 1
         while i < out.count {
@@ -308,14 +308,14 @@ extension Layout {
         return out
     }
 
-    func pieceKey(_ p: ColumnPiece) -> int64 {
+    func pieceKey(p: ColumnPiece) -> int64 {
         return int64(p.box.Id) * 100000 + int64(p.line + 1)
     }
 
     /// The fragments of each split decorated block: in every column its
     /// pieces went to, from its first piece's top (its own top in the
     /// first) to its last's bottom (its own bottom in the last).
-    func splitFragments(_ opened: [OpenedBlock], _ segments: [[ColumnPiece]], _ moves: [int64: (dx: float32, dy: float32)]) {
+    func splitFragments(opened: [OpenedBlock], segments: [[ColumnPiece]], moves: [int64: (dx: float32, dy: float32)]) {
         for d in opened {
             var frags: [(dx: float32, dy: float32, top: float32, bottom: float32)] = []
             for seg in segments {
@@ -341,7 +341,7 @@ extension Layout {
         }
     }
 
-    func moveColumnPiece(_ p: ColumnPiece, _ dx: float32, _ dy: float32) {
+    func moveColumnPiece(p: ColumnPiece, dx: float32, dy: float32) {
         if dx == 0 && dy == 0 { return }
         if p.line < 0 {
             p.box.X += dx

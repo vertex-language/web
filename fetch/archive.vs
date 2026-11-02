@@ -34,7 +34,7 @@ public struct Archive {
         Entries = [:]
     }
 
-    public mutating func Add(_ entry: ArchiveEntry) {
+    public mutating func Add(entry: ArchiveEntry) {
         Entries[entry.URL] = entry
     }
 
@@ -85,7 +85,7 @@ public struct Archive {
 }
 
 /// A field without the tabs and newlines that separate fields.
-func clean(_ s: string) -> string {
+func clean(s: string) -> string {
     if !s.contains("\t") && !s.contains("\n") { return s }
     var b = [uint8](s.utf8)
     var i = 0

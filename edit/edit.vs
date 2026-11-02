@@ -8,7 +8,7 @@ import "unicode/utf8"
 // text/segment.
 
 /// The text with bytes inserted at an offset, clamped to the text.
-public func Insert(_ s: string, at index: int, _ insertion: [uint8]) -> string {
+public func Insert(s: string, at index: int, insertion: [uint8]) -> string {
     let b = [uint8](s.utf8)
     let at = index < 0 ? 0 : (index > b.count ? b.count : index)
     var out: [uint8] = []
@@ -20,7 +20,7 @@ public func Insert(_ s: string, at index: int, _ insertion: [uint8]) -> string {
 }
 
 /// The text with bytes[start..<end] removed.
-public func Remove(_ s: string, from start: int, to end: int) -> string {
+public func Remove(s: string, from start: int, to end: int) -> string {
     let b = [uint8](s.utf8)
     let lo = min(start, b.count)
     let hi = min(end, b.count)
@@ -28,26 +28,26 @@ public func Remove(_ s: string, from start: int, to end: int) -> string {
 }
 
 /// The offset of the character before i.
-public func PreviousChar(_ b: [uint8], _ i: int) -> int {
+public func PreviousChar(b: [uint8], i: int) -> int {
     var j = i - 1
     while j > 0 && (b[j] & 0xC0) == 0x80 { j -= 1 }
     return j < 0 ? 0 : j
 }
 
 /// The offset of the character after i.
-public func NextChar(_ b: [uint8], _ i: int) -> int {
+public func NextChar(b: [uint8], i: int) -> int {
     var j = i + 1
     while j < b.count && (b[j] & 0xC0) == 0x80 { j += 1 }
     return j > b.count ? b.count : j
 }
 
 /// Whether i starts a character rather than continuing one.
-public func IsCharStart(_ b: [uint8], _ i: int) -> bool {
+public func IsCharStart(b: [uint8], i: int) -> bool {
     return i == b.count || (b[i] & 0xC0) != 0x80
 }
 
 /// The start of the word before i, skipping the spaces before it.
-public func WordStart(_ b: [uint8], before i: int) -> int {
+public func WordStart(b: [uint8], before i: int) -> int {
     var j = i
     while j > 0 && isSpaceByte(b[j - 1]) { j -= 1 }
     while j > 0 && !isSpaceByte(b[j - 1]) { j -= 1 }
@@ -55,7 +55,7 @@ public func WordStart(_ b: [uint8], before i: int) -> int {
 }
 
 /// The end of the word after i, skipping the spaces after it.
-public func WordEnd(_ b: [uint8], after i: int) -> int {
+public func WordEnd(b: [uint8], after i: int) -> int {
     var j = i
     while j < b.count && isSpaceByte(b[j]) { j += 1 }
     while j < b.count && !isSpaceByte(b[j]) { j += 1 }
@@ -64,7 +64,7 @@ public func WordEnd(_ b: [uint8], after i: int) -> int {
 
 /// The word, or the run of spaces, at an offset: what a double click
 /// selects.
-public func WordAt(_ b: [uint8], _ offset: int) -> (start: int, end: int) {
+public func WordAt(b: [uint8], offset: int) -> (start: int, end: int) {
     var start = min(offset, b.count)
     var end = start
     if start < b.count && isSpaceByte(b[start]) {
@@ -79,7 +79,7 @@ public func WordAt(_ b: [uint8], _ offset: int) -> (start: int, end: int) {
 
 /// The caret moved a line up or down in multi-line text, keeping its
 /// column where the line allows.
-public func LineMove(_ b: [uint8], _ caret: int, up: bool) -> int {
+public func LineMove(b: [uint8], caret: int, up: bool) -> int {
     var lineStart = caret
     while lineStart > 0 && b[lineStart - 1] != 10 { lineStart -= 1 }
     let column = caret - lineStart
@@ -101,7 +101,7 @@ public func LineMove(_ b: [uint8], _ caret: int, up: bool) -> int {
 }
 
 /// The line of multi-line text a row index falls on: its byte range.
-public func LineRange(_ b: [uint8], row: int) -> (start: int, end: int) {
+public func LineRange(b: [uint8], row: int) -> (start: int, end: int) {
     var i = 0
     var current = 0
     var lineStart = 0
@@ -118,7 +118,7 @@ public func LineRange(_ b: [uint8], row: int) -> (start: int, end: int) {
 }
 
 /// The first line of text, for a single-line field taking a paste.
-public func FirstLine(_ b: [uint8]) -> [uint8] {
+public func FirstLine(b: [uint8]) -> [uint8] {
     var i = 0
     while i < b.count && b[i] != 10 && b[i] != 13 { i += 1 }
     var out = b
@@ -126,11 +126,11 @@ public func FirstLine(_ b: [uint8]) -> [uint8] {
     return out
 }
 
-func isSpaceByte(_ b: uint8) -> bool {
+func isSpaceByte(b: uint8) -> bool {
     return b == 32 || b == 9 || b == 10 || b == 13 || b == 12
 }
 
-func stringOf(_ bytes: [uint8], _ start: int, _ end: int) -> string {
+func stringOf(bytes: [uint8], start: int, end: int) -> string {
     if start >= end { return "" }
     return utf8.Decode(bytes, start, end)
 }

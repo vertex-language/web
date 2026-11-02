@@ -11,7 +11,7 @@ import (
 /// implicit repeats, smooth curves reflected, quadratics raised to
 /// cubics, arcs turned into cubics. Where the data goes wrong, what came
 /// before it stands, as the spec has it.
-func parsePath(_ d: string, _ ops: inout [uint8], _ coords: inout [float32]) {
+func parsePath(d: string, ops: inout [uint8], coords: inout [float32]) {
     let b = [uint8](d.utf8)
     var r = NumberReader(bytes: b)
     var cmd: uint8 = 0
@@ -127,7 +127,7 @@ func parsePath(_ d: string, _ ops: inout [uint8], _ coords: inout [float32]) {
     }
 }
 
-func isCommand(_ c: uint8) -> bool {
+func isCommand(c: uint8) -> bool {
     switch c {
     case 77, 109, 76, 108, 72, 104, 86, 118, 67, 99, 83, 115, 81, 113, 84, 116, 65, 97, 90, 122: return true
     default: return false
@@ -189,7 +189,7 @@ struct NumberReader {
 }
 
 /// Every number in a list: points, a viewBox, a transform's arguments.
-func numbers(_ s: string) -> [float32] {
+func numbers(s: string) -> [float32] {
     var r = NumberReader(bytes: [uint8](s.utf8))
     var out: [float32] = []
     while let n = r.number() { out.append(n) }
@@ -200,8 +200,8 @@ let pi = float32(math.Pi)
 
 /// An elliptical arc from (x1, y1) to (x2, y2) as cubics, a quarter turn
 /// at most each (SVG 2 appendix B.2.4, endpoint to center).
-func arcTo(_ x1: float32, _ y1: float32, _ rxIn: float32, _ ryIn: float32, _ angle: float32, _ large: bool, _ sweep: bool,
-           _ x2: float32, _ y2: float32, _ ops: inout [uint8], _ coords: inout [float32]) {
+func arcTo(x1: float32, y1: float32, rxIn: float32, ryIn: float32, angle: float32, large: bool, sweep: bool,
+           x2: float32, y2: float32, ops: inout [uint8], coords: inout [float32]) {
     var rx = rxIn < 0 ? -rxIn : rxIn
     var ry = ryIn < 0 ? -ryIn : ryIn
     if (x1 == x2 && y1 == y2) { return }
@@ -253,7 +253,7 @@ func arcTo(_ x1: float32, _ y1: float32, _ rxIn: float32, _ ryIn: float32, _ ang
         let p1y = sinA + t * cosA
         let p2x = cosB + t * sinB
         let p2y = sinB - t * cosB
-        func map(_ ux: float32, _ uy: float32) -> (float32, float32) {
+        func map(ux: float32, uy: float32) -> (float32, float32) {
             let ex = ux * rx
             let ey = uy * ry
             return (cosPhi * ex - sinPhi * ey + cx, sinPhi * ex + cosPhi * ey + cy)
@@ -270,7 +270,7 @@ func arcTo(_ x1: float32, _ y1: float32, _ rxIn: float32, _ ryIn: float32, _ ang
 
 /// A transform attribute: matrix, translate, scale, rotate, skewX and
 /// skewY, applied left to right as written.
-func parseTransform(_ text: string) -> Matrix {
+func parseTransform(text: string) -> Matrix {
     var m = Matrix.identity
     let b = [uint8](text.utf8)
     var i = 0

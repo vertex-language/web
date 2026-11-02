@@ -62,7 +62,7 @@ public struct Pointer {
     public var TiltY: float32 = 0
     public var Id: int32 = 1
 
-    public init(_ position: draw.Point, button: PointerButton = PointerButton.primary, clicks: int32 = 1,
+    public init(position: draw.Point, button: PointerButton = PointerButton.primary, clicks: int32 = 1,
                 modifiers: Modifiers? = nil) {
         Position = position
         Button = button
@@ -78,7 +78,7 @@ public struct Wheel {
     public var Precise: bool
     public var Modifiers: Modifiers
 
-    public init(_ delta: draw.Point, precise: bool = false, modifiers: Modifiers? = nil) {
+    public init(delta: draw.Point, precise: bool = false, modifiers: Modifiers? = nil) {
         Delta = delta
         Precise = precise
         self.Modifiers = modifiers ?? noModifiers
@@ -121,7 +121,7 @@ extension Page {
     /// Takes an input. Pointer input inside the viewport, scrolling, and
     /// keys while something in the page has focus are handled; the rest
     /// is ignored and left to the host.
-    public func Handle(_ input: Input) -> EventResult {
+    public func Handle(input: Input) -> EventResult {
         // A key, typing or a press puts the validation bubble away.
         switch input {
         case .keyDown(_), .text(_), .pointerDown(_): hideValidationBubble()
@@ -144,7 +144,7 @@ extension Page {
         }
     }
 
-    func handleInput(_ input: Input) -> EventResult {
+    func handleInput(input: Input) -> EventResult {
         // What the program changed since the last input -- a field's value
         // set by a handler -- is what this input meets.
         syncValues()
@@ -254,17 +254,17 @@ extension Page {
 
     /// Tells the page which modifier keys are held now (a host's
     /// "modifiers changed" event), for the mouse events that follow.
-    public func SetModifiers(_ m: Modifiers) {
+    public func SetModifiers(m: Modifiers) {
         modifiers = m
     }
 
-    func isInside(_ p: draw.Point) -> bool {
+    func isInside(p: draw.Point) -> bool {
         return p.X >= 0 && p.Y >= 0 && p.X < size.Width && p.Y < size.Height
     }
 
     // MARK: - Pointer
 
-    func pointerMoved(_ p: draw.Point) -> EventResult {
+    func pointerMoved(p: draw.Point) -> EventResult {
         pointer = p
         if dragging != nil && dragMoved(p) { return .handled }
         if resizing != nil {
@@ -325,7 +325,7 @@ extension Page {
 
     /// The text position a drag at p reaches: the text under it, or,
     /// beside the text of a line, where that line's text starts or ends.
-    func textPositionNear(_ p: draw.Point) -> dom.TextPosition? {
+    func textPositionNear(p: draw.Point) -> dom.TextPosition? {
         guard let hit = hitAt(p) else { return nil }
         if let tb = hit.TextBox, let node = tb.Node { return dom.TextPosition(Node: node, Offset: hit.TextOffset) }
         // The block holding lines nearest the hit, and the line at y.
@@ -393,7 +393,7 @@ extension Page {
         needsStyle = true
     }
 
-    func setCurrentPointer(_ e: Pointer) {
+    func setCurrentPointer(e: Pointer) {
         var info = dom.PointerInfo()
         info.Kind = e.Kind
         info.Pressure = e.Pressure
@@ -404,7 +404,7 @@ extension Page {
     }
 
     /// Steps a number, date or time field, with input and change.
-    func stepControl(_ f: html.Node, by steps: int) {
+    func stepControl(f: html.Node, by steps: int) {
         let type = dom.InputType(f)
         let value = valueOf(f)
         let next = type == "number" ? dom.StepNumber(f, value, by: steps) : dom.StepDateTime(type, value, by: steps)
@@ -414,7 +414,7 @@ extension Page {
         _ = dispatch(dom.Event("change"), to: f)
     }
 
-    func clampedToView(_ p: draw.Point) -> draw.Point {
+    func clampedToView(p: draw.Point) -> draw.Point {
         var q = p
         if q.X < 0 { q.X = 0 }
         if q.Y < 0 { q.Y = 0 }
@@ -424,7 +424,7 @@ extension Page {
     }
 
     /// The cursor an element asks for, or what its kind implies.
-    func cursorFor(_ hit: layout.Hit?) -> Cursor {
+    func cursorFor(hit: layout.Hit?) -> Cursor {
         guard let h = hit else { return Cursor.default }
         var cur: layout.Box? = h.Box
         while let b = cur {
@@ -476,7 +476,7 @@ extension Page {
 
     /// user-select's used value for a box: its own, or where it is auto,
     /// the nearest ancestor's that is not.
-    func usedUserSelect(_ box: layout.Box) -> cascade.UserSelect {
+    func usedUserSelect(box: layout.Box) -> cascade.UserSelect {
         var cur: layout.Box? = box
         while let b = cur {
             if b.Style.UserSelect != .auto { return b.Style.UserSelect }
@@ -485,7 +485,7 @@ extension Page {
         return .text
     }
 
-    func setHovered(_ node: html.Node?) {
+    func setHovered(node: html.Node?) {
         if hovered?.Id == node?.Id { return }
         let oldLink = dom.LinkAncestor(hovered)
         let before = hovered
@@ -502,7 +502,7 @@ extension Page {
         stateChanged()
     }
 
-    func pointerDown(_ p: draw.Point, clicks: int32 = 1) -> EventResult {
+    func pointerDown(p: draw.Point, clicks: int32 = 1) -> EventResult {
         update()
         ClearSelection()
         guard let hit = hitAt(p) else {
@@ -641,7 +641,7 @@ extension Page {
         return .handled
     }
 
-    func pointerUp(_ p: draw.Point) -> EventResult {
+    func pointerUp(p: draw.Point) -> EventResult {
         if dragReleased(p) {
             pressed = nil
             stateChanged()
@@ -668,7 +668,7 @@ extension Page {
         return .handled
     }
 
-    func clicked(_ hit: layout.Hit, at p: draw.Point) -> EventResult {
+    func clicked(hit: layout.Hit, at p: draw.Point) -> EventResult {
         let node = hit.Node
         // Listeners first: one may take the click for its own. The second
         // click of a double one is a dblclick too.
@@ -693,7 +693,7 @@ extension Page {
         return .handled
     }
 
-    func navigate(_ href: string) {
+    func navigate(href: string) {
         if href.hasPrefix("#") {
             let b = [uint8](href.utf8)
             let id = stringOf(b, 1, b.count)
@@ -711,7 +711,7 @@ extension Page {
         }
     }
 
-    func activateButton(_ button: html.Node) {
+    func activateButton(button: html.Node) {
         // popovertarget and commandfor: the button opens or closes what
         // it names, and does nothing else.
         if invoke(button) { return }
@@ -732,7 +732,7 @@ extension Page {
 
     // MARK: - Scrolling
 
-    func wheel(_ delta: draw.Point, precise: bool) -> EventResult {
+    func wheel(delta: draw.Point, precise: bool) -> EventResult {
         update()
         let step: float32 = precise ? 1 : 40
         let dy = -delta.Y * step
@@ -783,7 +783,7 @@ extension Page {
 
     // MARK: - Keys
 
-    func keyDown(_ k: Key) -> EventResult {
+    func keyDown(k: Key) -> EventResult {
         if !dispatch(dom.KeyboardEvent("keydown", Key: k.Key, Code: k.Code, Shift: k.Shift, Control: k.Control, Alt: k.Alt, Meta: k.Meta),
                      to: focused ?? Document?.Tree.ElementsByTagName("body").first) {
             return .handled
@@ -862,7 +862,7 @@ extension Page {
     /// Keys on a focused select: up and down move through the options;
     /// Home and End go to the ends; a letter jumps to the next option
     /// starting with it.
-    func selectKey(_ f: html.Node, _ k: Key) -> EventResult {
+    func selectKey(f: html.Node, k: Key) -> EventResult {
         let options = dom.Descendants(f, tag: "option")
         if options.isEmpty { return .ignored }
         var current = -1
@@ -904,7 +904,7 @@ extension Page {
         return .handled
     }
 
-    func scrollBy(_ dx: float32, _ dy: float32) {
+    func scrollBy(dx: float32, dy: float32) {
         update()
         // From where a smooth scroll is going, so that keys pressed in a
         // row add up.
@@ -912,7 +912,7 @@ extension Page {
         scrollPage(to: draw.Point(from.X + dx, from.Y + dy), smooth: smoothScrolling)
     }
 
-    func typed(_ text: string) -> EventResult {
+    func typed(text: string) -> EventResult {
         if text.isEmpty { return .ignored }
         let bytes = [uint8](text.utf8)
         // Control characters arrive as keys, not text.
@@ -941,13 +941,13 @@ extension Page {
 
     /// Whether typed text is a function key's private-use character (the
     /// arrows and F-keys on a Mac, U+F700 to U+F8FF): a key, not text.
-    func isFunctionKeyText(_ b: [uint8]) -> bool {
+    func isFunctionKeyText(b: [uint8]) -> bool {
         return b.count == 3 && b[0] == 0xEF && (b[1] >= 0x9C && b[1] <= 0xA3)
     }
 
     /// Removes the field's selected text, if any, leaving the caret at
     /// its start; the value that remains.
-    func deleteFieldSelection(_ f: html.Node) -> string {
+    func deleteFieldSelection(f: html.Node) -> string {
         let value = valueOf(f)
         guard let r = fieldRange() else { return value }
         let rest = edit.Remove(value, from: r.start, to: r.end)
@@ -958,7 +958,7 @@ extension Page {
         return rest
     }
 
-    func editKey(_ f: html.Node, _ k: Key) -> EventResult {
+    func editKey(f: html.Node, k: Key) -> EventResult {
         let value = valueOf(f)
         let bytes = [uint8](value.utf8)
         let editable = !f.HasAttribute("disabled") && !f.HasAttribute("readonly")
@@ -1072,7 +1072,7 @@ extension Page {
 
     /// A click in a text control: the caret goes there and a drag
     /// selects from it; a double click takes the word, a triple all.
-    func clickInField(_ control: html.Node, at p: draw.Point, clicks: int32) {
+    func clickInField(control: html.Node, at p: draw.Point, clicks: int32) {
         placeCaret(control, at: p)
         let bytes = [uint8](valueOf(control).utf8)
         if clicks >= 3 {
@@ -1090,7 +1090,7 @@ extension Page {
     }
 
     /// Moves the caret to where a click landed in a text control.
-    func placeCaret(_ control: html.Node, at p: draw.Point) {
+    func placeCaret(control: html.Node, at p: draw.Point) {
         guard let box = builder.byNode[control.Id] else { return }
         let pos = layout.PagePosition(box)
         let px = p.X + scroll.X - (pos.x + box.ContentX + 1)
@@ -1152,7 +1152,7 @@ extension Page {
 
     // MARK: - Forms
 
-    func toggleChecked(_ input: html.Node) {
+    func toggleChecked(input: html.Node) {
         if input.HasAttribute("disabled") { return }
         userEdited.insert(input.Id)
         _ = Document?.ToggleAttribute(input, "checked")
@@ -1160,7 +1160,7 @@ extension Page {
         _ = dispatch(dom.Event("change"), to: input)
     }
 
-    func check(_ radio: html.Node) {
+    func check(radio: html.Node) {
         if radio.HasAttribute("disabled") { return }
         guard let doc = Document else { return }
         if let name = radio.GetAttribute("name") {
@@ -1176,7 +1176,7 @@ extension Page {
         _ = dispatch(dom.Event("change"), to: radio)
     }
 
-    func resetForm(_ form: html.Node) {
+    func resetForm(form: html.Node) {
         // reset first; a listener may keep the values.
         if !dispatch(dom.Event("reset"), to: form) { return }
         for c in dom.Controls(form) {
@@ -1185,7 +1185,7 @@ extension Page {
         needsStyle = true
     }
 
-    func submit(_ form: html.Node, submitter: html.Node?) {
+    func submit(form: html.Node, submitter: html.Node?) {
         let method = lower(form.GetAttribute("method") ?? "get")
         if method != "dialog" && !validate(form, submitter: submitter) { return }
         if !dispatch(dom.SubmitEvent("submit", Submitter: submitter), to: form) { return }
@@ -1239,7 +1239,7 @@ extension Page {
     /// An input method's text in progress: compositionstart the first time,
     /// compositionupdate with each change, shown at the focused field's
     /// caret until it is committed (.text) or given up ("").
-    func compose(_ text: string) -> EventResult {
+    func compose(text: string) -> EventResult {
         let target = focused ?? Document?.Tree.ElementsByTagName("body").first
         guard let t = target else { return .ignored }
         if text.isEmpty {
@@ -1257,7 +1257,7 @@ extension Page {
     }
 
     /// Composition ends, with what was committed ("" for nothing).
-    func endComposition(_ committed: string) {
+    func endComposition(committed: string) {
         Composing = ""
         needsPaint = true
         if let t = focused ?? Document?.Tree.ElementsByTagName("body").first {
@@ -1266,7 +1266,7 @@ extension Page {
     }
 
     /// A node's element and its ancestors, innermost first.
-    func elementChain(_ node: html.Node?) -> [html.Node] {
+    func elementChain(node: html.Node?) -> [html.Node] {
         var out: [html.Node] = []
         var cur = node
         while let n = cur {
@@ -1280,7 +1280,7 @@ extension Page {
 extension Page {
     /// slide sets a range input's value from where the pointer is over its
     /// track.
-    func slide(_ control: html.Node, to p: draw.Point) {
+    func slide(control: html.Node, to p: draw.Point) {
         update()
         guard let box = builder.byNode[control.Id] else { return }
         let pos = layout.PagePosition(box)

@@ -16,7 +16,7 @@ import (
     "web/layout"
 )
 
-func describe(_ n: html.Node) -> string {
+func describe(n: html.Node) -> string {
     var s = n.TagName
     if let id = n.GetAttribute("id") { s += "#" + id }
     for c in n.Classes() { s += "." + c }
@@ -24,7 +24,7 @@ func describe(_ n: html.Node) -> string {
 }
 
 @MainActor
-func report(_ page: web.Page, _ node: html.Node) {
+func report(page: web.Page, node: html.Node) {
     var chain: [html.Node] = []
     var cur: html.Node? = node
     while let n = cur, n.Kind == html.NodeKind.element {
@@ -50,7 +50,7 @@ func report(_ page: web.Page, _ node: html.Node) {
 
 /// An element and what is under it, a line each, to a depth.
 @MainActor
-func tree(_ page: web.Page, _ n: html.Node, _ depth: int, _ indent: string) {
+func tree(page: web.Page, n: html.Node, depth: int, indent: string) {
     var line = indent + describe(n)
     if let b = page.BoxFor(n) {
         let p = layout.PagePosition(b)

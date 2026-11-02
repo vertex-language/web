@@ -2,11 +2,11 @@ package layout
 
 import "unicode/utf8"
 
-func isSpaceByte(_ b: uint8) -> bool {
+func isSpaceByte(b: uint8) -> bool {
     return b == 32 || b == 9 || b == 10 || b == 13 || b == 12
 }
 
-func upperBytes(_ b: [uint8]) -> [uint8] {
+func upperBytes(b: [uint8]) -> [uint8] {
     var out = b
     var i = 0
     while i < out.count {
@@ -16,7 +16,7 @@ func upperBytes(_ b: [uint8]) -> [uint8] {
     return out
 }
 
-func lowerBytes(_ b: [uint8]) -> [uint8] {
+func lowerBytes(b: [uint8]) -> [uint8] {
     var out = b
     var i = 0
     while i < out.count {
@@ -26,7 +26,7 @@ func lowerBytes(_ b: [uint8]) -> [uint8] {
     return out
 }
 
-func capitalizeBytes(_ b: [uint8]) -> [uint8] {
+func capitalizeBytes(b: [uint8]) -> [uint8] {
     var out = b
     var atStart = true
     var i = 0
@@ -43,7 +43,7 @@ func capitalizeBytes(_ b: [uint8]) -> [uint8] {
 }
 
 /// Roman numerals for list markers.
-func roman(_ n: int, upper: bool) -> string {
+func roman(n: int, upper: bool) -> string {
     if n <= 0 || n >= 4000 { return "\(n)" }
     let values = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1]
     let lowerSymbols = ["m", "cm", "d", "cd", "c", "xc", "l", "xl", "x", "ix", "v", "iv", "i"]
@@ -62,7 +62,7 @@ func roman(_ n: int, upper: bool) -> string {
 }
 
 /// A counter's number as counter() writes it in a list-style-type.
-func counterText(_ n: int, _ style: string) -> string {
+func counterText(n: int, style: string) -> string {
     switch style {
     case "none": return ""
     case "disc": return "•"
@@ -78,7 +78,7 @@ func counterText(_ n: int, _ style: string) -> string {
 }
 
 /// Letters for list markers: a, b, ... z, aa, ab.
-func alpha(_ n: int, upper: bool) -> string {
+func alpha(n: int, upper: bool) -> string {
     if n <= 0 { return "\(n)" }
     var bytes: [uint8] = []
     var rest = n
@@ -91,7 +91,7 @@ func alpha(_ n: int, upper: bool) -> string {
 }
 
 /// The string bytes[start..<end] spell.
-func stringOf(_ bytes: [uint8], _ start: int, _ end: int) -> string {
+func stringOf(bytes: [uint8], start: int, end: int) -> string {
     if start >= end { return "" }
     return utf8.Decode(bytes, start, end)
 }

@@ -29,7 +29,7 @@ let colorSpaces: [string] = [
 ]
 
 /// Which channel is a hue in a space, or -1.
-func hueIndex(_ space: string) -> int {
+func hueIndex(space: string) -> int {
     switch space {
     case "hsl", "hwb": return 0
     case "lch", "oklch": return 2
@@ -38,7 +38,7 @@ func hueIndex(_ space: string) -> int {
 }
 
 /// What 100% is for channel i of a space.
-func percentRef(_ space: string, _ i: int) -> float64 {
+func percentRef(space: string, i: int) -> float64 {
     switch space {
     case "rgb": return 255
     case "hsl", "hwb": return 100
@@ -50,7 +50,7 @@ func percentRef(_ space: string, _ i: int) -> float64 {
 }
 
 /// The names relative colors give a space's channels.
-func channelNames(_ space: string) -> [string] {
+func channelNames(space: string) -> [string] {
     switch space {
     case "rgb", "srgb", "srgb-linear", "display-p3", "a98-rgb", "prophoto-rgb", "rec2020": return ["r", "g", "b"]
     case "xyz", "xyz-d50", "xyz-d65": return ["x", "y", "z"]
@@ -63,7 +63,7 @@ func channelNames(_ space: string) -> [string] {
 }
 
 /// The functional colors this file parses, where `name(` starts one.
-func parseColorFunction(_ name: string, _ b: [uint8], _ start: int) -> draw.Color? {
+func parseColorFunction(name: string, b: [uint8], start: int) -> draw.Color? {
     let end = b.count - 1
     switch name {
     case "color-mix": return parseColorMix(b, start, end)
@@ -110,7 +110,7 @@ func parseColorFunction(_ name: string, _ b: [uint8], _ start: int) -> draw.Colo
     return toDrawColor(space, sc)
 }
 
-func isRGBFamily(_ space: string) -> bool {
+func isRGBFamily(space: string) -> bool {
     switch space {
     case "srgb", "srgb-linear", "display-p3", "a98-rgb", "prophoto-rgb", "rec2020": return true
     default: return false
@@ -119,7 +119,7 @@ func isRGBFamily(_ space: string) -> bool {
 
 /// The three channels and the alpha written in args, in a space's own
 /// units. env names the origin's channels in a relative color.
-func channelsIn(_ space: string, _ args: [string], _ env: [string: float64]) -> SpaceColor? {
+func channelsIn(space: string, args: [string], env: [string: float64]) -> SpaceColor? {
     var values: [float64] = []
     var missing: [bool] = []
     var alpha: float64 = env["alpha"] ?? 1
@@ -159,7 +159,7 @@ struct Channel {
     var none: bool
 }
 
-func channelOf(_ s: string, _ env: [string: float64]) -> Channel? {
+func channelOf(s: string, env: [string: float64]) -> Channel? {
     if s == "none" { return Channel(value: 0, percent: false, angle: false, none: true) }
     if let v = env[s] { return Channel(value: v, percent: false, angle: false, none: false) }
     let b = [uint8](s.utf8)
@@ -183,7 +183,7 @@ func channelOf(_ s: string, _ env: [string: float64]) -> Channel? {
 
 /// An angle in degrees, from a number and its unit; nil for anything
 /// that is not an angle unit.
-func degrees(_ v: float64, _ unit: string) -> float64? {
+func degrees(v: float64, unit: string) -> float64? {
     switch unit {
     case "deg": return v
     case "grad": return v * 0.9
@@ -194,7 +194,7 @@ func degrees(_ v: float64, _ unit: string) -> float64? {
 }
 
 /// The number at b[i..<end] and where it ends; nil where none starts there.
-func numberAt(_ b: [uint8], _ i: int, _ end: int) -> (value: float64, next: int)? {
+func numberAt(b: [uint8], i: int, end: int) -> (value: float64, next: int)? {
     var j = i
     if j < end && (b[j] == 43 || b[j] == 45) { j += 1 }
     let digitsFrom = j
@@ -223,7 +223,7 @@ final class CalcReader {
     let end: int
     let env: [string: float64]
 
-    init(_ b: [uint8], _ i: int, _ end: int, _ env: [string: float64]) {
+    init(b: [uint8], i: int, end: int, env: [string: float64]) {
         self.b = b
         self.i = i
         self.end = end
@@ -300,7 +300,7 @@ final class CalcReader {
 
 /// The pieces between a function's parentheses, split at spaces and
 /// commas outside nested parentheses; a `/` is a piece of its own.
-func colorArgs(_ b: [uint8], _ start: int, _ end: int) -> [string] {
+func colorArgs(b: [uint8], start: int, end: int) -> [string] {
     var out: [string] = []
     var i = start
     while i < end {
@@ -324,7 +324,7 @@ func colorArgs(_ b: [uint8], _ start: int, _ end: int) -> [string] {
 
 /// The pieces between a function's parentheses split at top-level
 /// commas, each trimmed.
-func commaArgs(_ b: [uint8], _ start: int, _ end: int) -> [string] {
+func commaArgs(b: [uint8], start: int, end: int) -> [string] {
     var out: [string] = []
     var depth = 0
     var from = start
@@ -343,7 +343,7 @@ func commaArgs(_ b: [uint8], _ start: int, _ end: int) -> [string] {
     return out
 }
 
-func trimmedBytes(_ b: [uint8], _ start: int, _ end: int) -> [uint8] {
+func trimmedBytes(b: [uint8], start: int, end: int) -> [uint8] {
     var s = start
     var e = end
     while s < e && isSpace(b[s]) { s += 1 }
@@ -358,7 +358,7 @@ func trimmedBytes(_ b: [uint8], _ start: int, _ end: int) -> [uint8] {
 /// color-mix([in <space> [<hue> hue]?,] <color> <p>?, <color> <p>?):
 /// the two mixed in the space (oklab where none is named), with
 /// premultiplied alpha and the hue taken the shorter way by default.
-func parseColorMix(_ b: [uint8], _ start: int, _ end: int) -> draw.Color? {
+func parseColorMix(b: [uint8], start: int, end: int) -> draw.Color? {
     var parts = commaArgs(b, start, end)
     var space = "oklab"
     var hueMethod = "shorter"
@@ -398,7 +398,7 @@ func parseColorMix(_ b: [uint8], _ start: int, _ end: int) -> draw.Color? {
 /// Two colors mixed in a space, t of the way from the first to the
 /// second, hues going round as hueMethod says: color-mix(), and a
 /// gradient's `in <space>`.
-func mixIn(_ space: string, _ hueMethod: string, _ first: draw.Color, _ second: draw.Color, _ t: float64) -> draw.Color {
+func mixIn(space: string, hueMethod: string, first: draw.Color, second: draw.Color, t: float64) -> draw.Color {
     let w1 = 1 - t
     let w2 = t
     var a = fromSRGB(space, srgbOf(first))
@@ -440,7 +440,7 @@ func mixIn(_ space: string, _ hueMethod: string, _ first: draw.Color, _ second: 
 }
 
 /// One color of a color-mix(), with its percentage before or after it.
-func mixItem(_ s: string) -> (color: draw.Color, percent: float64?)? {
+func mixItem(s: string) -> (color: draw.Color, percent: float64?)? {
     let b = [uint8](s.utf8)
     let words = colorArgs(b, 0, b.count)
     if words.isEmpty { return nil }
@@ -458,14 +458,14 @@ func mixItem(_ s: string) -> (color: draw.Color, percent: float64?)? {
     return (color: c, percent: nil)
 }
 
-func percentOf(_ s: string) -> float64? {
+func percentOf(s: string) -> float64? {
     let b = [uint8](s.utf8)
     if b.count < 2 || b[b.count - 1] != 37 { return nil }
     guard let n = numberAt(b, 0, b.count - 1), n.next == b.count - 1 else { return nil }
     return n.value
 }
 
-func powerlessHue(_ space: string, _ c: SpaceColor) -> bool {
+func powerlessHue(space: string, c: SpaceColor) -> bool {
     switch space {
     case "hsl": return c.c[1] < 1e-6 || c.c[2] < 1e-6 || c.c[2] > 100 - 1e-6
     case "hwb": return c.c[1] + c.c[2] >= 100 - 1e-6
@@ -475,7 +475,7 @@ func powerlessHue(_ space: string, _ c: SpaceColor) -> bool {
     }
 }
 
-func normalizeHue(_ h: float64) -> float64 {
+func normalizeHue(h: float64) -> float64 {
     var v = h
     while v < 0 { v += 360 }
     while v >= 360 { v -= 360 }
@@ -483,7 +483,7 @@ func normalizeHue(_ h: float64) -> float64 {
 }
 
 /// contrast-color(): white or black, whichever contrasts more with c.
-func contrastColor(_ c: draw.Color) -> draw.Color {
+func contrastColor(c: draw.Color) -> draw.Color {
     let s = srgbOf(c)
     let l = 0.2126 * toLinear(s.c[0]) + 0.7152 * toLinear(s.c[1]) + 0.0722 * toLinear(s.c[2])
     let withWhite = 1.05 / (l + 0.05)
@@ -494,12 +494,12 @@ func contrastColor(_ c: draw.Color) -> draw.Color {
 // MARK: - Conversions
 
 /// An 8-bit color as sRGB channels from 0 to 1.
-func srgbOf(_ c: draw.Color) -> SpaceColor {
+func srgbOf(c: draw.Color) -> SpaceColor {
     return SpaceColor(c: [float64(c.R) / 255, float64(c.G) / 255, float64(c.B) / 255], alpha: float64(c.A) / 255, missing: [false, false, false])
 }
 
 /// A color in a space as an 8-bit sRGB color, clipped to the gamut.
-func toDrawColor(_ space: string, _ sc: SpaceColor) -> draw.Color {
+func toDrawColor(space: string, sc: SpaceColor) -> draw.Color {
     // Spaces built on sRGB skip XYZ, whose round trip would round 0.5
     // down.
     var rgb: [float64] = []
@@ -516,7 +516,7 @@ func toDrawColor(_ space: string, _ sc: SpaceColor) -> draw.Color {
 /// A color (XYZ, D65) in sRGB, brought into its gamut as CSS Color 4
 /// maps colors: chroma lowered in OKLCH, keeping lightness and hue,
 /// until clipping what is left changes it less than the eye can see.
-func gamutMapped(_ xyz: [float64]) -> [float64] {
+func gamutMapped(xyz: [float64]) -> [float64] {
     let rgb = fromXYZ("srgb", xyz)
     if inUnitCube(rgb) { return rgb }
     let origin = fromXYZ("oklch", xyz)
@@ -524,11 +524,11 @@ func gamutMapped(_ xyz: [float64]) -> [float64] {
     if origin[0] <= 0 { return [0, 0, 0] }
     let jnd = 0.02
     let epsilon = 0.0001
-    func srgbAt(_ chroma: float64) -> [float64] {
+    func srgbAt(chroma: float64) -> [float64] {
         return fromXYZ("srgb", toXYZ("oklch", [origin[0], chroma, origin[2]]))
     }
-    func clipped(_ c: [float64]) -> [float64] { return mapEach(c, clamp01) }
-    func deltaEOK(_ a: [float64], _ b: [float64]) -> float64 {
+    func clipped(c: [float64]) -> [float64] { return mapEach(c, clamp01) }
+    func deltaEOK(a: [float64], b: [float64]) -> float64 {
         let la = fromXYZ("oklab", toXYZ("srgb", a))
         let lb = fromXYZ("oklab", toXYZ("srgb", b))
         let d0 = la[0] - lb[0]
@@ -561,13 +561,13 @@ func gamutMapped(_ xyz: [float64]) -> [float64] {
     return clip
 }
 
-func inUnitCube(_ c: [float64]) -> bool {
+func inUnitCube(c: [float64]) -> bool {
     let e = 0.000075
     return c[0] >= -e && c[0] <= 1 + e && c[1] >= -e && c[1] <= 1 + e && c[2] >= -e && c[2] <= 1 + e
 }
 
 /// An sRGB color (channels 0-1) in another space.
-func fromSRGB(_ space: string, _ sc: SpaceColor) -> SpaceColor {
+func fromSRGB(space: string, sc: SpaceColor) -> SpaceColor {
     var c: [float64] = []
     switch space {
     case "srgb": c = sc.c
@@ -579,33 +579,33 @@ func fromSRGB(_ space: string, _ sc: SpaceColor) -> SpaceColor {
     return SpaceColor(c: c, alpha: sc.alpha, missing: [false, false, false])
 }
 
-func unitByte(_ v: float64) -> uint8 {
+func unitByte(v: float64) -> uint8 {
     return uint8(clamp01(v) * 255 + 0.5)
 }
 
-func clamp01(_ v: float64) -> float64 {
+func clamp01(v: float64) -> float64 {
     if v < 0 { return 0 }
     if v > 1 { return 1 }
     return v
 }
 
-func fabs(_ v: float64) -> float64 { return v < 0 ? -v : v }
+func fabs(v: float64) -> float64 { return v < 0 ? -v : v }
 
-func signed(_ v: float64, _ magnitude: float64) -> float64 { return v < 0 ? -magnitude : magnitude }
+func signed(v: float64, magnitude: float64) -> float64 { return v < 0 ? -magnitude : magnitude }
 
-func toLinear(_ c: float64) -> float64 {
+func toLinear(c: float64) -> float64 {
     let a = fabs(c)
     if a <= 0.04045 { return c / 12.92 }
     return signed(c, math.Pow((a + 0.055) / 1.055, 2.4))
 }
 
-func fromLinear(_ c: float64) -> float64 {
+func fromLinear(c: float64) -> float64 {
     let a = fabs(c)
     if a <= 0.0031308 { return 12.92 * c }
     return signed(c, 1.055 * math.Pow(a, 1 / 2.4) - 0.055)
 }
 
-func mul3(_ m: [float64], _ v: [float64]) -> [float64] {
+func mul3(m: [float64], v: [float64]) -> [float64] {
     return [
         m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
         m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
@@ -613,7 +613,7 @@ func mul3(_ m: [float64], _ v: [float64]) -> [float64] {
     ]
 }
 
-func mapEach(_ v: [float64], _ f: (float64) -> float64) -> [float64] {
+func mapEach(v: [float64], f: (float64) -> float64) -> [float64] {
     return [f(v[0]), f(v[1]), f(v[2])]
 }
 
@@ -700,16 +700,16 @@ let lmsToXYZ: [float64] = [
 ]
 let d50White: [float64] = [0.3457 / 0.3585, 1.0, (1.0 - 0.3457 - 0.3585) / 0.3585]
 
-func a98ToLinear(_ c: float64) -> float64 { return signed(c, math.Pow(fabs(c), 563.0 / 256.0)) }
-func a98FromLinear(_ c: float64) -> float64 { return signed(c, math.Pow(fabs(c), 256.0 / 563.0)) }
+func a98ToLinear(c: float64) -> float64 { return signed(c, math.Pow(fabs(c), 563.0 / 256.0)) }
+func a98FromLinear(c: float64) -> float64 { return signed(c, math.Pow(fabs(c), 256.0 / 563.0)) }
 
-func proPhotoToLinear(_ c: float64) -> float64 {
+func proPhotoToLinear(c: float64) -> float64 {
     let a = fabs(c)
     if a <= 16.0 / 512.0 { return c / 16 }
     return signed(c, math.Pow(a, 1.8))
 }
 
-func proPhotoFromLinear(_ c: float64) -> float64 {
+func proPhotoFromLinear(c: float64) -> float64 {
     let a = fabs(c)
     if a >= 1.0 / 512.0 { return signed(c, math.Pow(a, 1 / 1.8)) }
     return 16 * c
@@ -718,13 +718,13 @@ func proPhotoFromLinear(_ c: float64) -> float64 {
 let rec2020Alpha: float64 = 1.09929682680944
 let rec2020Beta: float64 = 0.018053968510807
 
-func rec2020ToLinear(_ c: float64) -> float64 {
+func rec2020ToLinear(c: float64) -> float64 {
     let a = fabs(c)
     if a < rec2020Beta * 4.5 { return c / 4.5 }
     return signed(c, math.Pow((a + rec2020Alpha - 1) / rec2020Alpha, 1 / 0.45))
 }
 
-func rec2020FromLinear(_ c: float64) -> float64 {
+func rec2020FromLinear(c: float64) -> float64 {
     let a = fabs(c)
     if a > rec2020Beta { return signed(c, rec2020Alpha * math.Pow(a, 0.45) - (rec2020Alpha - 1)) }
     return 4.5 * c
@@ -733,7 +733,7 @@ func rec2020FromLinear(_ c: float64) -> float64 {
 let labKappa: float64 = 24389.0 / 27.0
 let labEpsilon: float64 = 216.0 / 24389.0
 
-func labToXYZD50(_ lab: [float64]) -> [float64] {
+func labToXYZD50(lab: [float64]) -> [float64] {
     let f1 = (lab[0] + 16) / 116
     let f0 = lab[1] / 500 + f1
     let f2 = f1 - lab[2] / 200
@@ -743,7 +743,7 @@ func labToXYZD50(_ lab: [float64]) -> [float64] {
     return [x * d50White[0], y * d50White[1], z * d50White[2]]
 }
 
-func xyzD50ToLab(_ xyz: [float64]) -> [float64] {
+func xyzD50ToLab(xyz: [float64]) -> [float64] {
     var f: [float64] = []
     var i = 0
     while i < 3 {
@@ -754,23 +754,23 @@ func xyzD50ToLab(_ xyz: [float64]) -> [float64] {
     return [116 * f[1] - 16, 500 * (f[0] - f[1]), 200 * (f[1] - f[2])]
 }
 
-func polarToLab(_ lch: [float64]) -> [float64] {
+func polarToLab(lch: [float64]) -> [float64] {
     let h = lch[2] * math.Pi / 180
     return [lch[0], lch[1] * math.Cos(h), lch[1] * math.Sin(h)]
 }
 
-func labToPolar(_ lab: [float64]) -> [float64] {
+func labToPolar(lab: [float64]) -> [float64] {
     let c = math.Sqrt(lab[1] * lab[1] + lab[2] * lab[2])
     let h = c < 1e-9 ? 0 : normalizeHue(math.Atan2(lab[2], lab[1]) * 180 / math.Pi)
     return [lab[0], c, h]
 }
 
 /// HSL (s and l 0-100) to sRGB 0-1.
-func hslToSRGB(_ hsl: [float64]) -> [float64] {
+func hslToSRGB(hsl: [float64]) -> [float64] {
     let h = normalizeHue(hsl[0])
     let s = clamp01(hsl[1] / 100)
     let l = clamp01(hsl[2] / 100)
-    func f(_ n: float64) -> float64 {
+    func f(n: float64) -> float64 {
         var k = n + h / 30
         while k >= 12 { k -= 12 }
         let a = s * (l < 1 - l ? l : 1 - l)
@@ -783,7 +783,7 @@ func hslToSRGB(_ hsl: [float64]) -> [float64] {
     return [f(0), f(8), f(4)]
 }
 
-func srgbToHSL(_ rgb: [float64]) -> [float64] {
+func srgbToHSL(rgb: [float64]) -> [float64] {
     let mx = rgb[0] > rgb[1] ? (rgb[0] > rgb[2] ? rgb[0] : rgb[2]) : (rgb[1] > rgb[2] ? rgb[1] : rgb[2])
     let mn = rgb[0] < rgb[1] ? (rgb[0] < rgb[2] ? rgb[0] : rgb[2]) : (rgb[1] < rgb[2] ? rgb[1] : rgb[2])
     let l = (mx + mn) / 2
@@ -800,7 +800,7 @@ func srgbToHSL(_ rgb: [float64]) -> [float64] {
     return [h, s * 100, l * 100]
 }
 
-func hwbToSRGB(_ hwb: [float64]) -> [float64] {
+func hwbToSRGB(hwb: [float64]) -> [float64] {
     let w = hwb[1] / 100
     let bl = hwb[2] / 100
     if w + bl >= 1 {
@@ -811,7 +811,7 @@ func hwbToSRGB(_ hwb: [float64]) -> [float64] {
     return mapEach(rgb, { v in v * (1 - w - bl) + w })
 }
 
-func srgbToHWB(_ rgb: [float64]) -> [float64] {
+func srgbToHWB(rgb: [float64]) -> [float64] {
     let hsl = srgbToHSL(rgb)
     let mx = rgb[0] > rgb[1] ? (rgb[0] > rgb[2] ? rgb[0] : rgb[2]) : (rgb[1] > rgb[2] ? rgb[1] : rgb[2])
     let mn = rgb[0] < rgb[1] ? (rgb[0] < rgb[2] ? rgb[0] : rgb[2]) : (rgb[1] < rgb[2] ? rgb[1] : rgb[2])
@@ -819,7 +819,7 @@ func srgbToHWB(_ rgb: [float64]) -> [float64] {
 }
 
 /// Channels in a space to CIE XYZ (D65).
-func toXYZ(_ space: string, _ c: [float64]) -> [float64] {
+func toXYZ(space: string, c: [float64]) -> [float64] {
     switch space {
     case "rgb": return mul3(linSRGBToXYZ, mapEach([c[0] / 255, c[1] / 255, c[2] / 255], toLinear))
     case "srgb": return mul3(linSRGBToXYZ, mapEach(c, toLinear))
@@ -840,7 +840,7 @@ func toXYZ(_ space: string, _ c: [float64]) -> [float64] {
 }
 
 /// CIE XYZ (D65) to channels in a space.
-func fromXYZ(_ space: string, _ xyz: [float64]) -> [float64] {
+func fromXYZ(space: string, xyz: [float64]) -> [float64] {
     switch space {
     case "rgb": return mapEach(mapEach(mul3(xyzToLinSRGB, xyz), fromLinear), { v in v * 255 })
     case "srgb": return mapEach(mul3(xyzToLinSRGB, xyz), fromLinear)

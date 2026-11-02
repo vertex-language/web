@@ -27,20 +27,20 @@ public struct Matrix {
     public var E: float32
     public var F: float32
 
-    public init(_ a: float32, _ b: float32, _ c: float32, _ d: float32, _ e: float32, _ f: float32) {
+    public init(a: float32, b: float32, c: float32, d: float32, e: float32, f: float32) {
         A = a; B = b; C = c; D = d; E = e; F = f
     }
 
     public static let identity = Matrix(1, 0, 0, 1, 0, 0)
 
     /// This transform after another: other first, then self.
-    public func Times(_ o: Matrix) -> Matrix {
+    public func Times(o: Matrix) -> Matrix {
         return Matrix(A * o.A + C * o.B, B * o.A + D * o.B,
                       A * o.C + C * o.D, B * o.C + D * o.D,
                       A * o.E + C * o.F + E, B * o.E + D * o.F + F)
     }
 
-    public func Apply(_ x: float32, _ y: float32) -> (x: float32, y: float32) {
+    public func Apply(x: float32, y: float32) -> (x: float32, y: float32) {
         return (x: A * x + C * y + E, y: B * x + D * y + F)
     }
 }
@@ -157,7 +157,7 @@ public final class Drawing {
     }
 
     /// A shape's outline in device pixels.
-    func devicePath(_ s: Shape, _ m: Matrix) -> draw.Path {
+    func devicePath(s: Shape, m: Matrix) -> draw.Path {
         var path = draw.Path()
         var i = 0
         var k = 0
@@ -204,7 +204,7 @@ public final class Document {
 
 /// Reads bytes that are an SVG file, or nil where they aren't one: not
 /// well-formed XML (a raster image, say), or a root that isn't <svg>.
-public func ParseDocument(_ bytes: [uint8]) -> Document? {
+public func ParseDocument(bytes: [uint8]) -> Document? {
     guard let doc = try? xml.Parse(bytes: bytes) else { return nil }
     if doc.Root.Name.Local != "svg" { return nil }
     let root = fromXML(doc.Root)
@@ -213,11 +213,11 @@ public func ParseDocument(_ bytes: [uint8]) -> Document? {
 }
 
 /// What an <svg> element draws.
-public func Parse(_ root: html.Node) -> Drawing {
+public func Parse(root: html.Node) -> Drawing {
     return parse(fromHTML(root))
 }
 
-func parse(_ root: element) -> Drawing {
+func parse(root: element) -> Drawing {
     let d = Drawing(viewBox: viewBoxOf(root), stretch: (root.GetAttribute("preserveaspectratio") ?? "").hasPrefix("none"))
     var ctx = Context(matrix: Matrix.identity, fill: blackFill, fillInherited: true, rule: .nonZero, opacity: 1)
     ctx = ctx.with(root, ids: [:])
@@ -232,21 +232,21 @@ func parse(_ root: element) -> Drawing {
 /// 300 by 150, as for any replaced element, shaped by the viewBox.
 /// Whether an <svg> has a ratio from its viewBox but neither a width nor
 /// a height: CSS then sizes it to the room it has, not to 300 by 150.
-public func HasRatioOnly(_ root: html.Node) -> bool {
+public func HasRatioOnly(root: html.Node) -> bool {
     return hasRatioOnly(fromHTML(root))
 }
 
-func hasRatioOnly(_ root: element) -> bool {
+func hasRatioOnly(root: element) -> bool {
     if lengthAttribute(root.GetAttribute("width")) != nil || lengthAttribute(root.GetAttribute("height")) != nil { return false }
     if let vb = viewBoxOf(root), vb.Width > 0, vb.Height > 0 { return true }
     return false
 }
 
-public func IntrinsicSize(_ root: html.Node) -> (width: float32, height: float32) {
+public func IntrinsicSize(root: html.Node) -> (width: float32, height: float32) {
     return intrinsicSize(fromHTML(root))
 }
 
-func intrinsicSize(_ root: element) -> (width: float32, height: float32) {
+func intrinsicSize(root: element) -> (width: float32, height: float32) {
     let w = lengthAttribute(root.GetAttribute("width"))
     let h = lengthAttribute(root.GetAttribute("height"))
     let vb = viewBoxOf(root)
@@ -272,7 +272,7 @@ struct Context {
 
     /// The context inside an element: its transform, and the fill
     /// properties it sets by attribute or style.
-    func with(_ n: element, ids: [string: element]) -> Context {
+    func with(n: element, ids: [string: element]) -> Context {
         var c = self
         if let t = n.GetAttribute("transform") { c.matrix = matrix.Times(parseTransform(t)) }
         var props: [(string, string)] = []
@@ -343,7 +343,7 @@ struct Context {
 
 /// A url(#id) fill: a gradient's first stop color, until gradients are
 /// drawn as gradients.
-func gradientFill(_ v: string, _ ids: [string: element]) -> Fill? {
+func gradientFill(v: string, ids: [string: element]) -> Fill? {
     let b = [uint8](v.utf8)
     var i = 0
     while i < b.count && b[i] != 35 { i += 1 }
@@ -361,7 +361,7 @@ func gradientFill(_ v: string, _ ids: [string: element]) -> Fill? {
     return nil
 }
 
-func collectIds(_ n: element, _ ids: inout [string: element]) {
+func collectIds(n: element, ids: inout [string: element]) {
     for c in n.Children {
         if let id = c.GetAttribute("id") { ids[id] = c }
         collectIds(c, &ids)
@@ -369,7 +369,7 @@ func collectIds(_ n: element, _ ids: inout [string: element]) {
 }
 
 /// The shapes under an element, into the drawing.
-func walk(_ n: element, _ ctx: Context, _ d: Drawing, _ ids: [string: element]) {
+func walk(n: element, ctx: Context, d: Drawing, ids: [string: element]) {
     for c in n.Children {
         switch c.TagName {
         case "defs", "clippath", "mask", "lineargradient", "radialgradient", "pattern", "symbol", "marker",
@@ -396,7 +396,7 @@ func walk(_ n: element, _ ctx: Context, _ d: Drawing, _ ids: [string: element]) 
     }
 }
 
-func isHidden(_ n: element) -> bool {
+func isHidden(n: element) -> bool {
     if n.GetAttribute("display") == "none" || n.GetAttribute("visibility") == "hidden" { return true }
     if let style = n.GetAttribute("style") {
         let s = css.lower(style)
@@ -406,8 +406,8 @@ func isHidden(_ n: element) -> bool {
 }
 
 /// A shape element's outline, as path commands.
-func outline(_ n: element, _ ops: inout [uint8], _ coords: inout [float32]) {
-    func num(_ name: string) -> float32 { return lengthAttribute(n.GetAttribute(name)) ?? 0 }
+func outline(n: element, ops: inout [uint8], coords: inout [float32]) {
+    func num(name: string) -> float32 { return lengthAttribute(n.GetAttribute(name)) ?? 0 }
     switch n.TagName {
     case "path":
         parsePath(n.GetAttribute("d") ?? "", &ops, &coords)
@@ -475,10 +475,10 @@ func outline(_ n: element, _ ops: inout [uint8], _ coords: inout [float32]) {
     }
 }
 
-func smaller(_ a: float32, _ b: float32) -> float32 { return a < b ? a : b }
+func smaller(a: float32, b: float32) -> float32 { return a < b ? a : b }
 
 /// The viewBox: min-x, min-y, width, height.
-func viewBoxOf(_ n: element) -> draw.Rect? {
+func viewBoxOf(n: element) -> draw.Rect? {
     guard let v = n.GetAttribute("viewbox") else { return nil }
     let parts = numbers(v)
     if parts.count != 4 || parts[2] <= 0 || parts[3] <= 0 { return nil }
@@ -487,7 +487,7 @@ func viewBoxOf(_ n: element) -> draw.Rect? {
 
 /// A width, height or coordinate attribute in user units: a number,
 /// with px or nothing after it. Percentages and other units are nil.
-func lengthAttribute(_ v: string?) -> float32? {
+func lengthAttribute(v: string?) -> float32? {
     guard let s = v else { return nil }
     let t = trim(s)
     let b = [uint8](t.utf8)
@@ -500,7 +500,7 @@ func lengthAttribute(_ v: string?) -> float32? {
     return css.parseNumber(b, 0, end)
 }
 
-func trim(_ s: string) -> string {
+func trim(s: string) -> string {
     let b = [uint8](s.utf8)
     var i = 0
     var j = b.count
@@ -511,7 +511,7 @@ func trim(_ s: string) -> string {
 
 /// SVG path data as a path, each point x, y taken to x * scale + dx,
 /// y * scale + dy: clip-path: path(), on a page.
-public func PathFromData(_ d: string, scale: float32, dx: float32, dy: float32) -> draw.Path {
+public func PathFromData(d: string, scale: float32, dx: float32, dy: float32) -> draw.Path {
     var ops: [uint8] = []
     var coords: [float32] = []
     parsePath(d, &ops, &coords)

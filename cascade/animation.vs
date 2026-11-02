@@ -27,9 +27,9 @@ public struct Easing: Equatable {
     /// linear()'s points, as (input, output).
     public var Stops: [float32] = []
 
-    public init(_ kind: string) { Kind = kind }
+    public init(kind: string) { Kind = kind }
 
-    public static func bezier(_ x1: float32, _ y1: float32, _ x2: float32, _ y2: float32) -> Easing {
+    public static func bezier(x1: float32, y1: float32, x2: float32, y2: float32) -> Easing {
         var e = Easing("bezier")
         e.X1 = x1
         e.Y1 = y1
@@ -42,7 +42,7 @@ public struct Easing: Equatable {
     public static let ease = Easing.bezier(0.25, 0.1, 0.25, 1)
 
     /// Parses a timing function's normalized text (css/animation.vs).
-    public static func Parse(_ text: string) -> Easing {
+    public static func Parse(text: string) -> Easing {
         switch text {
         case "linear": return linear
         case "ease": return ease
@@ -123,7 +123,7 @@ public struct Easing: Equatable {
 
     /// The output progress at input t, 0 to 1. `before` is whether time
     /// is before the start, which steps() with a start jump cares about.
-    public func Progress(_ t: float32) -> float32 {
+    public func Progress(t: float32) -> float32 {
         switch Kind {
         case "steps":
             let n = float32(Steps)
@@ -183,12 +183,12 @@ public struct Easing: Equatable {
     }
 }
 
-func bez(_ u: float32, _ p1: float32, _ p2: float32) -> float32 {
+func bez(u: float32, p1: float32, p2: float32) -> float32 {
     let v = 1 - u
     return 3 * v * v * u * p1 + 3 * v * u * u * p2 + u * u * u
 }
 
-func bezSlope(_ u: float32, _ p1: float32, _ p2: float32) -> float32 {
+func bezSlope(u: float32, p1: float32, p2: float32) -> float32 {
     let v = 1 - u
     return 3 * v * v * p1 + 6 * v * u * (p2 - p1) + 3 * u * u * (1 - p2)
 }
@@ -202,7 +202,7 @@ public struct Keyframe {
 }
 
 /// A @keyframes rule's frames, sorted by offset.
-func keyframesOf(_ at: css.AtRule) -> [Keyframe] {
+func keyframesOf(at: css.AtRule) -> [Keyframe] {
     var out: [Keyframe] = []
     for rule in at.Rules {
         let split = SplitDecls(rule.Declarations)
@@ -283,17 +283,17 @@ public struct AnimationSpec {
 
 /// The i'th item of a list, repeating the list as the spec does where
 /// it is shorter.
-public func Cycled<T>(_ list: [T], _ i: int) -> T {
+public func Cycled<T>(list: [T], i: int) -> T {
     return list[i % list.count]
 }
 
-func listOf(_ v: css.Value) -> [string]? {
+func listOf(v: css.Value) -> [string]? {
     guard case .string(let text) = v else { return nil }
     return text.split(separator: "|").map { string($0) }
 }
 
 /// Applies a transition-* or animation-* longhand.
-func applyAnimationProperty(_ prop: css.Prop, _ v: css.Value, _ s: ComputedStyle) {
+func applyAnimationProperty(prop: css.Prop, v: css.Value, s: ComputedStyle) {
     guard let items = listOf(v), !items.isEmpty else { return }
     let numbers = items.map { $0 == "infinite" ? float32(-1) : css.ParseNumberText($0) }
     switch prop {
@@ -314,7 +314,7 @@ func applyAnimationProperty(_ prop: css.Prop, _ v: css.Value, _ s: ComputedStyle
     }
 }
 
-func copyAnimationProperty(_ prop: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
+func copyAnimationProperty(prop: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     switch prop {
     case .transitionProperty: b.Transition.Properties = a.Transition.Properties
     case .transitionDuration: b.Transition.Durations = a.Transition.Durations
@@ -405,7 +405,7 @@ public let AnimatableProperties: [AnimatableProperty] = [
 
 /// The animatable properties a name in transition-property covers: one,
 /// a shorthand's, or all of them.
-public func AnimatablePropertiesNamed(_ name: string) -> [AnimatableProperty] {
+public func AnimatablePropertiesNamed(name: string) -> [AnimatableProperty] {
     if name == "all" { return AnimatableProperties }
     var prefixes: [string] = []
     switch name {
@@ -430,11 +430,11 @@ public func AnimatablePropertiesNamed(_ name: string) -> [AnimatableProperty] {
 /// A property's value in a style.
 /// Whether a property transitions only with transition-behavior:
 /// allow-discrete.
-public func IsDiscreteProperty(_ p: css.Prop) -> bool {
+public func IsDiscreteProperty(p: css.Prop) -> bool {
     return p == .display
 }
 
-public func AnimatedValue(_ p: css.Prop, of s: ComputedStyle) -> AnimValue? {
+public func AnimatedValue(p: css.Prop, of s: ComputedStyle) -> AnimValue? {
     switch p {
     case .visibility: return .keyword(s.Visibility == .visible ? "visible" : (s.Visibility == .hidden ? "hidden" : "collapse"))
     case .display: return .keyword(displayName(s.Display))
@@ -487,7 +487,7 @@ public func AnimatedValue(_ p: css.Prop, of s: ComputedStyle) -> AnimValue? {
 }
 
 /// Puts an animated value into a style.
-public func SetAnimatedValue(_ p: css.Prop, _ v: AnimValue, on s: ComputedStyle) {
+public func SetAnimatedValue(p: css.Prop, v: AnimValue, on s: ComputedStyle) {
     switch v {
     case .keyword(let k):
         if p == .visibility { s.Visibility = k == "hidden" ? .hidden : (k == "collapse" ? .collapse : .visible) }
@@ -560,7 +560,7 @@ public func SetAnimatedValue(_ p: css.Prop, _ v: AnimValue, on s: ComputedStyle)
 
 /// Whether two values are the same, as a transition decides whether a
 /// value changed.
-public func SameValue(_ a: AnimValue, _ b: AnimValue) -> bool {
+public func SameValue(a: AnimValue, b: AnimValue) -> bool {
     switch (a, b) {
     case (.number(let x), .number(let y)): return x == y
     case (.color(let x), .color(let y)): return x == y
@@ -579,10 +579,10 @@ public func SameValue(_ a: AnimValue, _ b: AnimValue) -> bool {
     }
 }
 
-func lerp(_ a: float32, _ b: float32, _ t: float32) -> float32 { return a + (b - a) * t }
+func lerp(a: float32, b: float32, t: float32) -> float32 { return a + (b - a) * t }
 
 /// A length as pixels plus a percentage, or nil for a keyword.
-func lengthParts(_ l: css.Length) -> (px: float32, pct: float32)? {
+func lengthParts(l: css.Length) -> (px: float32, pct: float32)? {
     switch l {
     case .px(let p): return (px: p, pct: 0)
     case .percent(let p): return (px: 0, pct: p)
@@ -591,7 +591,7 @@ func lengthParts(_ l: css.Length) -> (px: float32, pct: float32)? {
     }
 }
 
-func lerpLength(_ a: css.Length, _ b: css.Length, _ t: float32) -> css.Length {
+func lerpLength(a: css.Length, b: css.Length, t: float32) -> css.Length {
     guard let x = lengthParts(a), let y = lengthParts(b) else { return t < 0.5 ? a : b }
     let px = lerp(x.px, y.px, t)
     let pct = lerp(x.pct, y.pct, t)
@@ -614,7 +614,7 @@ func identityOp(like op: TransformOp) -> TransformOp {
 
 /// The value a fraction t of the way from a to b. Lengths that can't
 /// mix (auto) and lists whose functions differ switch halfway.
-public func Interpolate(_ a: AnimValue, _ b: AnimValue, _ t: float32) -> AnimValue {
+public func Interpolate(a: AnimValue, b: AnimValue, t: float32) -> AnimValue {
     switch (a, b) {
     case (.keyword(let x), .keyword(let y)):
         // Visible all the way while either end is (visibility), and the
@@ -632,7 +632,7 @@ public func Interpolate(_ a: AnimValue, _ b: AnimValue, _ t: float32) -> AnimVal
         let ya = float32(y.A) / 255
         let alpha = lerp(xa, ya, t)
         if alpha <= 0 { return .color(draw.Color(0, 0, 0, 0)) }
-        func ch(_ p: uint8, _ q: uint8) -> uint8 {
+        func ch(p: uint8, q: uint8) -> uint8 {
             let v = lerp(float32(p) * xa, float32(q) * ya, t) / alpha
             return uint8(math.Clamp(v, 0, 255) + 0.5)
         }
@@ -669,14 +669,14 @@ public func Interpolate(_ a: AnimValue, _ b: AnimValue, _ t: float32) -> AnimVal
 extension StyleResolver {
     /// The keyframes of a @keyframes rule by name, the page's over the
     /// user agent's; nil where there is none.
-    public func Keyframes(_ name: string) -> [Keyframe]? {
+    public func Keyframes(name: string) -> [Keyframe]? {
         if let k = Author.keyframes[name] { return k }
         return UA.keyframes[name]
     }
 
     /// The values a keyframe's declarations give an element whose own
     /// style is base: each declaration applied over it, as computed.
-    public func KeyframeValues(_ decls: [css.Longhand], over base: ComputedStyle, parent: ComputedStyle?) -> [string: AnimValue] {
+    public func KeyframeValues(decls: [css.Longhand], over base: ComputedStyle, parent: ComputedStyle?) -> [string: AnimValue] {
         let p = parent ?? defaultStyle
         let s = ComputedStyle(inheriting: p)
         s.FontSize = base.FontSize
@@ -696,7 +696,7 @@ extension StyleResolver {
 }
 
 /// A display's keyword, as displayOf reads it.
-func displayName(_ d: Display) -> string {
+func displayName(d: Display) -> string {
     switch d {
     case .none: return "none"
     case .block: return "block"

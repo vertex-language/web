@@ -35,7 +35,7 @@ public final class Layout {
 
     /// Lays out the whole tree from the root. The root box fills the
     /// viewport's width; its height is its content's.
-    public func Run(_ root: Box) {
+    public func Run(root: Box) {
         Sticky = []
         rootBox = root
         let cb = ContainingBlock(width: ViewportWidth, height: ViewportHeight)
@@ -54,7 +54,7 @@ public final class Layout {
     /// Resolves a box's margins, borders and padding against its
     /// containing block's width; auto margins are 0 until the width is
     /// known.
-    func resolveEdges(_ box: Box, cbWidth: float32) {
+    func resolveEdges(box: Box, cbWidth: float32) {
         let s = box.Style
         box.Margin = draw.Edges(s.MarginTop.Or(0, base: cbWidth), s.MarginRight.Or(0, base: cbWidth),
                                 s.MarginBottom.Or(0, base: cbWidth), s.MarginLeft.Or(0, base: cbWidth))
@@ -64,17 +64,17 @@ public final class Layout {
     }
 
     /// The border-box width a length gives, for box-sizing.
-    func borderBoxWidth(_ box: Box, contentWidth: float32) -> float32 {
+    func borderBoxWidth(box: Box, contentWidth: float32) -> float32 {
         return contentWidth + box.Padding.Horizontal + box.Border.Horizontal
     }
 
-    func widthFromStyle(_ box: Box, _ length: css.Length, cbWidth: float32) -> float32? {
+    func widthFromStyle(box: Box, length: css.Length, cbWidth: float32) -> float32? {
         guard let v = length.Resolve(cbWidth) else { return nil }
         if box.Style.BoxSizing == .borderBox { return v }
         return borderBoxWidth(box, contentWidth: v)
     }
 
-    func heightFromStyle(_ box: Box, _ length: css.Length, cbHeight: float32?) -> float32? {
+    func heightFromStyle(box: Box, length: css.Length, cbHeight: float32?) -> float32? {
         var base: float32 = 0
         if case .percent = length {
             guard let h = cbHeight else { return nil }
@@ -92,7 +92,7 @@ public final class Layout {
 
     /// The border-box height aspect-ratio gives a box of its width, or
     /// nil where it has no ratio. The ratio is of the box-sizing box.
-    func heightFromRatio(_ box: Box) -> float32? {
+    func heightFromRatio(box: Box) -> float32? {
         let r = box.Style.AspectRatio
         if r <= 0 { return nil }
         if box.Style.BoxSizing == .borderBox { return box.Width / r }
@@ -101,7 +101,7 @@ public final class Layout {
     }
 
     /// Clamps a border-box width to min-width and max-width.
-    func clampWidth(_ box: Box, _ width: float32, cbWidth: float32) -> float32 {
+    func clampWidth(box: Box, width: float32, cbWidth: float32) -> float32 {
         var w = width
         if let max = widthFromStyle(box, box.Style.MaxWidth, cbWidth: cbWidth), w > max { w = max }
         if let min = widthFromStyle(box, box.Style.MinWidth, cbWidth: cbWidth), w < min { w = min }
@@ -110,7 +110,7 @@ public final class Layout {
         return w
     }
 
-    func clampHeight(_ box: Box, _ height: float32, cbHeight: float32?) -> float32 {
+    func clampHeight(box: Box, height: float32, cbHeight: float32?) -> float32 {
         var h = height
         if let max = heightFromStyle(box, box.Style.MaxHeight, cbHeight: cbHeight), h > max { h = max }
         if let min = heightFromStyle(box, box.Style.MinHeight, cbHeight: cbHeight), h < min { h = min }
@@ -124,7 +124,7 @@ public final class Layout {
     /// Lays out a block-level box in normal flow: its width from the
     /// containing block, its content, then its height. Sets Width,
     /// Height and the edges; the caller places X and Y.
-    func layoutBlock(_ box: Box, cb: ContainingBlock, flow: Flow) {
+    func layoutBlock(box: Box, cb: ContainingBlock, flow: Flow) {
         resolveEdges(box, cbWidth: cb.Width)
         box.Positioned = []
         box.ColumnFragments = []
@@ -213,7 +213,7 @@ public final class Layout {
     /// Hands a box taken out of the flow to what it is positioned
     /// against: its positioned ancestor, or for position: fixed the
     /// viewport (the root) or the ancestor standing in for it.
-    func attachPositioned(_ child: Box, _ flow: Flow) {
+    func attachPositioned(child: Box, flow: Flow) {
         if child.Style.Position == .fixed {
             child.FixedToViewport = flow.fixed == nil
             (flow.fixed ?? rootBox ?? flow.positioned).Positioned.append(child)
@@ -224,7 +224,7 @@ public final class Layout {
     }
 
     /// Lays out what a block holds and answers the content height.
-    func layoutContent(_ box: Box, flow: Flow) -> float32 {
+    func layoutContent(box: Box, flow: Flow) -> float32 {
         let contentWidth = box.InnerWidth
         var height: float32 = 0
         if box.Style.Display == .table || box.Style.Display == .inlineTable {
@@ -257,7 +257,7 @@ public final class Layout {
 
     /// Whether a box's containing block runs right to left: an in-flow
     /// block there sits against the right.
-    func rightToLeftContainer(_ box: Box) -> bool {
+    func rightToLeftContainer(box: Box) -> bool {
         guard let p = box.Parent else { return false }
         return p.Style.Direction == .rtl && !box.Style.IsOutOfFlow && box.Style.Float == .none
     }
@@ -265,7 +265,7 @@ public final class Layout {
     /// Flex and grid laid out left to right, turned round for right to
     /// left: each in-flow child's margin box mirrored in the content
     /// box, its margins staying on their sides.
-    func mirrorChildren(_ box: Box) {
+    func mirrorChildren(box: Box) {
         let left = box.ContentX
         let right = box.ContentX + box.InnerWidth
         for c in box.Children where !c.Style.IsOutOfFlow {
@@ -276,7 +276,7 @@ public final class Layout {
     /// Stacks block children top to bottom, collapsing the margins that
     /// meet: adjacent siblings', and a first or last child's with the
     /// parent's where nothing separates them.
-    func layoutBlockChildren(_ box: Box, contentWidth: float32, flow: Flow) -> float32 {
+    func layoutBlockChildren(box: Box, contentWidth: float32, flow: Flow) -> float32 {
         let cb = ContainingBlock(width: contentWidth, height: definiteInnerHeight(box))
         // The content box's corner in the formatting context, for floats.
         let rootX = flow.x + box.ContentX
@@ -383,7 +383,7 @@ public final class Layout {
 
     /// Two collapsing margins: the larger of positives, the more negative
     /// of negatives, or their sum when mixed.
-    func collapse(_ a: float32, _ b: float32) -> float32 {
+    func collapse(a: float32, b: float32) -> float32 {
         if a >= 0 && b >= 0 { return a > b ? a : b }
         if a < 0 && b < 0 { return a < b ? a : b }
         return a + b
@@ -391,7 +391,7 @@ public final class Layout {
 
     /// Whether a box's own top (or bottom) margin can collapse with its
     /// parent's: nothing of the box lies between them.
-    func collapsesThrough(_ box: Box, top: Bool) -> bool {
+    func collapsesThrough(box: Box, top: Bool) -> bool {
         if box.IsFormattingRoot || box.Kind != .block { return false }
         if top { return box.Border.Top == 0 && box.Padding.Top == 0 }
         return box.Border.Bottom == 0 && box.Padding.Bottom == 0
@@ -399,7 +399,7 @@ public final class Layout {
 
     /// The content height a box's children can take percentages of, if
     /// the box's height is known before its content is.
-    func definiteInnerHeight(_ box: Box) -> float32? {
+    func definiteInnerHeight(box: Box) -> float32? {
         if let h = box.DefiniteInnerHeight { return h }
         if let h = box.Style.Height.Pixels {
             if box.Style.BoxSizing == .borderBox { return h - box.Padding.Vertical - box.Border.Vertical }
@@ -412,12 +412,12 @@ public final class Layout {
 
     /// Whether a replaced box keeps its intrinsic proportions when only one
     /// of its sizes is given: an image or an SVG does, a control does not.
-    func keepsRatio(_ box: Box) -> bool {
+    func keepsRatio(box: Box) -> bool {
         return box.Replaced == .image || box.Replaced == .svg
     }
 
     /// Sizes an image or control from its style, or its own size.
-    func sizeReplaced(_ box: Box, cb: ContainingBlock) {
+    func sizeReplaced(box: Box, cb: ContainingBlock) {
         let s = box.Style
         var w: float32? = widthFromStyle(box, s.Width, cbWidth: cb.Width)
         var h: float32? = heightFromStyle(box, s.Height, cbHeight: cb.Height)
@@ -463,7 +463,7 @@ public final class Layout {
     /// Lays out an atomic inline box -- inline-block, inline-flex or a
     /// control -- for a line: it takes its own width, up to what the
     /// line offers.
-    func layoutAtomic(_ box: Box, cb: ContainingBlock, flow: Flow) {
+    func layoutAtomic(box: Box, cb: ContainingBlock, flow: Flow) {
         if box.Kind == .replaced {
             resolveEdges(box, cbWidth: cb.Width)
             sizeReplaced(box, cb: cb)
@@ -508,7 +508,7 @@ public final class Layout {
     }
 
     /// The baseline of the last line in a box, from the box's top.
-    func lastBaseline(_ box: Box) -> float32? {
+    func lastBaseline(box: Box) -> float32? {
         if !box.Lines.isEmpty {
             let line = box.Lines[box.Lines.count - 1]
             return line.Y + line.Baseline
@@ -529,11 +529,11 @@ public final class Layout {
     /// The narrowest and widest a box would be if its width were its
     /// content's: the longest word, and the whole content on one line.
     /// Border-box widths.
-    func intrinsicWidths(_ box: Box) -> (min: float32, max: float32) {
+    func intrinsicWidths(box: Box) -> (min: float32, max: float32) {
         return intrinsicWidths(box, ignoringWidth: false)
     }
 
-    func intrinsicWidths(_ box: Box, ignoringWidth: Bool) -> (min: float32, max: float32) {
+    func intrinsicWidths(box: Box, ignoringWidth: Bool) -> (min: float32, max: float32) {
         let s = box.Style
         let edges = box.Padding.Horizontal + box.Border.Horizontal
         if box.Kind == .replaced {
@@ -620,7 +620,7 @@ public final class Layout {
     /// have nothing to resolve against here, so a percentage max-width
     /// limits nothing; and an element whose width or max-width is a
     /// percentage is compressible, contributing nothing to min-content.
-    func replacedIntrinsicWidths(_ box: Box, ignoringWidth: Bool) -> (min: float32, max: float32) {
+    func replacedIntrinsicWidths(box: Box, ignoringWidth: Bool) -> (min: float32, max: float32) {
         let s = box.Style
         let edges = box.Padding.Horizontal + box.Border.Horizontal
         var w: float32
@@ -655,7 +655,7 @@ public final class Layout {
     /// Lays out the boxes positioned against a box, after its flow: each
     /// against the box's padding box, at its insets, or where it would
     /// have been where it has none.
-    func layoutPositioned(_ box: Box, cb: ContainingBlock) {
+    func layoutPositioned(box: Box, cb: ContainingBlock) {
         if box.Positioned.isEmpty { return }
         let list = box.Positioned
         let padX = box.Kind == .block && box.Parent != nil ? box.PaddingBoxX : 0
@@ -749,7 +749,7 @@ public final class Layout {
 
     /// Applies relative positioning after layout: the box is drawn
     /// shifted by its insets, its place in the flow kept.
-    func applyRelativeOffsets(_ box: Box, cbWidth: float32, cbHeight: float32?) {
+    func applyRelativeOffsets(box: Box, cbWidth: float32, cbHeight: float32?) {
         let s = box.Style
         box.OffsetX = 0
         box.OffsetY = 0
@@ -804,7 +804,7 @@ public final class Layout {
 /// an image's source or a cell's span: a change to it rebuilds the
 /// element's boxes. `web/cmd/check-deps` keeps this in step with the
 /// code.
-public func ReadsAttribute(_ name: string) -> bool {
+public func ReadsAttribute(name: string) -> bool {
     switch name {
     case "src", "colspan", "rowspan", "start", "type", "value", "selected", "placeholder", "multiple", "poster", "data":
         return true
@@ -815,7 +815,7 @@ public func ReadsAttribute(_ name: string) -> bool {
 
 /// Whether a width or height is min-content, max-content or fit-content:
 /// sized by the content even where both insets are given.
-func isSizingKeyword(_ l: css.Length) -> bool {
+func isSizingKeyword(l: css.Length) -> bool {
     switch l {
     case .minContent, .maxContent, .fitContent: return true
     default: return false

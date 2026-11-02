@@ -58,7 +58,7 @@ public final class MatchContext {
         countOf = [:]
     }
 
-    func siblingIndex(_ node: html.Node) -> (index: int, count: int) {
+    func siblingIndex(node: html.Node) -> (index: int, count: int) {
         guard let p = node.Parent else { return (index: 1, count: 1) }
         if let i = indexOf[node.Id], let n = countOf[p.Id] {
             return (index: i, count: n)
@@ -72,7 +72,7 @@ public final class MatchContext {
         return (index: indexOf[node.Id] ?? 1, count: n)
     }
 
-    func isHovered(_ node: html.Node) -> bool {
+    func isHovered(node: html.Node) -> bool {
         var cur = Hovered
         while let n = cur {
             if n.Id == node.Id { return true }
@@ -81,7 +81,7 @@ public final class MatchContext {
         return false
     }
 
-    func isActive(_ node: html.Node) -> bool {
+    func isActive(node: html.Node) -> bool {
         var cur = Active
         while let n = cur {
             if n.Id == node.Id { return true }
@@ -92,15 +92,15 @@ public final class MatchContext {
 }
 
 /// Matches a single compound part against an HTML element node.
-public func MatchPart(_ part: SelectorPart, _ node: html.Node) -> bool {
+public func MatchPart(part: SelectorPart, node: html.Node) -> bool {
     return MatchPartIn(part, node, MatchContext.none)
 }
 
-public func MatchPartIn(_ part: SelectorPart, _ node: html.Node, _ ctx: MatchContext) -> bool {
+public func MatchPartIn(part: SelectorPart, node: html.Node, ctx: MatchContext) -> bool {
     return matchPart(part, node, ctx, pseudoElement: nil)
 }
 
-func matchPart(_ part: SelectorPart, _ node: html.Node, _ ctx: MatchContext, pseudoElement: string?) -> bool {
+func matchPart(part: SelectorPart, node: html.Node, ctx: MatchContext, pseudoElement: string?) -> bool {
     if node.Kind != html.NodeKind.element {
         return false
     }
@@ -166,7 +166,7 @@ func matchPart(_ part: SelectorPart, _ node: html.Node, _ ctx: MatchContext, pse
     return true
 }
 
-func matchPseudo(_ p: Pseudo, _ node: html.Node, _ ctx: MatchContext) -> bool {
+func matchPseudo(p: Pseudo, node: html.Node, ctx: MatchContext) -> bool {
     switch p.Name {
     case "only-child":
         return node.PreviousElementSibling() == nil && node.NextElementSibling() == nil
@@ -318,12 +318,12 @@ func matchPseudo(_ p: Pseudo, _ node: html.Node, _ ctx: MatchContext) -> bool {
     }
 }
 
-func isFormControl(_ node: html.Node) -> bool {
+func isFormControl(node: html.Node) -> bool {
     let t = node.TagName
     return t == "input" || t == "button" || t == "select" || t == "textarea" || t == "option" || t == "fieldset"
 }
 
-func hasDescendantMatching(_ node: html.Node, _ sel: ComplexSelector, _ ctx: MatchContext) -> bool {
+func hasDescendantMatching(node: html.Node, sel: ComplexSelector, ctx: MatchContext) -> bool {
     var i = 0
     while i < node.Children.count {
         let c = node.Children[i]
@@ -336,7 +336,7 @@ func hasDescendantMatching(_ node: html.Node, _ sel: ComplexSelector, _ ctx: Mat
     return false
 }
 
-func previousOfType(_ node: html.Node) -> html.Node? {
+func previousOfType(node: html.Node) -> html.Node? {
     var cur = node.PreviousElementSibling()
     while let n = cur {
         if n.TagName == node.TagName { return n }
@@ -345,7 +345,7 @@ func previousOfType(_ node: html.Node) -> html.Node? {
     return nil
 }
 
-func nextOfType(_ node: html.Node) -> html.Node? {
+func nextOfType(node: html.Node) -> html.Node? {
     var cur = node.NextElementSibling()
     while let n = cur {
         if n.TagName == node.TagName { return n }
@@ -357,7 +357,7 @@ func nextOfType(_ node: html.Node) -> html.Node? {
 /// The 1-based position of an element among its parent's element
 /// children, counting only those of its type when asked, from the end
 /// when asked.
-func indexAmongSiblings(_ node: html.Node, ofType: bool, fromEnd: bool) -> int {
+func indexAmongSiblings(node: html.Node, ofType: bool, fromEnd: bool) -> int {
     guard let p = node.Parent else { return 1 }
     var index = 0
     var i = fromEnd ? p.Children.count - 1 : 0
@@ -373,7 +373,7 @@ func indexAmongSiblings(_ node: html.Node, ofType: bool, fromEnd: bool) -> int {
 }
 
 /// Whether index is An+B for some n >= 0.
-func nthMatches(_ a: int, _ b: int, _ index: int) -> bool {
+func nthMatches(a: int, b: int, index: int) -> bool {
     if a == 0 { return index == b }
     let diff = index - b
     if diff % a != 0 { return false }
@@ -381,20 +381,20 @@ func nthMatches(_ a: int, _ b: int, _ index: int) -> bool {
 }
 
 /// Matches a complex selector (e.g. `div.menu > ul li a`) against an element node.
-public func MatchComplex(_ complex: ComplexSelector, _ node: html.Node) -> bool {
+public func MatchComplex(complex: ComplexSelector, node: html.Node) -> bool {
     return MatchComplexIn(complex, node, MatchContext.none)
 }
 
 /// Matches a complex selector against an element, with the page's state
 /// for the dynamic pseudo-classes.
-public func MatchComplexIn(_ complex: ComplexSelector, _ node: html.Node, _ ctx: MatchContext) -> bool {
+public func MatchComplexIn(complex: ComplexSelector, node: html.Node, ctx: MatchContext) -> bool {
     return MatchComplexIn(complex, node, ctx, pseudoElement: nil)
 }
 
 /// Matches a selector that ends in a pseudo-element -- `a::before` --
 /// against an element's pseudo-element of that name; with nil, a
 /// selector ending in a pseudo-element matches nothing.
-public func MatchComplexIn(_ complex: ComplexSelector, _ node: html.Node, _ ctx: MatchContext, pseudoElement: string?) -> bool {
+public func MatchComplexIn(complex: ComplexSelector, node: html.Node, ctx: MatchContext, pseudoElement: string?) -> bool {
     if node.Kind != html.NodeKind.element {
         return false
     }
@@ -463,7 +463,7 @@ public func MatchComplexIn(_ complex: ComplexSelector, _ node: html.Node, _ ctx:
 }
 
 // String helpers for attribute matching
-func toLower(_ s: string) -> string {
+func toLower(s: string) -> string {
     var b = [uint8](s.utf8)
     var i = 0
     var changed = false
@@ -478,7 +478,7 @@ func toLower(_ s: string) -> string {
     return strFrom(b, 0, b.count)
 }
 
-func hasPrefix(_ str: string, _ prefix: string) -> bool {
+func hasPrefix(str: string, prefix: string) -> bool {
     let sb = bytesFrom(str)
     let pb = bytesFrom(prefix)
     if pb.count > sb.count { return false }
@@ -490,7 +490,7 @@ func hasPrefix(_ str: string, _ prefix: string) -> bool {
     return true
 }
 
-func hasSuffix(_ str: string, _ suffix: string) -> bool {
+func hasSuffix(str: string, suffix: string) -> bool {
     let sb = bytesFrom(str)
     let pb = bytesFrom(suffix)
     if pb.count > sb.count { return false }
@@ -503,7 +503,7 @@ func hasSuffix(_ str: string, _ suffix: string) -> bool {
     return true
 }
 
-func contains(_ str: string, _ needle: string) -> bool {
+func contains(str: string, needle: string) -> bool {
     let sb = bytesFrom(str)
     let nb = bytesFrom(needle)
     if nb.isEmpty { return true }
@@ -525,12 +525,12 @@ func contains(_ str: string, _ needle: string) -> bool {
     return false
 }
 
-func matchesAny(_ list: [ComplexSelector], _ node: html.Node, _ ctx: MatchContext) -> bool {
+func matchesAny(list: [ComplexSelector], node: html.Node, ctx: MatchContext) -> bool {
     for sel in list where MatchComplexIn(sel, node, ctx) { return true }
     return false
 }
 
-func trimSpace(_ s: string) -> string {
+func trimSpace(s: string) -> string {
     let b = [uint8](s.utf8)
     var i = 0
     var j = b.count
@@ -540,7 +540,7 @@ func trimSpace(_ s: string) -> string {
 }
 
 /// A field one types into: what shows :focus-visible however focused.
-func isTextEntry(_ node: html.Node) -> bool {
+func isTextEntry(node: html.Node) -> bool {
     if node.TagName == "textarea" { return true }
     if node.TagName != "input" { return false }
     switch inputType(node) {
@@ -549,13 +549,13 @@ func isTextEntry(_ node: html.Node) -> bool {
     }
 }
 
-func inputType(_ node: html.Node) -> string {
+func inputType(node: html.Node) -> string {
     return css.lower(node.GetAttribute("type") ?? "text")
 }
 
 /// :lang(): the element's language, from the nearest lang attribute,
 /// matches a range: equal, or a prefix before a hyphen; `*` matches any.
-func langMatches(_ arg: string, _ node: html.Node) -> bool {
+func langMatches(arg: string, node: html.Node) -> bool {
     var lang: string? = nil
     var cur: html.Node? = node
     while let n = cur {
@@ -577,7 +577,7 @@ func langMatches(_ arg: string, _ node: html.Node) -> bool {
 /// none says. dir=auto takes the direction of the first strong
 /// character of the element's text, as HTML has it (ltr where there is
 /// none; a textarea's or input's from its value).
-func directionOf(_ node: html.Node) -> string {
+func directionOf(node: html.Node) -> string {
     var cur: html.Node? = node
     while let n = cur {
         if let d = n.GetAttribute("dir") {
@@ -596,7 +596,7 @@ func directionOf(_ node: html.Node) -> string {
     return "ltr"
 }
 
-func valueFor(_ node: html.Node, _ ctx: MatchContext) -> string {
+func valueFor(node: html.Node, ctx: MatchContext) -> string {
     if let v = ctx.ValueOf { return v(node) }
     if node.TagName == "textarea" { return node.InnerText() }
     return node.GetAttribute("value") ?? ""
@@ -607,14 +607,14 @@ func valueFor(_ node: html.Node, _ ctx: MatchContext) -> string {
 /// <datalist>.
 /// Whether a control meets its constraints, as :valid asks; true for
 /// what constraint validation doesn't look at.
-public func IsValid(_ node: html.Node, _ ctx: MatchContext) -> bool {
+public func IsValid(node: html.Node, ctx: MatchContext) -> bool {
     return !isValidatable(node) || isValid(node, ctx)
 }
 
 /// Whether constraint validation looks at a control.
-public func IsValidatable(_ node: html.Node) -> bool { return isValidatable(node) }
+public func IsValidatable(node: html.Node) -> bool { return isValidatable(node) }
 
-func isValidatable(_ node: html.Node) -> bool {
+func isValidatable(node: html.Node) -> bool {
     let t = node.TagName
     if t != "input" && t != "textarea" && t != "select" { return false }
     if node.HasAttribute("disabled") { return false }
@@ -637,7 +637,7 @@ func isValidatable(_ node: html.Node) -> bool {
 /// Whether a control meets its constraints -- required, type, length,
 /// range and pattern -- or, for a form or fieldset, whether everything
 /// in it does.
-func isValid(_ node: html.Node, _ ctx: MatchContext) -> bool {
+func isValid(node: html.Node, ctx: MatchContext) -> bool {
     if node.TagName == "form" || node.TagName == "fieldset" {
         for c in node.Children where c.Kind == html.NodeKind.element {
             if isValidatable(c) && !isValid(c, ctx) { return false }
@@ -651,7 +651,7 @@ func isValid(_ node: html.Node, _ ctx: MatchContext) -> bool {
 /// What a control that fails its constraints says about it, as a
 /// browser's validation bubble does; empty where it meets them (or
 /// isn't validated).
-public func ValidationMessage(_ node: html.Node, _ ctx: MatchContext) -> string {
+public func ValidationMessage(node: html.Node, ctx: MatchContext) -> string {
     if !isValidatable(node) { return "" }
     let type = node.TagName == "input" ? inputType(node) : node.TagName
     let required = node.HasAttribute("required")
@@ -704,7 +704,7 @@ public func ValidationMessage(_ node: html.Node, _ ctx: MatchContext) -> string 
     return ""
 }
 
-func takesPattern(_ type: string) -> bool {
+func takesPattern(type: string) -> bool {
     switch type {
     case "text", "search", "url", "tel", "email", "password": return true
     default: return false
@@ -715,7 +715,7 @@ func takesPattern(_ type: string) -> bool {
 var patterns: [string: regexp.Regexp] = [:]
 var badPatterns: [string: bool] = [:]
 
-func compiledPattern(_ p: string) -> regexp.Regexp? {
+func compiledPattern(p: string) -> regexp.Regexp? {
     if let re = patterns[p] { return re }
     if badPatterns[p] != nil { return nil }
     if let re = regexp.Regexp.Compile(p, flags: "v") {
@@ -726,7 +726,7 @@ func compiledPattern(_ p: string) -> regexp.Regexp? {
     return nil
 }
 
-func looksLikeEmail(_ s: string) -> bool {
+func looksLikeEmail(s: string) -> bool {
     let parts = s.split(separator: "@", omittingEmptySubsequences: false)
     if parts.count != 2 || parts[0].isEmpty || parts[1].isEmpty { return false }
     for c in s.utf8 where c == 32 { return false }
@@ -735,7 +735,7 @@ func looksLikeEmail(_ s: string) -> bool {
 
 /// :in-range or not, for a number or range input with a min or max;
 /// nil where it has no range.
-func rangeState(_ node: html.Node, _ ctx: MatchContext) -> bool? {
+func rangeState(node: html.Node, ctx: MatchContext) -> bool? {
     if node.TagName != "input" { return nil }
     let type = inputType(node)
     if type != "number" && type != "range" { return nil }
@@ -748,7 +748,7 @@ func rangeState(_ node: html.Node, _ ctx: MatchContext) -> bool? {
     return true
 }
 
-func isReadWrite(_ node: html.Node) -> bool {
+func isReadWrite(node: html.Node) -> bool {
     if node.TagName == "textarea" { return !node.HasAttribute("readonly") && !node.HasAttribute("disabled") }
     if node.TagName == "input" {
         if !isTextEntry(node) && inputType(node) != "number" { return false }
@@ -765,7 +765,7 @@ func isReadWrite(_ node: html.Node) -> bool {
     return false
 }
 
-func isDefault(_ node: html.Node) -> bool {
+func isDefault(node: html.Node) -> bool {
     switch node.TagName {
     case "option": return node.HasAttribute("selected")
     case "input":
@@ -782,7 +782,7 @@ func isDefault(_ node: html.Node) -> bool {
 }
 
 /// Whether a submit button is the first of its form's.
-func isDefaultButton(_ node: html.Node) -> bool {
+func isDefaultButton(node: html.Node) -> bool {
     var form = node.Parent
     while let f = form, f.TagName != "form" { form = f.Parent }
     guard let f = form else { return false }
@@ -794,7 +794,7 @@ func isDefaultButton(_ node: html.Node) -> bool {
     return false
 }
 
-func isIndeterminate(_ node: html.Node) -> bool {
+func isIndeterminate(node: html.Node) -> bool {
     if node.TagName == "progress" { return !node.HasAttribute("value") }
     if node.TagName != "input" { return false }
     let type = inputType(node)
@@ -804,7 +804,7 @@ func isIndeterminate(_ node: html.Node) -> bool {
 }
 
 /// The radio buttons of node's group: the same name in the same form.
-func radioGroup(_ node: html.Node) -> [html.Node] {
+func radioGroup(node: html.Node) -> [html.Node] {
     guard let name = node.GetAttribute("name"), !name.isEmpty else { return [node] }
     var top: html.Node = node
     while let p = top.Parent {
@@ -814,17 +814,17 @@ func radioGroup(_ node: html.Node) -> [html.Node] {
     return descendants(top).filter { $0.TagName == "input" && inputType($0) == "radio" && $0.GetAttribute("name") == name }
 }
 
-func radioGroupChecked(_ node: html.Node) -> bool {
+func radioGroupChecked(node: html.Node) -> bool {
     for r in radioGroup(node) where r.HasAttribute("checked") { return true }
     return false
 }
 
-func groupRequired(_ node: html.Node) -> bool {
+func groupRequired(node: html.Node) -> bool {
     for r in radioGroup(node) where r.HasAttribute("required") { return true }
     return false
 }
 
-func descendants(_ node: html.Node) -> [html.Node] {
+func descendants(node: html.Node) -> [html.Node] {
     var out: [html.Node] = []
     for c in node.Children where c.Kind == html.NodeKind.element {
         out.append(c)
@@ -833,7 +833,7 @@ func descendants(_ node: html.Node) -> [html.Node] {
     return out
 }
 
-func numberOf(_ s: string) -> float64? {
+func numberOf(s: string) -> float64? {
     let t = trimSpace(s)
     if t.isEmpty { return nil }
     let b = [uint8](t.utf8)
@@ -847,12 +847,12 @@ func numberOf(_ s: string) -> float64? {
     return float64(css.ParseNumberText(t))
 }
 
-func numberAttr(_ node: html.Node, _ name: string) -> float64? {
+func numberAttr(node: html.Node, name: string) -> float64? {
     guard let v = node.GetAttribute(name) else { return nil }
     return numberOf(v)
 }
 
-func intAttr(_ node: html.Node, _ name: string) -> int? {
+func intAttr(node: html.Node, name: string) -> int? {
     guard let v = numberAttr(node, name), v >= 0 else { return nil }
     return int(v)
 }

@@ -21,7 +21,7 @@ import (
 
 var failures = 0
 
-func check(_ ok: bool, _ what: string) {
+func check(ok: bool, what: string) {
     if ok {
         print("ok    \(what)")
     } else {
@@ -58,7 +58,7 @@ func repositoryRoot() -> string? {
 }
 
 /// The paths a source file imports.
-func imports(_ source: string) -> [string] {
+func imports(source: string) -> [string] {
     var out: [string] = []
     var inBlock = false
     for raw in source.split(separator: "\n", omittingEmptySubsequences: false) {
@@ -82,7 +82,7 @@ func imports(_ source: string) -> [string] {
     return out
 }
 
-func quoted(_ line: string) -> string? {
+func quoted(line: string) -> string? {
     let b = [uint8](line.utf8)
     var i = 0
     while i < b.count && b[i] != 34 { i += 1 }
@@ -93,7 +93,7 @@ func quoted(_ line: string) -> string? {
     return string(decoding: b[(i + 1)..<j], as: UTF8.self)
 }
 
-func trim(_ s: string) -> string {
+func trim(s: string) -> string {
     let b = [uint8](s.utf8)
     var start = 0
     var end = b.count
@@ -104,7 +104,7 @@ func trim(_ s: string) -> string {
 
 /// The import path of the package a file is in, from its path in the
 /// repository: "layout/box.vs" is web/layout, "page.vs" is web.
-func packageOf(_ relative: string) -> string {
+func packageOf(relative: string) -> string {
     let parts = relative.split(separator: "/").map { string($0) }
     var out = "web"
     var i = 0
@@ -117,7 +117,7 @@ func packageOf(_ relative: string) -> string {
 
 /// The attribute names a source reads literally, by GetAttribute("x") or
 /// HasAttribute("x").
-func attributeReads(_ source: string) -> [string] {
+func attributeReads(source: string) -> [string] {
     var out: [string] = []
     let b = [uint8](source.utf8)
     let needle = [uint8]("Attribute(\"".utf8)
@@ -143,7 +143,7 @@ func attributeReads(_ source: string) -> [string] {
 }
 
 /// Whether the package that reads an attribute lists it.
-func listed(_ pkg: string, _ name: string) -> bool? {
+func listed(pkg: string, name: string) -> bool? {
     switch pkg {
     case "web/cascade": return cascade.ReadsAttribute(name) || name == "id" || name == "class"
     case "web/layout": return layout.ReadsAttribute(name)

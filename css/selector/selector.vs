@@ -6,7 +6,7 @@ import (
 )
 
 /// Checks if an element node matches a given selector string (can be comma-separated).
-public func Matches(_ selectorString: string, _ node: html.Node) -> bool {
+public func Matches(selectorString: string, node: html.Node) -> bool {
     let complexes = ParseSelectors(selectorString)
     var i = 0
     while i < complexes.count {
@@ -19,14 +19,14 @@ public func Matches(_ selectorString: string, _ node: html.Node) -> bool {
 }
 
 /// Finds the first descendant element matching the selector string.
-public func QuerySelector(_ selectorString: string, in root: html.Node) -> html.Node? {
+public func QuerySelector(selectorString: string, in root: html.Node) -> html.Node? {
     let complexes = ParseSelectors(selectorString)
     if complexes.isEmpty { return nil }
     return queryFirst(root, complexes)
 }
 
 /// Finds all descendant elements matching the selector string.
-public func QuerySelectorAll(_ selectorString: string, in root: html.Node) -> [html.Node] {
+public func QuerySelectorAll(selectorString: string, in root: html.Node) -> [html.Node] {
     let complexes = ParseSelectors(selectorString)
     if complexes.isEmpty { return [] }
     var results: [html.Node] = []
@@ -34,7 +34,7 @@ public func QuerySelectorAll(_ selectorString: string, in root: html.Node) -> [h
     return results
 }
 
-func queryFirst(_ node: html.Node, _ selectors: [ComplexSelector]) -> html.Node? {
+func queryFirst(node: html.Node, selectors: [ComplexSelector]) -> html.Node? {
     if node.Kind == html.NodeKind.element {
         var i = 0
         while i < selectors.count {
@@ -54,7 +54,7 @@ func queryFirst(_ node: html.Node, _ selectors: [ComplexSelector]) -> html.Node?
     return nil
 }
 
-func queryAll(_ node: html.Node, _ selectors: [ComplexSelector], _ out: inout [html.Node]) {
+func queryAll(node: html.Node, selectors: [ComplexSelector], out: inout [html.Node]) {
     if node.Kind == html.NodeKind.element {
         var i = 0
         while i < selectors.count {

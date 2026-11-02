@@ -9,7 +9,7 @@ import (
 
 var failures = 0
 
-func check(_ ok: bool, _ what: string) {
+func check(ok: bool, what: string) {
     if ok {
         print("ok    \(what)")
     } else {
@@ -18,7 +18,7 @@ func check(_ ok: bool, _ what: string) {
     }
 }
 
-func same(_ got: string, _ want: string, _ what: string) {
+func same(got: string, want: string, what: string) {
     check(got == want, got == want ? what : "\(what): got \"\(got)\", want \"\(want)\"")
 }
 
@@ -217,7 +217,7 @@ func testSelector() {
 func testPseudoClasses() {
     print("Testing web/css/selector pseudo-classes...")
     let doc = html.Parse("<ul><li id=a class=x>1<li id=b>2<li id=c class=x>3<li id=d>4<li id=e>5</ul><p id=empty></p><input id=in disabled><a id=link href=/>l</a><a id=anchor>n</a>")
-    func ids(_ sel: string) -> string {
+    func ids(sel: string) -> string {
         let nodes = selector.QuerySelectorAll(sel, in: doc.Root)
         var out = ""
         var i = 0
@@ -281,7 +281,7 @@ func testFormAndLanguagePseudoClasses() {
     <details id=d open><summary>s</summary></details><ul><li class=i id=i1><li id=n><li class=i id=i2><li class=i id=i3></ul>
     <div contenteditable><p id=ce>c</p></div>
     """)
-    func ids(_ sel: string) -> string {
+    func ids(sel: string) -> string {
         return selector.QuerySelectorAll(sel, in: doc.Root).map { $0.GetAttribute("id") ?? "?" }.filter { $0 != "?" }.joined(separator: " ")
     }
     check(ids(":lang(en)") == "en", ":lang matches a prefix before a hyphen (got \(ids(":lang(en)")))")
@@ -363,12 +363,12 @@ func testColors() {
 }
 
 /// Checks a color parses to within one step of each channel.
-func near(_ text: string, _ want: draw.Color) {
+func near(text: string, want: draw.Color) {
     guard let c = css.ParseColor(text) else {
         check(false, "\(text) parses")
         return
     }
-    func d(_ a: uint8, _ b: uint8) -> int { return a > b ? int(a - b) : int(b - a) }
+    func d(a: uint8, b: uint8) -> int { return a > b ? int(a - b) : int(b - a) }
     let ok = d(c.R, want.R) <= 1 && d(c.G, want.G) <= 1 && d(c.B, want.B) <= 1 && d(c.A, want.A) <= 1
     check(ok, "\(text) (got \(c.R) \(c.G) \(c.B) \(c.A))")
 }

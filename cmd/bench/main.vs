@@ -11,7 +11,7 @@ import (
 )
 
 /// A decimal argument, or the fallback when it is missing or not positive.
-func number(_ s: string, _ fallback: float32) -> float32 {
+func number(s: string, fallback: float32) -> float32 {
     var value: float32 = 0
     var scale: float32 = 0
     var any = false
@@ -33,7 +33,7 @@ func number(_ s: string, _ fallback: float32) -> float32 {
     return any && value > 0 ? value : fallback
 }
 
-func ms(_ d: time.Duration) -> string {
+func ms(d: time.Duration) -> string {
     let us = d.AsMicroseconds()
     return "\(us / 1000).\((us % 1000) / 100) ms"
 }

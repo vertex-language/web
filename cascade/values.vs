@@ -310,7 +310,7 @@ public struct TextDecoration: Equatable {
 
     public var IsNone: bool { return !Underline && !Overline && !LineThrough }
 
-    public func Union(_ o: TextDecoration) -> TextDecoration {
+    public func Union(o: TextDecoration) -> TextDecoration {
         var out = self
         // The decorating box's own look wins where it draws lines.
         if !o.IsNone {

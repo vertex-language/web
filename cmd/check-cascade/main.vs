@@ -15,7 +15,7 @@ typealias Length = css.Length
 
 var failures = 0
 
-func check(_ ok: bool, _ what: string) {
+func check(ok: bool, what: string) {
     if ok {
         print("ok    \(what)")
     } else {
@@ -24,7 +24,7 @@ func check(_ ok: bool, _ what: string) {
     }
 }
 
-func styleOf(_ source: string, _ sel: string) -> cascade.ComputedStyle? {
+func styleOf(source: string, sel: string) -> cascade.ComputedStyle? {
     let doc = html.Parse(source)
     let resolver = cascade.StyleResolver(ua: cascade.UserAgentRules())
     for style in doc.ElementsByTagName("style") {
@@ -151,7 +151,7 @@ func testStyles() {
 }
 
 /// The roots a change restyles, as tag#id, for a page with sheet.
-func invalidated(_ sheet: string, _ body: string, _ change: (dom.Document) -> Void) -> [string] {
+func invalidated(sheet: string, body: string, change: (dom.Document) -> Void) -> [string] {
     let doc = dom.Document(html.Parse("<body>" + body + "</body>"))
     let resolver = cascade.StyleResolver(ua: cascade.UserAgentRules())
     resolver.Author.Add(css.Parse(sheet))
@@ -257,7 +257,7 @@ func testCustomProperties() {
 
 func testMathAndEnv() {
     print("Math functions and env()")
-    func width(_ value: string) -> Length? {
+    func width(value: string) -> Length? {
         return styleOf("<div style=\"width: \(value)\">x</div>", "div")?.Width
     }
     let cases: [(string, float32)] = [
@@ -271,7 +271,7 @@ func testMathAndEnv() {
         let got = width(v)?.Pixels ?? -999
         check(abs(got - want) < 0.05, "width: \(v) is \(want)px (got \(got))")
     }
-    func padding(_ value: string) -> Length? {
+    func padding(value: string) -> Length? {
         return styleOf("<div style=\"padding-top: \(value)\">x</div>", "div")?.PaddingTop
     }
     check(padding("env(safe-area-inset-top)")?.Pixels == 0, "env(safe-area-inset-top) is 0 where the host sets nothing")
@@ -288,7 +288,7 @@ func testColorScheme() {
     let doc = html.Parse(src)
     let resolver = cascade.StyleResolver(ua: cascade.UserAgentRules())
     for style in doc.ElementsByTagName("style") { resolver.Author.Add(css.Parse(style.InnerText())) }
-    func colorOf(_ sel: String) -> draw.Color? {
+    func colorOf(sel: String) -> draw.Color? {
         guard let n = selector.QuerySelector(sel, in: doc.Root) else { return nil }
         var chain: [html.Node] = []
         var cur: html.Node? = n
@@ -310,7 +310,7 @@ func testColorScheme() {
 
 func testMediaQueries() {
     print("Media queries")
-    func width(_ query: string) -> Length? {
+    func width(query: string) -> Length? {
         return styleOf("<style>div { width: 1px } @media \(query) { div { width: 2px } }</style><div>x</div>", "div")?.Width
     }
     // styleOf's viewport is 800 by 600.
@@ -337,7 +337,7 @@ func testSiblingFunctions() {
 
 func testAtRules() {
     print("@supports, @layer and nesting")
-    func width(_ css: string) -> Length? {
+    func width(css: string) -> Length? {
         return styleOf("<style>" + css + "</style><div class=d>x</div>", "div")?.Width
     }
     check(width("div { width: 1px } @supports (display: flex) { div { width: 2px } }") == Length.px(2), "@supports holds for a declaration the engine parses")
@@ -367,7 +367,7 @@ func testAtRules() {
     </div>
     <b class=t id=outside>none</b>
     """
-    func w(_ css: string, _ sel: string) -> Length? {
+    func w(css: string, sel: string) -> Length? {
         return styleOf("<style>" + css + "</style>" + page, sel)?.Width
     }
     let kit = "@scope ([data-p=kit]) to ([data-p]:not([data-p=kit])) { .t { width: 9px } }"
@@ -390,11 +390,11 @@ func testAtRules() {
 
 func testBackgroundPosition() {
     print("background-position")
-    func pos(_ value: string) -> (float32, float32, float32, float32)? {
+    func pos(value: string) -> (float32, float32, float32, float32)? {
         guard let b = styleOf("<style>div { background: url(x.png) " + value + " }</style><div>x</div>", "div")?.BackgroundImage else { return nil }
         return (b.PositionX, b.OffsetX, b.PositionY, b.OffsetY)
     }
-    func same(_ v: (float32, float32, float32, float32)?, _ want: (float32, float32, float32, float32)) -> bool {
+    func same(v: (float32, float32, float32, float32)?, want: (float32, float32, float32, float32)) -> bool {
         guard let v = v else { return false }
         return v.0 == want.0 && v.1 == want.1 && v.2 == want.2 && v.3 == want.3
     }

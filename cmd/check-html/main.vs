@@ -4,7 +4,7 @@ import "web/html"
 
 var failures = 0
 
-func check(_ ok: bool, _ what: string) {
+func check(ok: bool, what: string) {
     if ok {
         print("ok    \(what)")
     } else {
@@ -13,7 +13,7 @@ func check(_ ok: bool, _ what: string) {
     }
 }
 
-func same(_ got: string, _ want: string, _ what: string) {
+func same(got: string, want: string, what: string) {
     check(got == want, got == want ? what : "\(what): got \"\(got)\", want \"\(want)\"")
 }
 

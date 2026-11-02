@@ -30,7 +30,7 @@ struct SplitDecls {
 
     init() {}
 
-    init(_ decls: [css.Declaration]) {
+    init(decls: [css.Declaration]) {
         for d in decls {
             if d.Property.hasPrefix("--") {
                 customs.append(CustomDecl(name: d.Property, tokens: d.Tokens, important: d.Important))
@@ -55,26 +55,26 @@ struct SplitDecls {
     var isEmpty: bool { return longhands.isEmpty && customs.isEmpty && pending.isEmpty }
 }
 
-func overlap(_ a: [css.Prop], _ b: [css.Prop]) -> bool {
+func overlap(a: [css.Prop], b: [css.Prop]) -> bool {
     for x in a where b.contains(x) { return true }
     return false
 }
 
 /// Whether tokens call var().
-func usesVar(_ tokens: [css.Token]) -> bool {
+func usesVar(tokens: [css.Token]) -> bool {
     for t in tokens where t.Kind == .function && css.lower(t.Value) == "var" { return true }
     return false
 }
 
 /// Whether a declaration calls attr() where it is substituted like var()
 /// (CSS Values 5): anywhere but content, which reads its own.
-func usesAttr(_ d: css.Declaration) -> bool {
+func usesAttr(d: css.Declaration) -> bool {
     return d.Property != "content" && !attrNames(d.Tokens).isEmpty
 }
 
 /// Whether tokens call sibling-index() or sibling-count(), which are
 /// numbers for each element, substituted as attr() is.
-func usesSiblingFunctions(_ tokens: [css.Token]) -> bool {
+func usesSiblingFunctions(tokens: [css.Token]) -> bool {
     for t in tokens where t.Kind == .function {
         let f = css.lower(t.Value)
         if f == "sibling-index" || f == "sibling-count" { return true }
@@ -84,7 +84,7 @@ func usesSiblingFunctions(_ tokens: [css.Token]) -> bool {
 
 /// sibling-index() (1 for the first) or sibling-count(): where an
 /// element is among its parent's elements, and how many there are.
-func siblingNumber(_ node: html.Node, count: bool) -> float32 {
+func siblingNumber(node: html.Node, count: bool) -> float32 {
     guard let parent = node.Parent else { return 1 }
     var n = 0
     var index = 1
@@ -96,7 +96,7 @@ func siblingNumber(_ node: html.Node, count: bool) -> float32 {
 }
 
 /// The attributes the attr() calls in tokens name.
-func attrNames(_ tokens: [css.Token]) -> [string] {
+func attrNames(tokens: [css.Token]) -> [string] {
     var out: [string] = []
     var i = 0
     while i + 1 < tokens.count {
@@ -112,7 +112,7 @@ func attrNames(_ tokens: [css.Token]) -> [string] {
 /// string; with type(...) parsed as CSS; with a unit (px, %, em, number)
 /// a number in it. Absent, the fallback; with none, an empty string
 /// untyped and nothing typed (the declaration fails).
-func attrTokens(_ args: [css.Token], _ node: html.Node) -> [css.Token]? {
+func attrTokens(args: [css.Token], node: html.Node) -> [css.Token]? {
     guard let name = args.first, name.Kind == .ident else { return nil }
     var kind = ""
     var fallback: [css.Token]? = nil
@@ -169,7 +169,7 @@ final class CustomScope {
         self.parent = parent
     }
 
-    func lookup(_ name: string) -> [css.Token]? {
+    func lookup(name: string) -> [css.Token]? {
         var s: CustomScope? = self
         while let scope = s {
             if scope.invalid.contains(name) { return nil }
@@ -183,7 +183,7 @@ final class CustomScope {
 /// Tokens with every var() replaced by its custom property's value, or
 /// its fallback; nil where one refers to nothing and has no fallback, or
 /// the references run too deep (a cycle).
-func substitute(_ tokens: [css.Token], _ scope: CustomScope?, _ depth: int = 0, node: html.Node? = nil) -> [css.Token]? {
+func substitute(tokens: [css.Token], scope: CustomScope?, depth: int = 0, node: html.Node? = nil) -> [css.Token]? {
     if depth > 24 { return nil }
     let attrs = node != nil && (!attrNames(tokens).isEmpty || usesSiblingFunctions(tokens))
     if !usesVar(tokens) && !attrs { return tokens }
@@ -279,7 +279,7 @@ func substitute(_ tokens: [css.Token], _ scope: CustomScope?, _ depth: int = 0, 
 
 /// The scope an element's custom declarations make over its parent's,
 /// in cascade order; the parent's own where it declares none.
-func customScope(_ decls: [CustomDecl], parent: CustomScope?) -> CustomScope? {
+func customScope(decls: [CustomDecl], parent: CustomScope?) -> CustomScope? {
     if decls.isEmpty { return parent }
     let scope = CustomScope(parent: parent)
     for d in decls { scope.own[d.name] = d.tokens }
@@ -301,7 +301,7 @@ func customScope(_ decls: [CustomDecl], parent: CustomScope?) -> CustomScope? {
 
 /// A declaration that waited for var(), substituted and parsed. One
 /// whose substitution fails is `unset`, as the spec has it.
-func expand(_ d: css.Declaration, _ scope: CustomScope?, _ node: html.Node? = nil) -> [css.Longhand] {
+func expand(d: css.Declaration, scope: CustomScope?, node: html.Node? = nil) -> [css.Longhand] {
     var tokens = substitute(d.Tokens, scope, node: node) ?? [css.Token(kind: .ident, value: "unset")]
     if tokens.isEmpty { tokens = [css.Token(kind: .ident, value: "unset")] }
     let parsed = css.Longhands(css.Declaration(property: d.Property, value: css.Serialize(tokens), important: d.Important, tokens: tokens))

@@ -33,7 +33,7 @@ let dragThreshold: float32 = 4
 
 extension Page {
     /// The element a press on node drags: the nearest with draggable=true.
-    func draggableAncestor(_ node: html.Node?) -> html.Node? {
+    func draggableAncestor(node: html.Node?) -> html.Node? {
         var cur = node
         while let n = cur {
             if n.Kind == html.NodeKind.element {
@@ -47,13 +47,13 @@ extension Page {
     }
 
     /// The element under a point, for a drag's events.
-    func dragTarget(_ p: draw.Point) -> html.Node? {
+    func dragTarget(p: draw.Point) -> html.Node? {
         return hitAt(p)?.Node
     }
 
     /// A move while pressed: the drag starting, or going on. Answers
     /// whether the drag took the move.
-    func dragMoved(_ p: draw.Point) -> bool {
+    func dragMoved(p: draw.Point) -> bool {
         guard let d = dragging else { return false }
         if !d.started {
             let dx = p.X - d.start.X
@@ -89,7 +89,7 @@ extension Page {
 
     /// The release: drop where it was taken, then dragend. Answers
     /// whether a drag ended (so the release is no click).
-    func dragReleased(_ p: draw.Point) -> bool {
+    func dragReleased(p: draw.Point) -> bool {
         guard let d = dragging else { return false }
         dragging = nil
         if !d.started { return false }
@@ -109,7 +109,7 @@ extension Page {
     /// element there gets dragenter, dragover and, if it takes them,
     /// drop, its DataTransfer's Files the paths. Answers whether it took
     /// them.
-    public func DropFiles(_ paths: [string], at p: draw.Point) -> bool {
+    public func DropFiles(paths: [string], at p: draw.Point) -> bool {
         update()
         guard let t = dragTarget(p) else { return false }
         let data = dom.DataTransfer()

@@ -115,14 +115,14 @@ public final class RuleSet {
     /// Adds a stylesheet's rules, including those under @media.
     /// Adds a stylesheet's rules. `media` is a query the whole sheet is
     /// under, as a <link media> or <style media> puts it.
-    public func Add(_ sheet: css.StyleSheet, media: string = "") {
+    public func Add(sheet: css.StyleSheet, media: string = "") {
         let m: [string] = media.isEmpty ? [] : [css.lower(media)]
         addBlock(sheet.Rules, sheet.AtRules, media: m, layer: "", scope: nil)
     }
 
     /// Adds a block's rules and at-rules in the order they were written:
     /// a sheet keeps the two apart, and a later rule beats an earlier one.
-    func addBlock(_ rules: [css.Rule], _ ats: [css.AtRule], media: [string], layer: string, scope: Scope?) {
+    func addBlock(rules: [css.Rule], ats: [css.AtRule], media: [string], layer: string, scope: Scope?) {
         let rank = layer.isEmpty ? Unlayered : layerRank(layer)
         var i = 0
         var j = 0
@@ -141,7 +141,7 @@ public final class RuleSet {
     /// query (with those around it), @supports' where its condition
     /// holds, @layer's in their layer, and @keyframes by name.
     /// @container and the rest aren't read yet.
-    func addAtRules(_ ats: [css.AtRule], media: [string], layer: string, scope: Scope? = nil) {
+    func addAtRules(ats: [css.AtRule], media: [string], layer: string, scope: Scope? = nil) {
         for at in ats {
             switch at.Name {
             case "media":
@@ -199,14 +199,14 @@ public final class RuleSet {
 
     /// A layer's rank, given on first mention: the order layers are
     /// named in is the order they stand in.
-    func layerRank(_ name: string) -> int32 {
+    func layerRank(name: string) -> int32 {
         if let r = layers[name] { return r }
         let r = int32(layers.count)
         layers[name] = r
         return r
     }
 
-    func add(_ rule: css.Rule, media: [string], layer: int32, scope: Scope? = nil) {
+    func add(rule: css.Rule, media: [string], layer: int32, scope: Scope? = nil) {
         let split = SplitDecls(rule.Declarations)
         if split.isEmpty { return }
         let decls = split.longhands
@@ -240,7 +240,7 @@ public final class RuleSet {
     }
 
     /// Notes which states a selector asks about; whether it asks any.
-    func noteState(_ sel: selector.ComplexSelector) -> bool {
+    func noteState(sel: selector.ComplexSelector) -> bool {
         var uses = false
         for c in sel.Compounds {
             for p in c.Part.Pseudos {
@@ -255,7 +255,7 @@ public final class RuleSet {
         return uses
     }
 
-    func bucket(_ r: StyleRule) {
+    func bucket(r: StyleRule) {
         all.append(r)
         let last = r.Selector.Compounds[r.Selector.Compounds.count - 1].Part
         if let pe = last.PseudoElement {
@@ -271,7 +271,7 @@ public final class RuleSet {
     }
 
     /// The rules of a pseudo-element; an empty set for one with none.
-    func pseudoBuckets(_ which: string) -> Buckets? {
+    func pseudoBuckets(which: string) -> Buckets? {
         switch which {
         case "before": return before
         case "after": return after
@@ -281,7 +281,7 @@ public final class RuleSet {
     }
 
     /// Re-evaluates every @media rule for a viewport.
-    func setViewport(_ width: float32, _ height: float32, dark: bool = false) {
+    func setViewport(width: float32, height: float32, dark: bool = false) {
         if width == mediaWidth && height == mediaHeight && dark == mediaDark && PrefersReducedMotion == mediaMotion { return }
         mediaWidth = width
         mediaHeight = height
@@ -298,14 +298,14 @@ public final class RuleSet {
 
     /// The rules that could match an element, by its tag, id, classes
     /// and attributes.
-    func candidates(_ node: html.Node, into out: inout [StyleRule]) {
+    func candidates(node: html.Node, into out: inout [StyleRule]) {
         main.candidates(node, into: &out)
     }
 }
 
 extension StyleRule {
     /// Whether the rule is on, and the element is in its scope.
-    func applies(_ node: html.Node) -> bool {
+    func applies(node: html.Node) -> bool {
         if !enabled { return false }
         if let sc = scope { return sc.contains(node) }
         return true
@@ -324,7 +324,7 @@ final class Scope {
 
     /// The prelude's two parenthesized selector lists, or nil for one
     /// this engine cannot read (an @scope with no root).
-    static func parse(_ params: string) -> Scope? {
+    static func parse(params: string) -> Scope? {
         let b = [uint8](params.utf8)
         var i = 0
         func group() -> string? {
@@ -360,7 +360,7 @@ final class Scope {
 
     /// Whether node is in the scope: at or under a root, with no limit
     /// between -- the limit itself is out.
-    func contains(_ node: html.Node) -> bool {
+    func contains(node: html.Node) -> bool {
         var cur: html.Node? = node
         while let n = cur, n.Kind == html.NodeKind.element {
             for r in roots where selector.MatchComplexIn(r, n, selector.MatchContext.none) { return true }
@@ -390,7 +390,7 @@ final class Buckets {
 
     var isEmpty: bool { return count == 0 }
 
-    func add(_ r: StyleRule) {
+    func add(r: StyleRule) {
         count += 1
         let last = r.Selector.Compounds[r.Selector.Compounds.count - 1].Part
         // Read, append, write back: vsc copies the whole table for a
@@ -419,7 +419,7 @@ final class Buckets {
         }
     }
 
-    func candidates(_ node: html.Node, into out: inout [StyleRule]) {
+    func candidates(node: html.Node, into out: inout [StyleRule]) {
         for r in universal { if r.applies(node) { out.append(r) } }
         if node.Parent == nil || node.Parent?.Kind == html.NodeKind.document {
             for r in root { if r.applies(node) { out.append(r) } }
@@ -453,14 +453,14 @@ public var PrefersReducedMotion = false
 
 /// Whether a media query holds for a viewport: `screen`, `all`,
 /// `(min-width: N)`, `(max-width: N)`, `and`, `not`, and lists.
-func mediaMatches(_ query: string, width: float32, height: float32, dark: bool = false) -> bool {
+func mediaMatches(query: string, width: float32, height: float32, dark: bool = false) -> bool {
     for part in splitTop(query, on: 44) {
         if mediaClauseMatches(part, width: width, height: height, dark: dark) { return true }
     }
     return false
 }
 
-func mediaClauseMatches(_ clause: string, width: float32, height: float32, dark: bool = false) -> bool {
+func mediaClauseMatches(clause: string, width: float32, height: float32, dark: bool = false) -> bool {
     let b = [uint8](clause.utf8)
     var i = 0
     var result = true
@@ -503,7 +503,7 @@ func mediaClauseMatches(_ clause: string, width: float32, height: float32, dark:
 /// or a feature on its own (`hover`). The page is on a screen with a
 /// fine pointer that hovers, in light mode, with no forced colors, no
 /// script, and motion allowed.
-func mediaFeature(_ text: string, width: float32, height: float32, dark: bool = false) -> bool {
+func mediaFeature(text: string, width: float32, height: float32, dark: bool = false) -> bool {
     let t = trimSpaces(text)
     if t.contains("<") || t.contains(">") || (t.contains("=") && !t.contains(":")) {
         return mediaRange(t, width: width, height: height)
@@ -548,7 +548,7 @@ func mediaFeature(_ text: string, width: float32, height: float32, dark: bool = 
 
 /// The range syntax: `width >= 768px`, `768px <= width`, and the two-
 /// sided `400px <= width < 800px`.
-func mediaRange(_ text: string, width: float32, height: float32) -> bool {
+func mediaRange(text: string, width: float32, height: float32) -> bool {
     // Split into operands and operators.
     var parts: [string] = []
     var ops: [string] = []
@@ -594,7 +594,7 @@ func mediaRange(_ text: string, width: float32, height: float32) -> bool {
     return true
 }
 
-func operand(_ s: string, width: float32, height: float32) -> float32? {
+func operand(s: string, width: float32, height: float32) -> float32? {
     switch css.lower(s) {
     case "width": return width
     case "height": return height
@@ -606,7 +606,7 @@ func operand(_ s: string, width: float32, height: float32) -> float32? {
 /// A length in a media query, in CSS pixels: px, em and rem (16px, as
 /// media queries measure against the initial font size), a bare number,
 /// or calc() of those added and subtracted.
-func mediaLength(_ text: string) -> float32? {
+func mediaLength(text: string) -> float32? {
     let t = trimSpaces(text)
     let b = [uint8](t.utf8)
     if b.isEmpty { return nil }
@@ -632,7 +632,7 @@ func mediaLength(_ text: string) -> float32? {
 }
 
 /// `48rem - .02px`: terms added and subtracted, left to right.
-func calcSum(_ text: string) -> float32? {
+func calcSum(text: string) -> float32? {
     let b = [uint8](text.utf8)
     var total: float32 = 0
     var sign: float32 = 1
@@ -661,7 +661,7 @@ let Unlayered: int32 = 1 << 30
 /// later, more specific rules apply last and win. (For !important
 /// declarations layers should stand in the reverse order; they don't
 /// yet.)
-func sortRules(_ rules: inout [StyleRule]) {
+func sortRules(rules: inout [StyleRule]) {
     var i = 1
     while i < rules.count {
         let r = rules[i]
@@ -726,7 +726,7 @@ public final class StyleResolver {
     /// Whether any rule that asks about hover, focus or the press matches
     /// differently under a context than it did when the styles were last
     /// built: the question a pointer move asks before restyling.
-    public func StateMatchesChanged(_ context: selector.MatchContext) -> bool {
+    public func StateMatchesChanged(context: selector.MatchContext) -> bool {
         for e in StateTrace {
             let m = e.pseudo.isEmpty
                 ? selector.MatchComplexIn(e.rule.Selector, e.node, context)
@@ -744,7 +744,7 @@ public final class StyleResolver {
 
     /// Whether a sheet has rules for a pseudo-element: ::marker,
     /// ::selection, ::first-line or ::first-letter.
-    public func HasPseudo(_ which: string) -> bool {
+    public func HasPseudo(which: string) -> bool {
         if let b = UA.otherPseudos[which], !b.isEmpty { return true }
         if let b = Author.otherPseudos[which], !b.isEmpty { return true }
         return false
@@ -756,7 +756,7 @@ public final class StyleResolver {
 
     /// The style of an element's ::before or ::after, or nil where no
     /// rule gives it content.
-    public func ResolvePseudo(_ node: html.Node, _ which: string, parent: ComputedStyle, context: selector.MatchContext) -> ComputedStyle? {
+    public func ResolvePseudo(node: html.Node, which: string, parent: ComputedStyle, context: selector.MatchContext) -> ComputedStyle? {
         guard let uaBuckets = UA.pseudoBuckets(which), let authorBuckets = Author.pseudoBuckets(which) else { return nil }
         if uaBuckets.isEmpty && authorBuckets.isEmpty { return nil }
         var uaList: [StyleRule] = []
@@ -814,7 +814,7 @@ public final class StyleResolver {
     }
 
     /// The style of an element, given its parent's.
-    public func Resolve(_ node: html.Node, parent: ComputedStyle?, context: selector.MatchContext) -> ComputedStyle {
+    public func Resolve(node: html.Node, parent: ComputedStyle?, context: selector.MatchContext) -> ComputedStyle {
         UA.setViewport(ViewportWidth, ViewportHeight, dark: Dark)
         Author.setViewport(ViewportWidth, ViewportHeight, dark: Dark)
         let root = parent == nil
@@ -941,7 +941,7 @@ public final class StyleResolver {
         return parent
     }
 
-    func inlineDeclarations(_ node: html.Node, _ text: string) -> SplitDecls {
+    func inlineDeclarations(node: html.Node, text: string) -> SplitDecls {
         // By text: pages repeat the same style attribute on many elements.
         if let cached = inlineByText[text] {
             return cached
@@ -957,7 +957,7 @@ public final class StyleResolver {
     /// What HTML attributes say about presentation, as the standard maps
     /// them to CSS: `hidden`, `width` and `height` on images and cells,
     /// `align`, `bgcolor`, `<font color>`, `<center>`.
-    func presentationalHints(_ node: html.Node, into out: inout [css.Longhand]) {
+    func presentationalHints(node: html.Node, into out: inout [css.Longhand]) {
         let tag = node.TagName
         if node.HasAttribute("hidden") {
             out.append(css.Longhand(.display, .keyword("none")))
@@ -1025,7 +1025,7 @@ public final class StyleResolver {
         }
     }
 
-    func dimensionAttribute(_ text: string) -> css.Value? {
+    func dimensionAttribute(text: string) -> css.Value? {
         let b = [uint8](trimSpaces(text).utf8)
         if b.isEmpty { return nil }
         let n = css.parseNumber(b, 0, b.count)
@@ -1036,7 +1036,7 @@ public final class StyleResolver {
 
     /// What follows the cascade: borders without a style have no width,
     /// floats and positioned boxes are blocks, the root is a block.
-    func finish(_ s: ComputedStyle, node: html.Node, root: bool) {
+    func finish(s: ComputedStyle, node: html.Node, root: bool) {
         if !s.BorderTopStyle.Draws { s.BorderTopWidth = 0 }
         if !s.BorderRightStyle.Draws { s.BorderRightWidth = 0 }
         if !s.BorderBottomStyle.Draws { s.BorderBottomWidth = 0 }
@@ -1077,7 +1077,7 @@ struct ApplyContext {
 
 // MARK: - Applying declarations
 
-func apply(_ given: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
+func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
     // An inline-start or -end property right to left is the other side.
     var d = given
     if d.FlipsInRightToLeft && s.Direction == .rtl { d.Prop = css.MirroredProp(d.Prop) }
@@ -1736,7 +1736,7 @@ func apply(_ given: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
 }
 
 /// One to four sides as margin takes them: top, right, bottom, left.
-func fourOf<T>(_ given: [T], _ fallback: T) -> [T] {
+func fourOf<T>(given: [T], fallback: T) -> [T] {
     switch given.count {
     case 0: return [fallback, fallback, fallback, fallback]
     case 1: return [given[0], given[0], given[0], given[0]]
@@ -1747,7 +1747,7 @@ func fourOf<T>(_ given: [T], _ fallback: T) -> [T] {
 }
 
 /// A background's or a mask's repeat, size or position into its layer.
-func applyLayerKeyword(_ p: css.Prop, _ k: string, _ layer: inout BackgroundImage, _ s: ComputedStyle, _ ctx: ApplyContext) {
+func applyLayerKeyword(p: css.Prop, k: string, layer: inout BackgroundImage, s: ComputedStyle, ctx: ApplyContext) {
     switch p {
     case .backgroundRepeat, .maskRepeat:
         layer.RepeatX = k == "repeat" || k == "repeat-x" || k == "space" || k == "round"
@@ -1774,7 +1774,7 @@ func applyLayerKeyword(_ p: css.Prop, _ k: string, _ layer: inout BackgroundImag
 /// mix-blend-mode's keyword as a draw blend mode. The non-separable
 /// modes (hue, saturation, color, luminosity) and plus-lighter are not
 /// drawn and blend as normal.
-func blendModeOf(_ k: string) -> draw.BlendMode {
+func blendModeOf(k: string) -> draw.BlendMode {
     switch k {
     case "multiply": return .multiply
     case "screen": return .screen
@@ -1791,7 +1791,7 @@ func blendModeOf(_ k: string) -> draw.BlendMode {
     }
 }
 
-func keywordOf(_ v: css.Value) -> string? {
+func keywordOf(v: css.Value) -> string? {
     switch v {
     case .keyword(let k): return k
     case .auto: return "auto"
@@ -1803,7 +1803,7 @@ func keywordOf(_ v: css.Value) -> string? {
 
 /// A transform value's functions, their lengths resolved; empty for
 /// none or anything that does not resolve.
-func transformOps(_ v: css.Value, _ s: ComputedStyle, _ ctx: ApplyContext) -> [TransformOp] {
+func transformOps(v: css.Value, s: ComputedStyle, ctx: ApplyContext) -> [TransformOp] {
     guard case .transforms(let fns) = v else { return [] }
     var out: [TransformOp] = []
     for f in fns {
@@ -1822,12 +1822,12 @@ func transformOps(_ v: css.Value, _ s: ComputedStyle, _ ctx: ApplyContext) -> [T
     return out
 }
 
-func colorOf(_ v: css.Value) -> draw.Color? {
+func colorOf(v: css.Value) -> draw.Color? {
     if case .color(let c) = v { return c }
     return nil
 }
 
-func words(_ s: string) -> [string] {
+func words(s: string) -> [string] {
     var out: [string] = []
     let b = [uint8](s.utf8)
     var i = 0
@@ -1842,7 +1842,7 @@ func words(_ s: string) -> [string] {
 
 /// A length value resolved as far as the element allows: em, rem and
 /// the viewport units to pixels; percentages left for layout.
-func length(_ v: css.Value, _ s: ComputedStyle, _ ctx: ApplyContext) -> css.Length? {
+func length(v: css.Value, s: ComputedStyle, ctx: ApplyContext) -> css.Length? {
     switch v {
     case .auto: return .auto
     case .none: return .none
@@ -1894,7 +1894,7 @@ func length(_ v: css.Value, _ s: ComputedStyle, _ ctx: ApplyContext) -> css.Leng
 }
 
 /// A length that must be pixels: borders, radii, spacing.
-func pixels(_ v: css.Value, _ s: ComputedStyle, _ ctx: ApplyContext) -> float32? {
+func pixels(v: css.Value, s: ComputedStyle, ctx: ApplyContext) -> float32? {
     guard let l = length(v, s, ctx) else { return nil }
     switch l {
     case .px(let p): return p
@@ -1908,7 +1908,7 @@ func pixels(_ v: css.Value, _ s: ComputedStyle, _ ctx: ApplyContext) -> float32?
 /// `right 10px`-style edge offsets -- as each axis's fraction of the free
 /// space and offset in pixels. One value is x unless it's top or bottom;
 /// what's left out is centered.
-func backgroundPosition(_ w: [string], _ s: ComputedStyle) -> (fx: float32, ox: float32, fy: float32, oy: float32) {
+func backgroundPosition(w: [string], s: ComputedStyle) -> (fx: float32, ox: float32, fy: float32, oy: float32) {
     // Each item: which axis a keyword ties it to (0 either, 1 x, 2 y),
     // its fraction and its offset.
     var items: [(axis: int, f: float32, o: float32)] = []
@@ -1959,13 +1959,13 @@ func backgroundPosition(_ w: [string], _ s: ComputedStyle) -> (fx: float32, ox: 
     return (fx: rx.f, ox: rx.o, fy: ry.f, oy: ry.o)
 }
 
-func isPositionAmount(_ word: string) -> bool {
+func isPositionAmount(word: string) -> bool {
     guard let c = word.utf8.first else { return false }
     return (c >= 48 && c <= 57) || c == 45 || c == 43 || c == 46
 }
 
 /// A length in a position: px, em, rem; 0 for what isn't one.
-func positionLength(_ word: string, _ s: ComputedStyle) -> float32 {
+func positionLength(word: string, s: ComputedStyle) -> float32 {
     let b = [uint8](word.utf8)
     var end = 0
     while end < b.count && ((b[end] >= 48 && b[end] <= 57) || b[end] == 45 || b[end] == 43 || b[end] == 46) { end += 1 }
@@ -1979,7 +1979,7 @@ func positionLength(_ word: string, _ s: ComputedStyle) -> float32 {
     }
 }
 
-func nonNegative(_ l: css.Length) -> css.Length {
+func nonNegative(l: css.Length) -> css.Length {
     switch l {
     case .px(let v): return v < 0 ? .px(0) : l
     case .percent(let p): return p < 0 ? .percent(0) : l
@@ -1988,7 +1988,7 @@ func nonNegative(_ l: css.Length) -> css.Length {
 }
 
 /// white-space-collapse's word for a white-space value.
-func collapseOf(_ w: WhiteSpace) -> string {
+func collapseOf(w: WhiteSpace) -> string {
     switch w {
     case .pre, .preWrap: return "preserve"
     case .preLine: return "preserve-breaks"
@@ -2005,7 +2005,7 @@ func whiteSpaceOf(collapse: string, wraps: bool) -> WhiteSpace {
     }
 }
 
-func displayOf(_ k: string) -> Display {
+func displayOf(k: string) -> Display {
     switch k {
     case "none": return .none
     case "block", "flow-root": return .block
@@ -2030,7 +2030,7 @@ func displayOf(_ k: string) -> Display {
     }
 }
 
-func borderStyleOf(_ k: string) -> BorderStyle {
+func borderStyleOf(k: string) -> BorderStyle {
     switch k {
     case "hidden": return .hidden
     case "solid": return .solid
@@ -2045,7 +2045,7 @@ func borderStyleOf(_ k: string) -> BorderStyle {
     }
 }
 
-func overflowOf(_ k: string) -> Overflow {
+func overflowOf(k: string) -> Overflow {
     switch k {
     case "hidden": return .hidden
     case "scroll": return .scroll
@@ -2056,7 +2056,7 @@ func overflowOf(_ k: string) -> Overflow {
 }
 
 /// A counter property's parsed "name\u{1F}n" parts.
-func counterChanges(_ v: css.Value) -> [CounterChange] {
+func counterChanges(v: css.Value) -> [CounterChange] {
     guard case .families(let parts) = v else { return [] }
     var out: [CounterChange] = []
     for p in parts {
@@ -2069,7 +2069,7 @@ func counterChanges(_ v: css.Value) -> [CounterChange] {
     return out
 }
 
-func justifyOf(_ k: string) -> JustifyContent {
+func justifyOf(k: string) -> JustifyContent {
     switch k {
     case "flex-end", "end", "right": return .flexEnd
     case "center": return .center
@@ -2080,7 +2080,7 @@ func justifyOf(_ k: string) -> JustifyContent {
     }
 }
 
-func alignOf(_ k: string) -> AlignItems {
+func alignOf(k: string) -> AlignItems {
     switch k {
     case "flex-start", "start", "self-start": return .flexStart
     case "flex-end", "end", "self-end": return .flexEnd
@@ -2093,7 +2093,7 @@ func alignOf(_ k: string) -> AlignItems {
 
 /// Copies one property from one style to another: what `inherit` and
 /// `initial` do.
-func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
+func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     switch p {
     case .display: b.Display = a.Display
     case .position: b.Position = a.Position
@@ -2340,7 +2340,7 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
 }
 
 
-package func trimSpaces(_ s: string) -> string {
+package func trimSpaces(s: string) -> string {
     let b = [uint8](s.utf8)
     var start = 0
     var end = b.count
@@ -2350,12 +2350,12 @@ package func trimSpaces(_ s: string) -> string {
     return stringOf(b, start, end)
 }
 
-func endsWith(_ s: string, _ suffix: string) -> bool {
+func endsWith(s: string, suffix: string) -> bool {
     return s.hasSuffix(suffix)
 }
 
 /// Splits on a byte outside parentheses.
-func splitTop(_ s: string, on sep: uint8) -> [string] {
+func splitTop(s: string, on sep: uint8) -> [string] {
     var out: [string] = []
     let b = [uint8](s.utf8)
     var depth = 0
@@ -2374,7 +2374,7 @@ func splitTop(_ s: string, on sep: uint8) -> [string] {
     return out
 }
 
-func sameFamilies(_ a: [string], _ b: [string]) -> bool {
+func sameFamilies(a: [string], b: [string]) -> bool {
     if a.count != b.count { return false }
     var i = 0
     while i < a.count {
@@ -2385,7 +2385,7 @@ func sameFamilies(_ a: [string], _ b: [string]) -> bool {
 }
 
 /// A length written as a word of a keyword value: "50%", "10px", "auto".
-func lengthFromWord(_ word: string, _ s: ComputedStyle, _ ctx: ApplyContext) -> css.Length {
+func lengthFromWord(word: string, s: ComputedStyle, ctx: ApplyContext) -> css.Length {
     if word == "auto" { return .auto }
     let b = [uint8](word.utf8)
     if b.isEmpty { return .auto }
@@ -2397,7 +2397,7 @@ func lengthFromWord(_ word: string, _ s: ComputedStyle, _ ctx: ApplyContext) -> 
 }
 
 /// Tracks with their em lengths resolved against the element.
-func resolveTracks(_ tracks: [css.GridTrack], _ s: ComputedStyle, _ ctx: ApplyContext) -> [css.GridTrack] {
+func resolveTracks(tracks: [css.GridTrack], s: ComputedStyle, ctx: ApplyContext) -> [css.GridTrack] {
     return tracks
 }
 

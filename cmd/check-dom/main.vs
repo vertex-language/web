@@ -9,7 +9,7 @@ import (
 
 var failures = 0
 
-func check(_ ok: bool, _ what: string) {
+func check(ok: bool, what: string) {
     if ok {
         print("ok    \(what)")
     } else {
@@ -18,7 +18,7 @@ func check(_ ok: bool, _ what: string) {
     }
 }
 
-func load(_ source: string) -> dom.Document {
+func load(source: string) -> dom.Document {
     return dom.Document(html.Parse(source))
 }
 

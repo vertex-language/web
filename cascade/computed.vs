@@ -407,7 +407,7 @@ public final class ComputedStyle {
     }
 
     /// The color a border side paints: its own, or the text color.
-    public func BorderColor(_ side: int) -> draw.Color {
+    public func BorderColor(side: int) -> draw.Color {
         switch side {
         case 0: return BorderTopColor ?? Color
         case 1: return BorderRightColor ?? Color
@@ -460,7 +460,7 @@ public struct TransformOp {
     public var Lengths: [css.Length]
     public var Numbers: [float32]
 
-    public init(_ name: string, lengths: [css.Length] = [], numbers: [float32] = []) {
+    public init(name: string, lengths: [css.Length] = [], numbers: [float32] = []) {
         Name = name
         Lengths = lengths
         Numbers = numbers
@@ -517,7 +517,7 @@ public struct GridArea: Equatable {
 }
 
 /// The areas of grid-template-areas' rows (css's "|"-joined form).
-func gridAreasOf(_ text: string) -> (areas: [string: GridArea], columns: int32, rows: int32) {
+func gridAreasOf(text: string) -> (areas: [string: GridArea], columns: int32, rows: int32) {
     var areas: [string: GridArea] = [:]
     if text.isEmpty { return (areas: areas, columns: 0, rows: 0) }
     let rows = text.split(separator: "|").map { $0.split(separator: " ").map { string($0) } }
@@ -573,7 +573,7 @@ public struct CounterChange: Equatable {
     public var Name: string
     public var Value: int
 
-    public init(_ name: string, _ value: int) {
+    public init(name: string, value: int) {
         Name = name
         Value = value
     }

@@ -14,7 +14,7 @@ import (
 /// 1024 bytes, and UTF-8 otherwise. One of "utf-8", "utf-16le",
 /// "utf-16be" and "windows-1252" -- the labels the web uses map onto
 /// those (iso-8859-1, latin1 and ascii are windows-1252).
-public func DetectEncoding(_ bytes: [uint8], contentType: string? = nil) -> string {
+public func DetectEncoding(bytes: [uint8], contentType: string? = nil) -> string {
     if bytes.count >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF { return "utf-8" }
     if bytes.count >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE { return "utf-16le" }
     if bytes.count >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF { return "utf-16be" }
@@ -27,7 +27,7 @@ public func DetectEncoding(_ bytes: [uint8], contentType: string? = nil) -> stri
 }
 
 /// The encoding a label names, or nil for one not supported here.
-public func EncodingForLabel(_ label: string) -> string? {
+public func EncodingForLabel(label: string) -> string? {
     switch toLower(trimASCII(label)) {
     case "utf-8", "utf8", "unicode-1-1-utf-8", "unicode11utf8", "unicode20utf8", "x-unicode20utf8":
         return "utf-8"
@@ -45,7 +45,7 @@ public func EncodingForLabel(_ label: string) -> string? {
 
 /// A document's bytes as text, in the encoding DetectEncoding finds. A
 /// byte order mark is dropped; what doesn't decode becomes U+FFFD.
-public func Decode(_ bytes: [uint8], contentType: string? = nil) -> string {
+public func Decode(bytes: [uint8], contentType: string? = nil) -> string {
     switch DetectEncoding(bytes, contentType: contentType) {
     case "utf-16le": return decodeUTF16(bytes, littleEndian: true)
     case "utf-16be": return decodeUTF16(bytes, littleEndian: false)
@@ -64,7 +64,7 @@ let windows1252High: [uint32] = [
     0x90, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x9D, 0x017E, 0x0178,
 ]
 
-func decodeWindows1252(_ bytes: [uint8]) -> string {
+func decodeWindows1252(bytes: [uint8]) -> string {
     var out: [uint8] = []
     out.reserveCapacity(bytes.count + bytes.count / 8)
     for b in bytes {
@@ -77,7 +77,7 @@ func decodeWindows1252(_ bytes: [uint8]) -> string {
     return string(decoding: out, as: UTF8.self)
 }
 
-func decodeUTF16(_ bytes: [uint8], littleEndian: bool) -> string {
+func decodeUTF16(bytes: [uint8], littleEndian: bool) -> string {
     var units: [uint16] = []
     units.reserveCapacity(bytes.count / 2)
     var i = 0
@@ -93,7 +93,7 @@ func decodeUTF16(_ bytes: [uint8], littleEndian: bool) -> string {
 }
 
 /// The charset parameter of a Content-Type: `text/html; charset=UTF-8`.
-func charsetParameter(_ contentType: string) -> string? {
+func charsetParameter(contentType: string) -> string? {
     let lower = toLower(contentType)
     let b = [uint8](lower.utf8)
     let key = [uint8]("charset".utf8)
@@ -124,7 +124,7 @@ func charsetParameter(_ contentType: string) -> string? {
 /// The charset a <meta> in the first 1024 bytes names: its charset
 /// attribute, or an http-equiv content-type's content. A plain reading
 /// of HTML's prescan, enough for the <meta>s pages write.
-func prescanMeta(_ bytes: [uint8]) -> string? {
+func prescanMeta(bytes: [uint8]) -> string? {
     let n = bytes.count < 1024 ? bytes.count : 1024
     var head: [uint8] = []
     head.reserveCapacity(n)
@@ -151,7 +151,7 @@ func prescanMeta(_ bytes: [uint8]) -> string? {
     }
 }
 
-func find(_ hay: [uint8], _ needle: [uint8], from: int) -> int? {
+func find(hay: [uint8], needle: [uint8], from: int) -> int? {
     var i = from
     while i + needle.count <= hay.count {
         var k = 0
@@ -163,7 +163,7 @@ func find(_ hay: [uint8], _ needle: [uint8], from: int) -> int? {
 }
 
 /// An attribute's value in a tag's text: name=value, quoted or not.
-func attributeIn(_ tag: string, _ name: string) -> string? {
+func attributeIn(tag: string, name: string) -> string? {
     let b = [uint8](tag.utf8)
     let key = [uint8](name.utf8)
     var i = 0
@@ -190,7 +190,7 @@ func attributeIn(_ tag: string, _ name: string) -> string? {
     return nil
 }
 
-func trimASCII(_ s: string) -> string {
+func trimASCII(s: string) -> string {
     let b = [uint8](s.utf8)
     var i = 0
     var j = b.count

@@ -1,7 +1,7 @@
 package html
 
 /// Serializes an HTML Node or Document tree into an HTML string.
-public func Render(_ node: Node) -> string {
+public func Render(node: Node) -> string {
     switch node.Kind {
     case .text:
         return Escape(node.Text)

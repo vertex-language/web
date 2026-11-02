@@ -45,7 +45,7 @@ public class Node {
 
     /// Looks up an attribute value by name. Names are lowercase as the
     /// parser stores them, and a name asked for in any case is found.
-    public func GetAttribute(_ name: string) -> string? {
+    public func GetAttribute(name: string) -> string? {
         // Names asked for are nearly always lowercase already.
         var i = 0
         while i < Attributes.count {
@@ -67,7 +67,7 @@ public class Node {
     }
 
     /// Sets or updates an attribute.
-    package func SetAttribute(_ name: string, _ value: string) {
+    package func SetAttribute(name: string, value: string) {
         let lower = toLower(name)
         if lower == "class" { classCache = nil }
         var i = 0
@@ -82,7 +82,7 @@ public class Node {
     }
 
     /// Removes an attribute, if it has it.
-    package func RemoveAttribute(_ name: string) {
+    package func RemoveAttribute(name: string) {
         let lower = toLower(name)
         if lower == "class" { classCache = nil }
         var i = 0
@@ -96,7 +96,7 @@ public class Node {
     }
 
     /// Whether the element has the specified attribute.
-    public func HasAttribute(_ name: string) -> bool {
+    public func HasAttribute(name: string) -> bool {
         return GetAttribute(name) != nil
     }
 
@@ -124,7 +124,7 @@ public class Node {
     }
 
     /// Returns true if this element contains the specified class.
-    public func HasClass(_ className: string) -> bool {
+    public func HasClass(className: string) -> bool {
         for c in Classes() where c == className { return true }
         return false
     }
@@ -133,7 +133,7 @@ public class Node {
 
     /// Appends a child node to this node's children, taking it from
     /// where it was first.
-    package func AppendChild(_ child: Node) {
+    package func AppendChild(child: Node) {
         if let old = child.Parent { old.RemoveChild(child) }
         child.Parent = self
         Children.append(child)
@@ -141,7 +141,7 @@ public class Node {
 
     /// Inserts a child before another of this node's children, or last
     /// where `before` is nil or not a child.
-    package func InsertBefore(_ child: Node, _ before: Node?) {
+    package func InsertBefore(child: Node, before: Node?) {
         if let old = child.Parent { old.RemoveChild(child) }
         child.Parent = self
         if let b = before {
@@ -158,12 +158,12 @@ public class Node {
     }
 
     /// Replaces a text or comment node's text.
-    package func SetText(_ text: string) {
+    package func SetText(text: string) {
         Text = text
     }
 
     /// Removes a child node.
-    package func RemoveChild(_ child: Node) {
+    package func RemoveChild(child: Node) {
         var i = 0
         while i < Children.count {
             if Children[i].Id == child.Id {
@@ -292,12 +292,12 @@ public struct Document {
     }
 
     /// Finds the first element with the given ID.
-    public func ElementById(_ id: string) -> Node? {
+    public func ElementById(id: string) -> Node? {
         return findById(Root, id)
     }
 
     /// Finds all elements with the given tag name (case-insensitive).
-    public func ElementsByTagName(_ tag: string) -> [Node] {
+    public func ElementsByTagName(tag: string) -> [Node] {
         var results: [Node] = []
         let lower = toLower(tag)
         findTags(Root, lower, &results)
@@ -305,7 +305,7 @@ public struct Document {
     }
 
     /// Finds all elements containing the specified class name.
-    public func ElementsByClassName(_ className: string) -> [Node] {
+    public func ElementsByClassName(className: string) -> [Node] {
         var results: [Node] = []
         findClasses(Root, className, &results)
         return results
@@ -313,7 +313,7 @@ public struct Document {
 }
 
 // Internal recursive search helpers
-func findById(_ node: Node, _ id: string) -> Node? {
+func findById(node: Node, id: string) -> Node? {
     if node.Kind == NodeKind.element && node.IdAttr() == id {
         return node
     }
@@ -327,7 +327,7 @@ func findById(_ node: Node, _ id: string) -> Node? {
     return nil
 }
 
-func findTags(_ node: Node, _ lowerTag: string, _ out: inout [Node]) {
+func findTags(node: Node, lowerTag: string, out: inout [Node]) {
     if node.Kind == NodeKind.element && (lowerTag == "*" || toLower(node.TagName) == lowerTag) {
         out.append(node)
     }
@@ -338,7 +338,7 @@ func findTags(_ node: Node, _ lowerTag: string, _ out: inout [Node]) {
     }
 }
 
-func findClasses(_ node: Node, _ className: string, _ out: inout [Node]) {
+func findClasses(node: Node, className: string, out: inout [Node]) {
     if node.Kind == NodeKind.element && node.HasClass(className) {
         out.append(node)
     }

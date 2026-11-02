@@ -25,7 +25,7 @@ struct RunningTransition {
     var easing: cascade.Easing
     var started: bool = false
 
-    func valueAt(_ now: float64) -> cascade.AnimValue {
+    func valueAt(now: float64) -> cascade.AnimValue {
         if start < 0 { return from }
         let t = now - start - delay
         if t <= 0 { return from }
@@ -33,7 +33,7 @@ struct RunningTransition {
         return cascade.Interpolate(from, to, easing.Progress(float32(t / duration)))
     }
 
-    func done(_ now: float64) -> bool { return start >= 0 && now - start >= delay + duration }
+    func done(now: float64) -> bool { return start >= 0 && now - start >= delay + duration }
 }
 
 /// A @keyframes animation running on an element.
@@ -61,7 +61,7 @@ final class RunningAnimation {
     }
 
     /// The time it has been active, at now: negative in its delay.
-    func activeTime(_ now: float64) -> float64 {
+    func activeTime(now: float64) -> float64 {
         if start < 0 { return -delay }
         let at = pausedAt >= 0 ? pausedAt : now
         return at - start - delay
@@ -69,11 +69,11 @@ final class RunningAnimation {
 
     var total: float64 { return count < 0 ? 1e300 : duration * count }
 
-    func finished(_ now: float64) -> bool { return start >= 0 && activeTime(now) >= total }
+    func finished(now: float64) -> bool { return start >= 0 && activeTime(now) >= total }
 
     /// The progress through the keyframes and the iteration at now; nil
     /// where nothing applies (before or after, without a fill there).
-    func progress(_ now: float64) -> (p: float32, iteration: int64)? {
+    func progress(now: float64) -> (p: float32, iteration: int64)? {
         let t = activeTime(now)
         var iterationProgress: float64 = 0
         var iteration: int64 = 0
@@ -105,7 +105,7 @@ final class RunningAnimation {
 
     /// A property's value at progress p, with the element's own value
     /// (base) standing in for a 0% or 100% the keyframes leave out.
-    func value(_ prop: cascade.AnimatableProperty, at p: float32, base: cascade.AnimValue) -> cascade.AnimValue {
+    func value(prop: cascade.AnimatableProperty, at p: float32, base: cascade.AnimValue) -> cascade.AnimValue {
         var stops: [(offset: float32, value: cascade.AnimValue, easing: cascade.Easing?)] = []
         for f in frames {
             if let v = f.values[prop.Name] { stops.append((offset: f.offset, value: v, easing: f.easing)) }
@@ -189,7 +189,7 @@ final class Animator {
 
     /// Whether a node is still in a document: its top ancestor is the
     /// document, or the root element (whose parent the tree leaves nil).
-    func connected(_ n: html.Node) -> bool {
+    func connected(n: html.Node) -> bool {
         var top = n
         while let p = top.Parent { top = p }
         return top.Kind == html.NodeKind.document || top.TagName == "html"
@@ -197,7 +197,7 @@ final class Animator {
 
     /// Moves to a frame's time: what was waiting starts, what is done
     /// ends. Answers whether anything is still running.
-    func advance(_ time: float64) -> bool {
+    func advance(time: float64) -> bool {
         now = time
         for (_, e) in elements {
             var finished: [string] = []
@@ -243,7 +243,7 @@ final class Animator {
     }
 
     /// The cascade's hook: an element's settled style, and its parent's.
-    func apply(_ node: html.Node, _ style: cascade.ComputedStyle, _ parent: cascade.ComputedStyle?) {
+    func apply(node: html.Node, style: cascade.ComputedStyle, parent: cascade.ComputedStyle?) {
         let spec = style.Transition
         let anims = style.Animation
         let known = elements[node.Id]
@@ -286,7 +286,7 @@ final class Animator {
         if e.transitions.isEmpty && e.animations.isEmpty && !spec.Runs { elements[node.Id] = nil }
     }
 
-    func updateTransitions(_ e: ElementAnimations, _ style: cascade.ComputedStyle, first: bool, prior: cascade.ComputedStyle?) {
+    func updateTransitions(e: ElementAnimations, style: cascade.ComputedStyle, first: bool, prior: cascade.ComputedStyle?) {
         let spec = style.Transition
         var covered: [string] = []
         var i = 0
@@ -333,7 +333,7 @@ final class Animator {
         }
     }
 
-    func updateAnimations(_ e: ElementAnimations, _ style: cascade.ComputedStyle, _ parent: cascade.ComputedStyle?) {
+    func updateAnimations(e: ElementAnimations, style: cascade.ComputedStyle, parent: cascade.ComputedStyle?) {
         let spec = style.Animation
         var kept: [RunningAnimation] = []
         var i = 0
@@ -382,7 +382,7 @@ final class Animator {
         e.animations = kept
     }
 
-    func queue(_ node: html.Node, _ event: dom.Event) {
+    func queue(node: html.Node, event: dom.Event) {
         events.append((node: node, event: event))
     }
 

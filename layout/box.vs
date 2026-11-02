@@ -219,7 +219,7 @@ public final class Box {
         return false
     }
 
-    public func AppendChild(_ child: Box) {
+    public func AppendChild(child: Box) {
         child.Parent = self
         Children.append(child)
     }

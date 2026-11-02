@@ -5,11 +5,11 @@ import (
     "unicode/utf8"
 )
 
-func lower(_ s: string) -> string {
+func lower(s: string) -> string {
     return css.lower(s)
 }
 
-func trimSpaces(_ s: string) -> string {
+func trimSpaces(s: string) -> string {
     let b = [uint8](s.utf8)
     var start = 0
     var end = b.count
@@ -19,11 +19,11 @@ func trimSpaces(_ s: string) -> string {
     return stringOf(b, start, end)
 }
 
-func parseNumber(_ b: [uint8], _ start: int, _ end: int) -> float32 {
+func parseNumber(b: [uint8], start: int, end: int) -> float32 {
     return css.parseNumber(b, start, end)
 }
 
-func startsWithBytes(_ b: [uint8], _ prefix: string) -> bool {
+func startsWithBytes(b: [uint8], prefix: string) -> bool {
     let p = [uint8](prefix.utf8)
     if b.count < p.count { return false }
     var i = 0
@@ -35,7 +35,7 @@ func startsWithBytes(_ b: [uint8], _ prefix: string) -> bool {
 }
 
 /// The string bytes[start..<end] spell.
-func stringOf(_ bytes: [uint8], _ start: int, _ end: int) -> string {
+func stringOf(bytes: [uint8], start: int, end: int) -> string {
     if start >= end { return "" }
     return utf8.Decode(bytes, start, end)
 }

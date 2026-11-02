@@ -18,7 +18,7 @@ public struct TextPosition {
 }
 
 /// The nearest element at or above a node with a tag name, or nil.
-public func Ancestor(_ node: html.Node?, _ tag: string) -> html.Node? {
+public func Ancestor(node: html.Node?, tag: string) -> html.Node? {
     var cur = node
     while let n = cur {
         if n.Kind == html.NodeKind.element && n.TagName == tag { return n }
@@ -28,7 +28,7 @@ public func Ancestor(_ node: html.Node?, _ tag: string) -> html.Node? {
 }
 
 /// The link a node is inside: the nearest `<a>` or `<area>` with an href.
-public func LinkAncestor(_ node: html.Node?) -> html.Node? {
+public func LinkAncestor(node: html.Node?) -> html.Node? {
     var cur = node
     while let n = cur {
         if n.Kind == html.NodeKind.element && (n.TagName == "a" || n.TagName == "area") && n.HasAttribute("href") { return n }
@@ -39,7 +39,7 @@ public func LinkAncestor(_ node: html.Node?) -> html.Node? {
 
 /// The form control a node is inside: the nearest input, textarea,
 /// button or select.
-public func ControlAncestor(_ node: html.Node?) -> html.Node? {
+public func ControlAncestor(node: html.Node?) -> html.Node? {
     var cur = node
     while let n = cur {
         if n.Kind == html.NodeKind.element {
@@ -52,7 +52,7 @@ public func ControlAncestor(_ node: html.Node?) -> html.Node? {
 }
 
 /// Whether a is b or one of b's ancestors.
-public func Contains(_ a: html.Node, _ b: html.Node) -> bool {
+public func Contains(a: html.Node, b: html.Node) -> bool {
     var cur: html.Node? = b
     while let n = cur {
         if n.Id == a.Id { return true }
@@ -62,13 +62,13 @@ public func Contains(_ a: html.Node, _ b: html.Node) -> bool {
 }
 
 /// The elements under a node with a tag name, in document order.
-public func Descendants(_ node: html.Node, tag: string) -> [html.Node] {
+public func Descendants(node: html.Node, tag: string) -> [html.Node] {
     var out: [html.Node] = []
     collectTags(node, tag, &out)
     return out
 }
 
-func collectTags(_ node: html.Node, _ tag: string, _ out: inout [html.Node]) {
+func collectTags(node: html.Node, tag: string, out: inout [html.Node]) {
     for c in node.Children where c.Kind == html.NodeKind.element {
         if c.TagName == tag { out.append(c) }
         collectTags(c, tag, &out)
@@ -77,7 +77,7 @@ func collectTags(_ node: html.Node, _ tag: string, _ out: inout [html.Node]) {
 
 /// An ASCII-lowercased copy, for attribute values HTML compares
 /// case-insensitively.
-func lower(_ s: string) -> string {
+func lower(s: string) -> string {
     var b = [uint8](s.utf8)
     var changed = false
     var i = 0
@@ -93,7 +93,7 @@ func lower(_ s: string) -> string {
 }
 
 /// Leading and trailing ASCII whitespace removed.
-func trimSpaces(_ s: string) -> string {
+func trimSpaces(s: string) -> string {
     let b = [uint8](s.utf8)
     var start = 0
     var end = b.count
@@ -103,7 +103,7 @@ func trimSpaces(_ s: string) -> string {
     return stringOf(b, start, end)
 }
 
-func stringOf(_ bytes: [uint8], _ start: int, _ end: int) -> string {
+func stringOf(bytes: [uint8], start: int, end: int) -> string {
     if start >= end { return "" }
     return utf8.Decode(bytes, start, end)
 }

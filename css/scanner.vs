@@ -96,7 +96,7 @@ public class Scanner {
         return Token(kind: TokenKind.delim, value: string(cString: singleChar))
     }
 
-    func startsNumber(_ at: int) -> bool {
+    func startsNumber(at: int) -> bool {
         if at >= len { return false }
         let b = src[at]
         if isDigit(b) { return true }
@@ -110,7 +110,7 @@ public class Scanner {
         return false
     }
 
-    func startsIdent(_ at: int) -> bool {
+    func startsIdent(at: int) -> bool {
         if at >= len { return false }
         let b = src[at]
         if b == 45 { // '-'
@@ -256,7 +256,7 @@ public class Scanner {
         return Token(kind: TokenKind.number, value: numStr, unit: "", numberVal: numVal)
     }
 
-    func parseNumber(_ s: string) -> float32 {
+    func parseNumber(s: string) -> float32 {
         let bytes = bytesFromString(s)
         var i = 0
         var negative = false
@@ -328,11 +328,11 @@ public class Scanner {
     }
 }
 
-func isHexDigit(_ b: uint8) -> bool {
+func isHexDigit(b: uint8) -> bool {
     return isDigit(b) || (b >= 97 && b <= 102) || (b >= 65 && b <= 70)
 }
 
-func hexDigit(_ b: uint8) -> uint32 {
+func hexDigit(b: uint8) -> uint32 {
     if isDigit(b) { return uint32(b - 48) }
     if b >= 97 && b <= 102 { return uint32(b - 97 + 10) }
     return uint32(b - 65 + 10)
@@ -341,6 +341,6 @@ func hexDigit(_ b: uint8) -> uint32 {
 // appendEscaped writes an escape's code point; CSS Syntax 4.3.7 reads
 // zero as U+FFFD, as it does a surrogate or a value past U+10FFFF (which
 // utf8.Append replaces itself).
-func appendEscaped(_ out: inout [uint8], _ code: uint32) {
+func appendEscaped(out: inout [uint8], code: uint32) {
     utf8.Append(&out, code == 0 ? unicode.ReplacementCharacter : code)
 }

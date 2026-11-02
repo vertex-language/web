@@ -19,7 +19,7 @@ public struct ContainerQuery {
     public var Condition: string
 
     /// Parses `card (width > 400px)`, `(min-width: 30em) and style(--x: y)`.
-    static func parse(_ params: string) -> ContainerQuery {
+    static func parse(params: string) -> ContainerQuery {
         let t = trimSpaces(params)
         let b = [uint8](t.utf8)
         var i = 0
@@ -55,12 +55,12 @@ extension StyleResolver {
     }
 
     /// Whether every query holds for a node.
-    func containersHold(_ queries: [ContainerQuery], _ node: html.Node) -> bool {
+    func containersHold(queries: [ContainerQuery], node: html.Node) -> bool {
         for q in queries where !containerHolds(q, node) { return false }
         return true
     }
 
-    func containerHolds(_ q: ContainerQuery, _ node: html.Node) -> bool {
+    func containerHolds(q: ContainerQuery, node: html.Node) -> bool {
         // The nearest ancestor of the name that is a size container -- or,
         // for a query of style() only, any element of the name.
         let sizeQuery = conditionAsksSize(q.Condition)
@@ -79,7 +79,7 @@ extension StyleResolver {
 
     /// The nearest size container's content box above node: what cq
     /// units are of, the viewport where there is none.
-    func nearestContainerSize(_ node: html.Node) -> (w: float32, h: float32) {
+    func nearestContainerSize(node: html.Node) -> (w: float32, h: float32) {
         var p = node.Parent
         while let a = p {
             p = a.Parent
@@ -97,7 +97,7 @@ extension StyleResolver {
 
     /// Records the content boxes of the size containers once laid out;
     /// answers whether any changed, which means a restyle.
-    public func SetContainerSizes(_ sizes: [int64: ContainerSize]) -> bool {
+    public func SetContainerSizes(sizes: [int64: ContainerSize]) -> bool {
         var changed = sizes.count != ContainerSizes.count
         if !changed {
             for (id, s) in sizes {
@@ -119,7 +119,7 @@ extension StyleResolver {
 }
 
 /// Whether a condition asks about size (anything but style()).
-func conditionAsksSize(_ cond: string) -> bool {
+func conditionAsksSize(cond: string) -> bool {
     var rest = css.lower(cond)
     // Drop every style(...) and see whether a feature is left.
     while let start = indexOf(rest, "style(") {
@@ -138,7 +138,7 @@ func conditionAsksSize(_ cond: string) -> bool {
 
 /// A container condition: `not`, `and`, `or` over parenthesized
 /// features, nested conditions, and style() queries.
-func conditionHolds(_ cond: string, _ size: ContainerSize?, _ style: ComputedStyle) -> bool {
+func conditionHolds(cond: string, size: ContainerSize?, style: ComputedStyle) -> bool {
     let t = trimSpaces(cond)
     if t.isEmpty { return true }
     let lowered = css.lower(t)
@@ -181,7 +181,7 @@ func conditionHolds(_ cond: string, _ size: ContainerSize?, _ style: ComputedSty
 
 /// Splits `a and b and c` / `a or b` at the top level: the terms and the
 /// words between them.
-func splitCondition(_ t: string) -> ([string], [string]) {
+func splitCondition(t: string) -> ([string], [string]) {
     let b = [uint8](t.utf8)
     var terms: [string] = []
     var joiners: [string] = []
@@ -213,11 +213,11 @@ func splitCondition(_ t: string) -> ([string], [string]) {
 }
 
 /// `aspect-ratio > 1`, `aspect-ratio: 16/9`, `min-aspect-ratio: 1/1`.
-func aspectRatioHolds(_ text: string, _ s: ContainerSize) -> bool {
+func aspectRatioHolds(text: string, s: ContainerSize) -> bool {
     if s.Height <= 0 { return false }
     let ratio = s.Width / s.Height
     let t = css.lower(text)
-    func value(_ v: string) -> float32 {
+    func value(v: string) -> float32 {
         let parts = v.split(separator: "/").map { css.ParseNumberText(trimSpaces(string($0))) }
         if parts.count == 2 && parts[1] != 0 { return parts[0] / parts[1] }
         return parts.isEmpty ? 0 : parts[0]
@@ -247,7 +247,7 @@ func aspectRatioHolds(_ text: string, _ s: ContainerSize) -> bool {
 
 /// `style(--theme: dark)`: the container's custom property is that
 /// value; `style(--theme)`: it has one.
-func styleQueryHolds(_ text: string, _ style: ComputedStyle) -> bool {
+func styleQueryHolds(text: string, style: ComputedStyle) -> bool {
     let t = trimSpaces(text)
     let b = [uint8](t.utf8)
     var i = 0
@@ -261,7 +261,7 @@ func styleQueryHolds(_ text: string, _ style: ComputedStyle) -> bool {
 }
 
 /// Where needle first starts in s, in bytes; nil where it doesn't.
-func indexOf(_ s: string, _ needle: string) -> int? {
+func indexOf(s: string, needle: string) -> int? {
     let b = [uint8](s.utf8)
     let n = [uint8](needle.utf8)
     if n.isEmpty || n.count > b.count { return nil }
@@ -276,7 +276,7 @@ func indexOf(_ s: string, _ needle: string) -> int? {
 }
 
 /// s with every `from` replaced by `to`.
-func replaceAll(_ s: string, _ from: string, _ to: string) -> string {
+func replaceAll(s: string, from: string, to: string) -> string {
     var out = ""
     var rest = s
     while let at = indexOf(rest, from) {
@@ -288,7 +288,7 @@ func replaceAll(_ s: string, _ from: string, _ to: string) -> string {
 }
 
 /// s trimmed, with each run of white space one space.
-func collapsedSpaces(_ s: string) -> string {
+func collapsedSpaces(s: string) -> string {
     var out: [uint8] = []
     var space = false
     for c in s.utf8 {

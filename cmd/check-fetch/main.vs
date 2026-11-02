@@ -6,7 +6,7 @@ import "web/fetch"
 
 var failures = 0
 
-func check(_ ok: bool, _ what: string) {
+func check(ok: bool, what: string) {
     if ok {
         print("ok    \(what)")
     } else {
@@ -15,7 +15,7 @@ func check(_ ok: bool, _ what: string) {
     }
 }
 
-func resolves(_ url: string, _ base: string, _ want: string) {
+func resolves(url: string, base: string, want: string) {
     let got = fetch.Resolve(url, against: base)
     check(got == want, "\(url) against \(base) is \(want)" + (got == want ? "" : " (got \(got))"))
 }

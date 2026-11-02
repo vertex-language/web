@@ -54,7 +54,7 @@ final class FloatContext {
     }
 
     /// The row below every float of a side, for `clear`.
-    func clearance(_ clear: cascade.Clear, at y: float32) -> float32 {
+    func clearance(clear: cascade.Clear, at y: float32) -> float32 {
         var out = y
         for f in floats {
             let matches = clear == .both || (clear == .left && f.left) || (clear == .right && !f.left)
@@ -73,7 +73,7 @@ final class FloatContext {
     /// Places a float as high as it goes, no higher than y, between the
     /// container's edges, beside the floats already there; a float that
     /// fits beside nothing moves down past them.
-    func place(_ box: Box, left isLeft: bool, y startY: float32, containerLeft: float32, containerRight: float32) -> PlacedFloat {
+    func place(box: Box, left isLeft: bool, y startY: float32, containerLeft: float32, containerRight: float32) -> PlacedFloat {
         let w = box.OuterWidth
         let h = box.OuterHeight
         var y = startY
@@ -114,17 +114,17 @@ struct Flow {
     var fixed: Box? = nil
 
     /// The flow for a child at a corner relative to this box.
-    func at(_ dx: float32, _ dy: float32) -> Flow {
+    func at(dx: float32, dy: float32) -> Flow {
         return Flow(positioned: positioned, floats: floats, x: x + dx, y: y + dy, fixed: fixed)
     }
 
     /// The flow inside a box that is a formatting root: floats of its
     /// own, coordinates from its corner.
-    func root(_ box: Box) -> Flow {
+    func root(box: Box) -> Flow {
         return Flow(positioned: box.Style.IsPositioned ? box : positioned, floats: FloatContext(), x: 0, y: 0, fixed: fixed)
     }
 
-    func positionedBy(_ box: Box) -> Flow {
+    func positionedBy(box: Box) -> Flow {
         return Flow(positioned: box, floats: floats, x: x, y: y, fixed: fixed)
     }
 }

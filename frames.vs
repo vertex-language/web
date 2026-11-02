@@ -32,7 +32,7 @@ final class Frame {
 extension Page {
     /// What an element's frame shows: "srcdoc:" and its text, or a URL
     /// resolved against the page, or "" for an empty document.
-    func frameSource(_ node: html.Node) -> string {
+    func frameSource(node: html.Node) -> string {
         switch node.TagName {
         case "iframe":
             if let doc = node.GetAttribute("srcdoc") { return "srcdoc:" + doc }
@@ -48,7 +48,7 @@ extension Page {
     }
 
     /// Loads a frame's document from its source.
-    func loadFrame(_ f: Frame) {
+    func loadFrame(f: Frame) {
         let src = f.source
         if src.hasPrefix("srcdoc:") {
             f.page.LoadHTML(string(src.dropFirst(7)), baseURL: baseURL)
@@ -109,13 +109,13 @@ extension Page {
 
     /// The frame under a point of the view, and the point in its own
     /// view; nil where there is none.
-    func frameAt(_ p: draw.Point) -> (frame: Frame, point: draw.Point)? {
+    func frameAt(p: draw.Point) -> (frame: Frame, point: draw.Point)? {
         if frames.isEmpty { return nil }
         guard let hit = hitAt(p), let node = hit.Node, let f = frames[node.Id], let box = builder.byNode[node.Id] else { return nil }
         return framePoint(f, box, p)
     }
 
-    func framePoint(_ f: Frame, _ box: layout.Box, _ p: draw.Point) -> (frame: Frame, point: draw.Point)? {
+    func framePoint(f: Frame, box: layout.Box, p: draw.Point) -> (frame: Frame, point: draw.Point)? {
         let pos = layout.PagePosition(box)
         let local = draw.Point(p.X + scroll.X - pos.x - box.ContentX, p.Y + scroll.Y - pos.y - box.ContentY)
         if local.X < 0 || local.Y < 0 || local.X >= box.InnerWidth || local.Y >= box.InnerHeight { return nil }
@@ -125,7 +125,7 @@ extension Page {
     /// Sends an input to the frame it belongs to: the one under the
     /// pointer, the one a press started in until it is released, the one
     /// clicked into for keys. Nil where it is the page's own.
-    func forwardToFrame(_ input: Input) -> EventResult? {
+    func forwardToFrame(input: Input) -> EventResult? {
         if frames.isEmpty { return nil }
         switch input {
         case .pointerMoved(let p):
@@ -189,7 +189,7 @@ extension Page {
         }
     }
 
-    func frameResult(_ f: Frame, _ r: EventResult) -> EventResult {
+    func frameResult(f: Frame, r: EventResult) -> EventResult {
         if f.page.NeedsRepaint() { needsPaint = true }
         return r
     }

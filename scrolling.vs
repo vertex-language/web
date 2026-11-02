@@ -54,7 +54,7 @@ extension Page {
 
     /// Scrolls an element to an offset within its content, smoothly or
     /// at once.
-    func scrollElement(_ b: layout.Box, to p: draw.Point, smooth: bool) {
+    func scrollElement(b: layout.Box, to p: draw.Point, smooth: bool) {
         guard let node = b.Node else { return }
         let to = clampedScroll(b, p)
         if !smooth {
@@ -65,7 +65,7 @@ extension Page {
         scrollAnimation = ScrollAnimation(node: node.Id, from: draw.Point(b.ScrollX, b.ScrollY), to: to, start: -1, duration: smoothScrollSeconds)
     }
 
-    func clampedScroll(_ b: layout.Box, _ p: draw.Point) -> draw.Point {
+    func clampedScroll(b: layout.Box, p: draw.Point) -> draw.Point {
         let maxY = b.ContentHeight - b.InnerHeight
         let maxX = b.ContentWidth - b.InnerWidth
         return draw.Point(math.Clamp(p.X, 0, maxX > 0 ? maxX : 0), math.Clamp(p.Y, 0, maxY > 0 ? maxY : 0))
@@ -73,7 +73,7 @@ extension Page {
 
     /// Sets an element's scroll offset, and keeps it for the boxes a
     /// restyle builds; scroll fires at it.
-    func setElementScroll(_ b: layout.Box, _ p: draw.Point) {
+    func setElementScroll(b: layout.Box, p: draw.Point) {
         if b.ScrollX == p.X && b.ScrollY == p.Y { return }
         b.ScrollX = p.X
         b.ScrollY = p.Y
@@ -99,7 +99,7 @@ extension Page {
 
     /// A wheel scroll moved the page (nil) or a container: once it has
     /// been still a moment, it snaps.
-    func noteWheelScroll(_ container: layout.Box?) {
+    func noteWheelScroll(container: layout.Box?) {
         let id = container?.Node?.Id ?? 0
         let style = container?.Style ?? root?.Style
         guard let s = style, s.SnapType != "none" else { return }
@@ -108,7 +108,7 @@ extension Page {
 
     /// Moves a smooth scroll, and snaps a wheel scroll that has come to
     /// rest. Answers whether a repaint is needed.
-    func advanceScroll(_ time: float64) -> bool {
+    func advanceScroll(time: float64) -> bool {
         var moved = false
         if let p = pendingSnap, time - p.at >= snapIdleSeconds {
             pendingSnap = nil
@@ -146,7 +146,7 @@ extension Page {
     /// Where a snap container settles from where it is: the nearest snap
     /// position of the boxes in it, along the axes it snaps; with
     /// proximity, only one near enough. Nil where there is none.
-    func snapTarget(_ container: layout.Box?) -> draw.Point? {
+    func snapTarget(container: layout.Box?) -> draw.Point? {
         guard let r = root else { return nil }
         let cs = container?.Style ?? r.Style
         let words = cs.SnapType.split(separator: " ").map { string($0) }
@@ -172,7 +172,7 @@ extension Page {
         }
         var bestX: float32? = nil
         var bestY: float32? = nil
-        func consider(_ b: layout.Box) {
+        func consider(b: layout.Box) {
             let align = b.Style.SnapAlign.split(separator: " ").map { string($0) }
             if align.isEmpty || align[0] == "none" { return }
             let blockAlign = align[0]
@@ -196,7 +196,7 @@ extension Page {
         }
         // The boxes the container scrolls, not into scroll containers of
         // their own.
-        func walk(_ b: layout.Box) {
+        func walk(b: layout.Box) {
             for c in b.Children {
                 consider(c)
                 if !c.Style.IsScrollContainer { walk(c) }

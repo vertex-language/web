@@ -48,7 +48,7 @@ public final class BoxTreeBuilder {
 
     /// The box tree of a document: the root element's box, or nil for a
     /// document with no element.
-    public func Build(_ doc: html.Document) -> Box? {
+    public func Build(doc: html.Document) -> Box? {
         byNode = [:]
         HasFrames = false
         resolver.StateTrace.removeAll(keepingCapacity: true)
@@ -96,7 +96,7 @@ public final class BoxTreeBuilder {
     }
 
     /// Whether children become flex items: blocks, each of its own.
-    func place(_ made: [Box], into parent: Box) {
+    func place(made: [Box], into parent: Box) {
         if made.isEmpty { return }
         if isTableInternal(parent.Style.Display) {
             // Rows and groups hold cells and rows; loose text is dropped
@@ -171,7 +171,7 @@ public final class BoxTreeBuilder {
     }
 
     /// Wraps a run of inline-level boxes in an anonymous block.
-    func flushInline(_ run: inout [Box], into parent: Box) {
+    func flushInline(run: inout [Box], into parent: Box) {
         if run.isEmpty { return }
         var allBlank = true
         for b in run {
@@ -234,7 +234,7 @@ public final class BoxTreeBuilder {
     }
 
     /// The box for an element, with its children's boxes under it.
-    func makeBox(_ node: html.Node, style: cascade.ComputedStyle, parentStyle: cascade.ComputedStyle, listIndex: inout int) -> Box? {
+    func makeBox(node: html.Node, style: cascade.ComputedStyle, parentStyle: cascade.ComputedStyle, listIndex: inout int) -> Box? {
         let tag = node.TagName
         var box: Box
         switch tag {
@@ -413,7 +413,7 @@ public final class BoxTreeBuilder {
 
     /// A list item's marker image, where the page has it; until then the
     /// list-style-type marker stands in.
-    func markerImage(_ box: Box, _ src: string) {
+    func markerImage(box: Box, src: string) {
         if let img = Images[src], img.Width > 0 {
             box.MarkerImage = img
             box.MarkerImageSize = draw.Size(float32(img.Width), float32(img.Height))
@@ -428,7 +428,7 @@ public final class BoxTreeBuilder {
 
     /// Puts an image the page has for src in a replaced box, an SVG as
     /// shapes; answers whether there was one.
-    func showImage(_ box: Box, _ src: string?) -> bool {
+    func showImage(box: Box, src: string?) -> bool {
         guard let src = src else { return false }
         if let doc = Vectors[src] {
             box.Replaced = .svg
@@ -452,7 +452,7 @@ public final class BoxTreeBuilder {
     /// the page has, or a document. An <object> that doesn't shows its
     /// fallback content, as an ordinary element; an <embed> always takes
     /// its box.
-    func embedsSomething(_ node: html.Node) -> bool {
+    func embedsSomething(node: html.Node) -> bool {
         if node.TagName == "embed" { return true }
         if let data = node.GetAttribute("data"), Images[data] != nil || Vectors[data] != nil { return true }
         return EmbedsDocument(node)
@@ -461,7 +461,7 @@ public final class BoxTreeBuilder {
     /// ::first-letter: the block's first letter, with the punctuation
     /// before it, moved into an inline box of its own style. It looks
     /// through inline boxes to the first text, and not into blocks.
-    func splitFirstLetter(_ block: Box, _ style: cascade.ComputedStyle) {
+    func splitFirstLetter(block: Box, style: cascade.ComputedStyle) {
         var container = block
         var i = 0
         while i < container.Children.count {
@@ -518,7 +518,7 @@ public final class BoxTreeBuilder {
 
     /// Adds the boxes of ::before and ::after where rules give them
     /// content: first and last among the element's children.
-    func addPseudoElements(_ node: html.Node, _ box: Box, _ style: cascade.ComputedStyle, before: Box?) {
+    func addPseudoElements(node: html.Node, box: Box, style: cascade.ComputedStyle, before: Box?) {
         if let made = before {
             made.Parent = box
             box.Children.insert(made, at: 0)
@@ -531,7 +531,7 @@ public final class BoxTreeBuilder {
     }
 
     /// The box of ::before or ::after, if rules give it content.
-    func pseudoElement(_ node: html.Node, _ which: string, _ style: cascade.ComputedStyle) -> Box? {
+    func pseudoElement(node: html.Node, which: string, style: cascade.ComputedStyle) -> Box? {
         if !resolver.HasPseudoElements { return nil }
         guard let ps = resolver.ResolvePseudo(node, which, parent: style, context: context) else { return nil }
         if ps.Display == .none { return nil }
@@ -551,7 +551,7 @@ public final class BoxTreeBuilder {
         counterDepth -= 1
     }
 
-    func applyCounters(_ node: html.Node?, _ style: cascade.ComputedStyle) {
+    func applyCounters(node: html.Node?, style: cascade.ComputedStyle) {
         var resetsList = false
         for c in style.CounterReset {
             resetCounter(c.Name, c.Value)
@@ -565,7 +565,7 @@ public final class BoxTreeBuilder {
     }
 
     /// A new counter, or a new value for one a sibling made.
-    func resetCounter(_ name: string, _ value: int) {
+    func resetCounter(name: string, value: int) {
         var i = counters.count - 1
         while i >= 0 && counters[i].depth == counterDepth {
             if counters[i].name == name { counters[i].value = value; return }
@@ -574,7 +574,7 @@ public final class BoxTreeBuilder {
         counters.append((name: name, value: value, depth: counterDepth))
     }
 
-    func innermost(_ name: string) -> int? {
+    func innermost(name: string) -> int? {
         var i = counters.count - 1
         while i >= 0 {
             if counters[i].name == name { return i }
@@ -583,18 +583,18 @@ public final class BoxTreeBuilder {
         return nil
     }
 
-    func counterValue(_ name: string) -> int {
+    func counterValue(name: string) -> int {
         if let i = innermost(name) { return counters[i].value }
         resetCounter(name, 0)
         return 0
     }
 
-    func setCounter(_ name: string, _ value: int) {
+    func setCounter(name: string, value: int) {
         if let i = innermost(name) { counters[i].value = value } else { resetCounter(name, value) }
     }
 
     /// What `content`'s parts spell: text, attr(), counters and quotes.
-    func contentText(_ node: html.Node, _ parts: [string], quotes: [string]) -> string {
+    func contentText(node: html.Node, parts: [string], quotes: [string]) -> string {
         var text = ""
         for part in parts {
             let b = [uint8](part.utf8)
@@ -644,7 +644,7 @@ public final class BoxTreeBuilder {
 
     /// The box of a pseudo-element: its display, holding its content
     /// as text. attr() reads the element's attribute.
-    func pseudoBox(_ node: html.Node, _ style: cascade.ComputedStyle) -> Box? {
+    func pseudoBox(node: html.Node, style: cascade.ComputedStyle) -> Box? {
         guard let parts = style.Content else { return nil }
         let text = contentText(node, parts, quotes: style.Quotes)
         if style.Display == .none { return nil }
@@ -661,7 +661,7 @@ public final class BoxTreeBuilder {
 
     /// Wraps inline runs again after a pseudo-element joined the
     /// children, so blocks and inlines stay apart.
-    func regroup(_ box: Box) {
+    func regroup(box: Box) {
         var made: [Box] = []
         for c in box.Children {
             if c.IsAnonymous && c.Kind == .block && c.Node == nil && c.Style.Content == nil {
@@ -675,7 +675,7 @@ public final class BoxTreeBuilder {
         place(made, into: box)
     }
 
-    func kindFor(_ display: cascade.Display) -> BoxKind {
+    func kindFor(display: cascade.Display) -> BoxKind {
         switch display {
         case .inline: return .inline
         case .inlineBlock, .inlineFlex, .inlineGrid, .inlineTable: return .inlineBlock
@@ -685,7 +685,7 @@ public final class BoxTreeBuilder {
 
     /// Whether a box is a part of a table other than a cell: a row, a
     /// row group, a column. Text in one is not content.
-    func isTableInternal(_ display: cascade.Display) -> bool {
+    func isTableInternal(display: cascade.Display) -> bool {
         switch display {
         case .table, .inlineTable, .tableRow, .tableRowGroup, .tableHeaderGroup, .tableFooterGroup, .tableColumn, .tableColumnGroup:
             return true
@@ -694,14 +694,14 @@ public final class BoxTreeBuilder {
         }
     }
 
-    func selectedOptionText(_ select: html.Node) -> string {
+    func selectedOptionText(select: html.Node) -> string {
         var first = ""
         var found = ""
         walkOptions(select, &first, &found)
         return found.isEmpty ? first : found
     }
 
-    func walkOptions(_ n: html.Node, _ first: inout string, _ found: inout string) {
+    func walkOptions(n: html.Node, first: inout string, found: inout string) {
         for c in n.Children {
             if c.Kind == html.NodeKind.element {
                 if c.TagName == "option" {
@@ -716,7 +716,7 @@ public final class BoxTreeBuilder {
     }
 }
 
-public func IsBlank(_ s: string) -> bool {
+public func IsBlank(s: string) -> bool {
     for b in s.utf8 {
         if !isSpaceByte(b) { return false }
     }
@@ -724,7 +724,7 @@ public func IsBlank(_ s: string) -> bool {
 }
 
 /// The marker a list item shows for its list-style-type and index.
-func markerText(_ type: cascade.ListStyleType, _ index: int, node: html.Node) -> string {
+func markerText(type: cascade.ListStyleType, index: int, node: html.Node) -> string {
     switch type {
     case .none: return ""
     case .disc: return "•"
@@ -741,7 +741,7 @@ func markerText(_ type: cascade.ListStyleType, _ index: int, node: html.Node) ->
 
 /// Whether an <object> or <embed> points at an HTML document, by its
 /// type or its URL's extension: what the page shows as a nested frame.
-public func EmbedsDocument(_ node: html.Node) -> bool {
+public func EmbedsDocument(node: html.Node) -> bool {
     let type = css.lower(node.GetAttribute("type") ?? "")
     if type.contains("html") { return true }
     if !type.isEmpty { return false }
@@ -750,7 +750,7 @@ public func EmbedsDocument(_ node: html.Node) -> bool {
 }
 
 /// ASCII punctuation that ::first-letter takes with the letter.
-func isPunctuation(_ b: uint8) -> bool {
+func isPunctuation(b: uint8) -> bool {
     switch b {
     case 33, 34, 35, 37, 38, 39, 40, 41, 42, 44, 45, 46, 47, 58, 59, 63, 64, 91, 92, 93, 95, 123, 125: return true
     default: return false
