@@ -325,7 +325,11 @@ func testColors() {
     near("oklch(0.452 0.313 264.05)", draw.Color(0, 0, 255))
     near("color(srgb 0 0.5 1)", draw.Color(0, 128, 255))
     near("color(srgb-linear 0.5 0.5 0.5)", draw.Color(188, 188, 188))
-    near("color(display-p3 1 0 0)", draw.Color(255, 0, 0))
+    // Out of sRGB's gamut, colors are mapped into it (CSS Color 4):
+    // chroma lowered in OKLCH, so P3's red keeps its hue rather than
+    // clipping to sRGB's, and a far-out oklch() keeps its lightness.
+    near("color(display-p3 1 0 0)", draw.Color(255, 11, 12))
+    near("oklch(1.2 0.1 30)", draw.Color(255, 255, 255))
     near("color(display-p3 0.5 0.5 0.5)", draw.Color(128, 128, 128))
     near("color(a98-rgb 0.5 0.5 0.5)", draw.Color(128, 128, 128))
     near("color(prophoto-rgb 0.5 0.5 0.5)", draw.Color(146, 146, 146))

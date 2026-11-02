@@ -37,7 +37,7 @@ struct SplitDecls {
                 continue
             }
             let props = css.LonghandsOf(d.Property)
-            if usesVar(d.Tokens) || usesAttr(d) {
+            if usesVar(d.Tokens) || usesAttr(d) || usesSiblingFunctions(d.Tokens) {
                 if props.isEmpty { continue }
                 longhands = longhands.filter { l in l.Important != d.Important || !props.contains(l.Prop) }
                 pending = pending.filter { p in p.Important != d.Important || !overlap(css.LonghandsOf(p.Property), props) }
@@ -70,6 +70,29 @@ func usesVar(_ tokens: [css.Token]) -> bool {
 /// (CSS Values 5): anywhere but content, which reads its own.
 func usesAttr(_ d: css.Declaration) -> bool {
     return d.Property != "content" && !attrNames(d.Tokens).isEmpty
+}
+
+/// Whether tokens call sibling-index() or sibling-count(), which are
+/// numbers for each element, substituted as attr() is.
+func usesSiblingFunctions(_ tokens: [css.Token]) -> bool {
+    for t in tokens where t.Kind == .function {
+        let f = css.lower(t.Value)
+        if f == "sibling-index" || f == "sibling-count" { return true }
+    }
+    return false
+}
+
+/// sibling-index() (1 for the first) or sibling-count(): where an
+/// element is among its parent's elements, and how many there are.
+func siblingNumber(_ node: html.Node, count: bool) -> float32 {
+    guard let parent = node.Parent else { return 1 }
+    var n = 0
+    var index = 1
+    for c in parent.Children where c.Kind == html.NodeKind.element {
+        n += 1
+        if c.Id == node.Id { index = n }
+    }
+    return float32(count ? n : index)
 }
 
 /// The attributes the attr() calls in tokens name.
@@ -162,13 +185,22 @@ final class CustomScope {
 /// the references run too deep (a cycle).
 func substitute(_ tokens: [css.Token], _ scope: CustomScope?, _ depth: int = 0, node: html.Node? = nil) -> [css.Token]? {
     if depth > 24 { return nil }
-    let attrs = node != nil && !attrNames(tokens).isEmpty
+    let attrs = node != nil && (!attrNames(tokens).isEmpty || usesSiblingFunctions(tokens))
     if !usesVar(tokens) && !attrs { return tokens }
     var out: [css.Token] = []
     var i = 0
     while i < tokens.count {
         let t = tokens[i]
         let fname = t.Kind == .function ? css.lower(t.Value) : ""
+        if fname == "sibling-index" || fname == "sibling-count", let n = node {
+            var j = i + 1
+            while j < tokens.count && tokens[j].Kind != .closeParen { j += 1 }
+            var num = css.Token(kind: .number, numberVal: siblingNumber(n, count: fname == "sibling-count"))
+            num.SpaceBefore = t.SpaceBefore
+            out.append(num)
+            i = j + 1
+            continue
+        }
         if fname == "attr", let n = node {
             // attr()'s arguments, to the matching parenthesis.
             var args: [css.Token] = []

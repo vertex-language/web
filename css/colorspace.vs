@@ -508,9 +508,62 @@ func toDrawColor(_ space: string, _ sc: SpaceColor) -> draw.Color {
     case "rgb": rgb = [sc.c[0] / 255, sc.c[1] / 255, sc.c[2] / 255]
     case "hsl": rgb = hslToSRGB(sc.c)
     case "hwb": rgb = hwbToSRGB(sc.c)
-    default: rgb = fromXYZ("srgb", toXYZ(space, sc.c))
+    default: rgb = gamutMapped(toXYZ(space, sc.c))
     }
     return draw.Color(unitByte(rgb[0]), unitByte(rgb[1]), unitByte(rgb[2]), unitByte(sc.alpha))
+}
+
+/// A color (XYZ, D65) in sRGB, brought into its gamut as CSS Color 4
+/// maps colors: chroma lowered in OKLCH, keeping lightness and hue,
+/// until clipping what is left changes it less than the eye can see.
+func gamutMapped(_ xyz: [float64]) -> [float64] {
+    let rgb = fromXYZ("srgb", xyz)
+    if inUnitCube(rgb) { return rgb }
+    let origin = fromXYZ("oklch", xyz)
+    if origin[0] >= 1 { return [1, 1, 1] }
+    if origin[0] <= 0 { return [0, 0, 0] }
+    let jnd = 0.02
+    let epsilon = 0.0001
+    func srgbAt(_ chroma: float64) -> [float64] {
+        return fromXYZ("srgb", toXYZ("oklch", [origin[0], chroma, origin[2]]))
+    }
+    func clipped(_ c: [float64]) -> [float64] { return mapEach(c, clamp01) }
+    func deltaEOK(_ a: [float64], _ b: [float64]) -> float64 {
+        let la = fromXYZ("oklab", toXYZ("srgb", a))
+        let lb = fromXYZ("oklab", toXYZ("srgb", b))
+        let d0 = la[0] - lb[0]
+        let d1 = la[1] - lb[1]
+        let d2 = la[2] - lb[2]
+        return math.Sqrt(d0 * d0 + d1 * d1 + d2 * d2)
+    }
+    var clip = clipped(rgb)
+    if deltaEOK(clip, rgb) < jnd { return clip }
+    var low = 0.0
+    var high = origin[1]
+    var lowInGamut = true
+    while high - low > epsilon {
+        let chroma = (low + high) / 2
+        let current = srgbAt(chroma)
+        if lowInGamut && inUnitCube(current) {
+            low = chroma
+            continue
+        }
+        clip = clipped(current)
+        let e = deltaEOK(clip, current)
+        if e < jnd {
+            if jnd - e < epsilon { return clip }
+            lowInGamut = false
+            low = chroma
+        } else {
+            high = chroma
+        }
+    }
+    return clip
+}
+
+func inUnitCube(_ c: [float64]) -> bool {
+    let e = 0.000075
+    return c[0] >= -e && c[0] <= 1 + e && c[1] >= -e && c[1] <= 1 + e && c[2] >= -e && c[2] <= 1 + e
 }
 
 /// An sRGB color (channels 0-1) in another space.

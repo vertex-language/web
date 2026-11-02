@@ -326,6 +326,15 @@ func testMediaQueries() {
     for q in no { check(width(q) == Length.px(1), "@media \(q) doesn't") }
 }
 
+func testSiblingFunctions() {
+    print("sibling-index() and sibling-count()")
+    let page = "<style>li { width: calc(sibling-index() * 10px); height: calc(sibling-count() * 1px) }</style><ul><li>a</li><li id=b>b</li><li>c</li><!-- --><li id=d>d</li></ul>"
+    let b = styleOf(page, "#b")
+    let d = styleOf(page, "#d")
+    check(b?.Width == Length.px(20) && d?.Width == Length.px(40), "sibling-index() counts elements among siblings (got \(b?.Width) \(d?.Width))")
+    check(b?.Height == Length.px(4), "sibling-count() counts them all (got \(b?.Height))")
+}
+
 func testAtRules() {
     print("@supports, @layer and nesting")
     func width(_ css: string) -> Length? {
@@ -419,6 +428,7 @@ func main() -> int32 {
     testInvalidation()
     testCustomProperties()
     testMediaQueries()
+    testSiblingFunctions()
     testAtRules()
     testColorScheme()
     testMathAndEnv()
