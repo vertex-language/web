@@ -1553,6 +1553,26 @@ func testBorderImage() {
     check(at(147, 30) == draw.Color(0, 0, 255) && at(143, 30) == white, "border-image-outset draws outside the box (got \(at(147, 30)) \(at(143, 30)))")
     // The 40px gradient cut at 10px: the left edge is the darkest part.
     check(at(205, 30).R < 64 && at(254, 30).R > 190, "the longhands cut a gradient into slices (got \(at(205, 30)) \(at(254, 30)))")
+
+    // A raster border image fades with the box, as a gradient does.
+    view.LoadHTML("""
+    <style>body { margin: 0; background: white } div { position: absolute; top: 10px; width: 20px; height: 20px; border: 10px solid; opacity: 0.5 }</style>
+    <div style="left: 0; border-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR4nGNgYPiPhIjiAACOsw/xs6MvMwAAAABJRU5ErkJggg==) 1"></div>
+    <div style="left: 50px; border-image: linear-gradient(rgb(0,0,255), rgb(0,0,255)) 10"></div>
+    """)
+    view.Draw(into: &px, width: 260, height: 70, scale: 1)
+    let faded = at(5, 15)
+    check(faded.R > 100 && faded.R < 160 && faded.B == 255 && faded == at(55, 15),
+          "a raster border image under opacity fades as a gradient one does (got \(faded) and \(at(55, 15)))")
+
+    // An SVG image as the source: a 30px green square with a red middle.
+    view.LoadHTML("""
+    <style>body { margin: 0; background: white } div { position: absolute; top: 10px; width: 20px; height: 20px; border: 10px solid }</style>
+    <div style="left: 0; border-image: url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2230%22 height=%2230%22><rect width=%2230%22 height=%2230%22 fill=%22rgb(0,128,0)%22/><rect x=%2210%22 y=%2210%22 width=%2210%22 height=%2210%22 fill=%22rgb(255,0,0)%22/></svg>') 10"></div>
+    """)
+    view.Draw(into: &px, width: 260, height: 70, scale: 1)
+    check(at(5, 15) == draw.Color(0, 128, 0) && at(20, 30) == white && at(35, 45) == draw.Color(0, 128, 0),
+          "an SVG border image is cut and drawn round the box (got \(at(5, 15)) \(at(20, 30)) \(at(35, 45)))")
 }
 
 @MainActor

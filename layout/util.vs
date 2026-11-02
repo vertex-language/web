@@ -61,6 +61,22 @@ func roman(_ n: int, upper: bool) -> string {
     return out
 }
 
+/// A counter's number as counter() writes it in a list-style-type.
+func counterText(_ n: int, _ style: string) -> string {
+    switch style {
+    case "none": return ""
+    case "disc": return "•"
+    case "circle": return "◦"
+    case "square": return "▪"
+    case "decimal-leading-zero": return n >= 0 && n < 10 ? "0\(n)" : "\(n)"
+    case "lower-alpha", "lower-latin": return alpha(n, upper: false)
+    case "upper-alpha", "upper-latin": return alpha(n, upper: true)
+    case "lower-roman": return roman(n, upper: false)
+    case "upper-roman": return roman(n, upper: true)
+    default: return "\(n)"
+    }
+}
+
 /// Letters for list markers: a, b, ... z, aa, ab.
 func alpha(_ n: int, upper: bool) -> string {
     if n <= 0 { return "\(n)" }

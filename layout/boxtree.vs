@@ -34,6 +34,12 @@ public final class BoxTreeBuilder {
     /// Each text node's place in document order, for ordering selections.
     public var textOrder: [int64: int] = [:]
     var textCount = 0
+    /// The counters in scope, outermost first: each made by an element
+    /// at a depth, and gone when its parent's children end.
+    var counters: [(name: string, value: int, depth: int)] = []
+    var counterDepth = 0
+    /// How deep open-quote has gone, in document order.
+    var quoteDepth = 0
 
     public init(resolver: cascade.StyleResolver, context: selector.MatchContext) {
         self.resolver = resolver
@@ -48,6 +54,9 @@ public final class BoxTreeBuilder {
         resolver.StateTrace.removeAll(keepingCapacity: true)
         textOrder = [:]
         textCount = 0
+        counters = []
+        counterDepth = 0
+        quoteDepth = 0
         var rootNode: html.Node? = nil
         for c in doc.Root.Children {
             if c.Kind == html.NodeKind.element {
@@ -60,7 +69,10 @@ public final class BoxTreeBuilder {
         if style.Display == .none { return nil }
         let box = Box(kind: .block, style: style, node: root)
         byNode[root.Id] = box
+        applyCounters(root, style)
+        enterCounters()
         buildChildren(of: root, into: box, parentStyle: style)
+        leaveCounters()
         // ::backdrop: a fixed box under each top-layer element, painted
         // over the rest of the page.
         for id in TopLayer {
@@ -205,8 +217,11 @@ public final class BoxTreeBuilder {
             case .element:
                 let style = resolver.Resolve(child, parent: parentStyle, context: context)
                 if style.Display == .none { continue }
+                applyCounters(child, style)
                 if style.Display == .contents {
+                    enterCounters()
                     appendChildBoxes(of: child, parentStyle: style, into: &out)
+                    leaveCounters()
                     continue
                 }
                 if let box = makeBox(child, style: style, parentStyle: parentStyle, listIndex: &listIndex) {
@@ -355,10 +370,15 @@ public final class BoxTreeBuilder {
                     let n = int(css.parseNumber(b, 0, b.count))
                     if n > 0 { listIndex = n }
                 }
+                // The list-item counter is the item's number, unless the
+                // page counts it itself.
+                var counted = false
+                for c in style.CounterIncrement + style.CounterSet where c.Name == "list-item" { counted = true }
+                if counted { listIndex = counterValue("list-item") } else { setCounter("list-item", listIndex) }
                 box.Marker = markerText(style.ListStyleType, listIndex, node: node)
                 if resolver.HasPseudo("marker"), let ms = resolver.ResolvePseudo(node, "marker", parent: style, context: context) {
                     box.MarkerStyle = ms
-                    if let content = ms.Content { box.Marker = content.joined() }
+                    if let content = ms.Content { box.Marker = contentText(node, content, quotes: ms.Quotes) }
                 }
             }
             if resolver.HasPseudo("selection") {
@@ -371,8 +391,13 @@ public final class BoxTreeBuilder {
             // content-visibility: hidden skips the content: it isn't laid
             // out or drawn, and the box keeps its own size.
             if style.ContentVisibility != "hidden" {
+                // ::before comes first among the children, so it counts
+                // and quotes before them.
+                enterCounters()
+                let before = pseudoElement(node, "before", style)
                 buildChildren(of: node, into: box, parentStyle: style)
-                addPseudoElements(node, box, style)
+                addPseudoElements(node, box, style, before: before)
+                leaveCounters()
             }
             if resolver.HasPseudo("first-letter") && (kind == .block || kind == .inlineBlock || style.Display == .listItem) {
                 if let fl = resolver.ResolvePseudo(node, "first-letter", parent: style, context: context) {
@@ -477,36 +502,135 @@ public final class BoxTreeBuilder {
 
     /// Adds the boxes of ::before and ::after where rules give them
     /// content: first and last among the element's children.
-    func addPseudoElements(_ node: html.Node, _ box: Box, _ style: cascade.ComputedStyle) {
-        if !resolver.HasPseudoElements { return }
-        if let before = resolver.ResolvePseudo(node, "before", parent: style, context: context) {
-            if let made = pseudoBox(node, before) {
-                made.Parent = box
-                box.Children.insert(made, at: 0)
-                if box.Children.count > 1 { regroup(box) }
+    func addPseudoElements(_ node: html.Node, _ box: Box, _ style: cascade.ComputedStyle, before: Box?) {
+        if let made = before {
+            made.Parent = box
+            box.Children.insert(made, at: 0)
+            if box.Children.count > 1 { regroup(box) }
+        }
+        if let made = pseudoElement(node, "after", style) {
+            box.AppendChild(made)
+            if box.Children.count > 1 { regroup(box) }
+        }
+    }
+
+    /// The box of ::before or ::after, if rules give it content.
+    func pseudoElement(_ node: html.Node, _ which: string, _ style: cascade.ComputedStyle) -> Box? {
+        if !resolver.HasPseudoElements { return nil }
+        guard let ps = resolver.ResolvePseudo(node, which, parent: style, context: context) else { return nil }
+        if ps.Display == .none { return nil }
+        applyCounters(nil, ps)
+        return pseudoBox(node, ps)
+    }
+
+    // Counters (CSS Lists 3): an element's counter-reset makes a counter
+    // that it, what is in it, and its later siblings see; -increment and
+    // -set change the innermost of the name, making one where there is
+    // none. Lists reset list-item, and their items count it.
+
+    func enterCounters() { counterDepth += 1 }
+
+    func leaveCounters() {
+        while let last = counters.last, last.depth >= counterDepth { counters.removeLast() }
+        counterDepth -= 1
+    }
+
+    func applyCounters(_ node: html.Node?, _ style: cascade.ComputedStyle) {
+        var resetsList = false
+        for c in style.CounterReset {
+            resetCounter(c.Name, c.Value)
+            if c.Name == "list-item" { resetsList = true }
+        }
+        if let n = node, !resetsList, n.TagName == "ol" || n.TagName == "ul" || n.TagName == "menu" {
+            resetCounter("list-item", 0)
+        }
+        for c in style.CounterIncrement { setCounter(c.Name, counterValue(c.Name) + c.Value) }
+        for c in style.CounterSet { setCounter(c.Name, c.Value) }
+    }
+
+    /// A new counter, or a new value for one a sibling made.
+    func resetCounter(_ name: string, _ value: int) {
+        var i = counters.count - 1
+        while i >= 0 && counters[i].depth == counterDepth {
+            if counters[i].name == name { counters[i].value = value; return }
+            i -= 1
+        }
+        counters.append((name: name, value: value, depth: counterDepth))
+    }
+
+    func innermost(_ name: string) -> int? {
+        var i = counters.count - 1
+        while i >= 0 {
+            if counters[i].name == name { return i }
+            i -= 1
+        }
+        return nil
+    }
+
+    func counterValue(_ name: string) -> int {
+        if let i = innermost(name) { return counters[i].value }
+        resetCounter(name, 0)
+        return 0
+    }
+
+    func setCounter(_ name: string, _ value: int) {
+        if let i = innermost(name) { counters[i].value = value } else { resetCounter(name, value) }
+    }
+
+    /// What `content`'s parts spell: text, attr(), counters and quotes.
+    func contentText(_ node: html.Node, _ parts: [string], quotes: [string]) -> string {
+        var text = ""
+        for part in parts {
+            let b = [uint8](part.utf8)
+            if b.isEmpty { continue }
+            switch b[0] {
+            case 1:
+                text += node.GetAttribute(stringOf(b, 1, b.count)) ?? ""
+            case 2, 3:
+                var fields: [string] = []
+                var start = 1
+                var j = 1
+                while j <= b.count {
+                    if j == b.count || b[j] == 31 { fields.append(stringOf(b, start, j)); start = j + 1 }
+                    j += 1
+                }
+                let name = fields[0]
+                let style = fields[fields.count - 1]
+                if b[0] == 2 {
+                    text += counterText(counterValue(name), style)
+                } else {
+                    _ = counterValue(name)
+                    var all: [string] = []
+                    for c in counters where c.name == name { all.append(counterText(c.value, style)) }
+                    text += all.joined(separator: fields[1])
+                }
+            case 4:
+                let word = stringOf(b, 1, b.count)
+                if word == "open-quote" || word == "no-open-quote" {
+                    if word == "open-quote" && !quotes.isEmpty {
+                        let pair = quoteDepth < quotes.count / 2 ? quoteDepth : quotes.count / 2 - 1
+                        text += quotes[pair * 2]
+                    }
+                    quoteDepth += 1
+                } else if quoteDepth > 0 {
+                    quoteDepth -= 1
+                    if word == "close-quote" && !quotes.isEmpty {
+                        let pair = quoteDepth < quotes.count / 2 ? quoteDepth : quotes.count / 2 - 1
+                        text += quotes[pair * 2 + 1]
+                    }
+                }
+            default:
+                text += part
             }
         }
-        if let after = resolver.ResolvePseudo(node, "after", parent: style, context: context) {
-            if let made = pseudoBox(node, after) {
-                box.AppendChild(made)
-                if box.Children.count > 1 { regroup(box) }
-            }
-        }
+        return text
     }
 
     /// The box of a pseudo-element: its display, holding its content
     /// as text. attr() reads the element's attribute.
     func pseudoBox(_ node: html.Node, _ style: cascade.ComputedStyle) -> Box? {
         guard let parts = style.Content else { return nil }
-        var text = ""
-        for part in parts {
-            let b = [uint8](part.utf8)
-            if !b.isEmpty && b[0] == 1 {
-                text += node.GetAttribute(stringOf(b, 1, b.count)) ?? ""
-            } else {
-                text += part
-            }
-        }
+        let text = contentText(node, parts, quotes: style.Quotes)
         if style.Display == .none { return nil }
         let kind = kindFor(style.Display)
         let box = Box(kind: kind, style: style, node: nil)

@@ -41,6 +41,8 @@ ol { list-style-type: decimal; }
 ul, menu, dir { list-style-type: disc; }
 ol ul, ul ul, menu ul, dir ul { list-style-type: circle; }
 ol ol ul, ol ul ul, ul ol ul, ul ul ul { list-style-type: square; }
+q::before { content: open-quote; }
+q::after { content: close-quote; }
 li { display: list-item; }
 ol ol, ol ul, ul ol, ul ul, dl dl, dl ol, dl ul { margin-top: 0; margin-bottom: 0; }
 hr { color: gray; border-style: inset; border-width: 1px; margin: 0.5em auto; }

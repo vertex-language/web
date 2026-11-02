@@ -144,6 +144,10 @@ public enum Prop: int32 {
     case borderSpacing
     case tabSize
     case content
+    case counterReset
+    case counterIncrement
+    case counterSet
+    case quotes
     case fill
     case transform
     case transformOrigin
@@ -392,7 +396,8 @@ let propNames: [string: Prop] = [
     "overflow-wrap": .overflowWrap, "word-wrap": .overflowWrap, "word-break": .wordBreak, "text-overflow": .textOverflow,
     "list-style-position": .listStylePosition, "cursor": .cursor, "pointer-events": .pointerEvents, "user-select": .userSelect, "-webkit-user-select": .userSelect, "visibility": .visibility, "scrollbar-width": .scrollbarWidth,
     "border-collapse": .borderCollapse, "border-spacing": .borderSpacing, "tab-size": .tabSize,
-    "content": .content, "fill": .fill,
+    "content": .content, "counter-reset": .counterReset, "counter-increment": .counterIncrement,
+    "counter-set": .counterSet, "quotes": .quotes, "fill": .fill,
 ]
 
 /// Parses a declaration from a stylesheet into the longhands it sets.
@@ -746,8 +751,8 @@ func longhands(_ d: Declaration) -> [Longhand] {
     case "place-items":
         if let v = parseValue(.alignItems, [tokens[0]]) { set(.alignItems, v) }
         if let j = parseValue(.justifyItems, [tokens.count > 1 ? tokens[1] : tokens[0]]) { set(.justifyItems, j) }
-    case "quotes", "perspective", "perspective-origin", "backface-visibility",
-         "transform-style", "transform-box", "counter-reset", "counter-increment",
+    case "perspective", "perspective-origin", "backface-visibility",
+         "transform-style", "transform-box",
          "font-variant", "font-stretch", "font-feature-settings", "src", "unicode-range",
          "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
          "hyphens",
@@ -2224,9 +2229,39 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
         return nil
     case .borderSpacing:
         return parseLengthValue(t, allowAuto: false)
+    case .counterReset, .counterIncrement, .counterSet:
+        // Names, each with an optional number: "name\u{1F}n".
+        if kw == "none" { return .none }
+        var names: [string] = []
+        var numbers: [int] = []
+        for tok in tokens {
+            if tok.Kind == .ident {
+                names.append(tok.Value)
+                numbers.append(prop == .counterIncrement ? 1 : 0)
+            } else if tok.Kind == .number && !numbers.isEmpty {
+                numbers[numbers.count - 1] = int(tok.NumberVal)
+            } else {
+                return nil
+            }
+        }
+        var parts: [string] = []
+        var k = 0
+        while k < names.count {
+            parts.append(names[k] + "\u{1F}" + "\(numbers[k])")
+            k += 1
+        }
+        return parts.isEmpty ? nil : .families(parts)
+    case .quotes:
+        // Pairs of strings; auto is the language's, none none.
+        if kw == "none" { return .none }
+        if kw == "auto" { return .auto }
+        var parts: [string] = []
+        for tok in tokens where tok.Kind == .string { parts.append(tok.Value) }
+        return parts.isEmpty || parts.count % 2 != 0 ? nil : .families(parts)
     case .content:
-        // Strings, attr(), and the keywords; counters and quotes are
-        // read as nothing.
+        // Strings, attr(), counter() as "\u{2}name\u{1F}style",
+        // counters() as "\u{3}name\u{1F}separator\u{1F}style", and the
+        // quote keywords as "\u{4}keyword".
         if kw == "none" || kw == "normal" { return .none }
         var parts: [string] = []
         var i = 0
@@ -2240,12 +2275,32 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
                     parts.append("\u{1}" + lower(tokens[i + 1].Value))
                 }
                 i = end
+            } else if tok.Kind == .function && (lower(tok.Value) == "counter" || lower(tok.Value) == "counters") {
+                let end = closeParen(tokens, from: i + 1)
+                var names: [string] = []
+                var separator = ""
+                var k = i + 1
+                while k < end {
+                    if tokens[k].Kind == .ident { names.append(tokens[k].Value) }
+                    if tokens[k].Kind == .string { separator = tokens[k].Value }
+                    k += 1
+                }
+                if !names.isEmpty {
+                    let style = names.count > 1 ? lower(names[1]) : "decimal"
+                    if lower(tok.Value) == "counter" {
+                        parts.append("\u{2}" + names[0] + "\u{1F}" + style)
+                    } else {
+                        parts.append("\u{3}" + names[0] + "\u{1F}" + separator + "\u{1F}" + style)
+                    }
+                }
+                i = end
             } else if tok.Kind == .function {
                 i = closeParen(tokens, from: i + 1)
             } else if tok.Kind == .ident {
                 let word = lower(tok.Value)
-                if word == "open-quote" { parts.append("\u{201C}") }
-                if word == "close-quote" { parts.append("\u{201D}") }
+                if word == "open-quote" || word == "close-quote" || word == "no-open-quote" || word == "no-close-quote" {
+                    parts.append("\u{4}" + word)
+                }
             }
             i += 1
         }

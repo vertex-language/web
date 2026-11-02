@@ -1707,6 +1707,15 @@ func apply(_ given: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
     case .tabSize: if case .number(let n) = v { s.TabSize = int32(n) }
     case .content:
         if case .families(let parts) = v { s.Content = parts } else { s.Content = nil }
+    case .counterReset: s.CounterReset = counterChanges(v)
+    case .counterIncrement: s.CounterIncrement = counterChanges(v)
+    case .counterSet: s.CounterSet = counterChanges(v)
+    case .quotes:
+        switch v {
+        case .families(let parts): s.Quotes = parts
+        case .none: s.Quotes = []
+        default: s.Quotes = ["\u{201C}", "\u{201D}", "\u{2018}", "\u{2019}"]
+        }
     }
 }
 
@@ -2030,6 +2039,20 @@ func overflowOf(_ k: string) -> Overflow {
     }
 }
 
+/// A counter property's parsed "name\u{1F}n" parts.
+func counterChanges(_ v: css.Value) -> [CounterChange] {
+    guard case .families(let parts) = v else { return [] }
+    var out: [CounterChange] = []
+    for p in parts {
+        let b = [uint8](p.utf8)
+        var j = 0
+        while j < b.count && b[j] != 31 { j += 1 }
+        let n = css.parseNumber(b, j + 1, b.count)
+        out.append(CounterChange(stringOf(b, 0, j), int(n)))
+    }
+    return out
+}
+
 func justifyOf(_ k: string) -> JustifyContent {
     switch k {
     case "flex-end", "end", "right": return .flexEnd
@@ -2284,6 +2307,10 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .borderSpacing: b.BorderSpacing = a.BorderSpacing
     case .tabSize: b.TabSize = a.TabSize
     case .content: b.Content = a.Content
+    case .counterReset: b.CounterReset = a.CounterReset
+    case .counterIncrement: b.CounterIncrement = a.CounterIncrement
+    case .counterSet: b.CounterSet = a.CounterSet
+    case .quotes: b.Quotes = a.Quotes
     case .fill:
         b.Fill = a.Fill
         b.FillCurrent = a.FillCurrent

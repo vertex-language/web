@@ -869,8 +869,20 @@ final class DisplayListBuilder {
             it.Gradient = g
         } else if let img = images[s.BorderImageURL], img.Width > 0 && img.Height > 0 {
             it.Image = img
+            it.Opacity = opacity
             iw = float32(img.Width)
             ih = float32(img.Height)
+        } else if let doc = vectors[s.BorderImageURL] {
+            // An SVG image: drawn at its own size, or the area's where
+            // it has none, then cut as a raster one is.
+            it.Vector = doc.Drawing
+            it.Opacity = opacity
+            if doc.Width > 0 && doc.Height > 0 {
+                iw = doc.Width
+                ih = doc.Height
+            }
+            it.TileWidth = iw
+            it.TileHeight = ih
         } else {
             return nil
         }
@@ -1838,7 +1850,21 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
             let widths = draw.Edges(w.Top * scale, w.Right * scale, w.Bottom * scale, w.Left * scale)
             if let img = item.Image {
                 canvas.DrawNineSlice(img, into: area, slice: item.Slice, widths: widths, fill: item.SliceFill,
-                                     horizontal: item.SliceAcross, vertical: item.SliceDown)
+                                     horizontal: item.SliceAcross, vertical: item.SliceDown, opacity: item.Opacity)
+            } else if let v = item.Vector {
+                let gw = draw.RoundToInt(item.TileWidth * scale)
+                let gh = draw.RoundToInt(item.TileHeight * scale)
+                if gw <= 0 || gh <= 0 { continue }
+                var pixels = [uint8](repeating: 0, count: int(gw) * int(gh) * 4)
+                draw.WithCanvas(&pixels, width: gw, height: gh) { gc in
+                    v.Render(on: gc, into: draw.Rect(0, 0, float32(gw), float32(gh)), scale: scale,
+                             currentColor: draw.Color(0, 0, 0), fill: nil, fillNone: false)
+                }
+                let sl = item.Slice
+                canvas.DrawNineSlice(draw.Image(width: gw, height: gh, pixels: pixels), into: area,
+                                     slice: draw.Edges(sl.Top * scale, sl.Right * scale, sl.Bottom * scale, sl.Left * scale),
+                                     widths: widths, fill: item.SliceFill, horizontal: item.SliceAcross, vertical: item.SliceDown,
+                                     opacity: item.Opacity)
             } else if var g = item.Gradient {
                 // The gradient drawn at the canvas's scale, then cut as
                 // an image is.

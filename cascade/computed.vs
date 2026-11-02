@@ -298,6 +298,14 @@ public final class ComputedStyle {
     /// The `content` of a pseudo-element, as its parts: text, or
     /// "\u{1}name" for attr(name). Nil is none.
     public var Content: [string]? = nil
+    /// counter-reset, counter-increment and counter-set: the counters
+    /// the element changes, in order. Not inherited.
+    public var CounterReset: [CounterChange] = []
+    public var CounterIncrement: [CounterChange] = []
+    public var CounterSet: [CounterChange] = []
+    /// quotes: open and close strings by nesting depth. Inherited; auto
+    /// is English's curly quotes.
+    public var Quotes: [string] = ["\u{201C}", "\u{201D}", "\u{2018}", "\u{2019}"]
     /// SVG's fill, which inherits: a color, the element's color
     /// (currentColor, kept as that), or none.
     public var Fill: draw.Color = draw.Color(0, 0, 0)
@@ -336,6 +344,7 @@ public final class ComputedStyle {
         BorderCollapse = parent.BorderCollapse
         BorderSpacing = parent.BorderSpacing
         TabSize = parent.TabSize
+        Quotes = parent.Quotes
         TextShadows = parent.TextShadows
         TextWrapStyle = parent.TextWrapStyle
         ScrollbarThumb = parent.ScrollbarThumb
@@ -538,4 +547,15 @@ public enum BorderImageSide: Equatable {
 /// A layer with no image: what mask-repeat, -size and -position start from.
 func emptyLayer() -> BackgroundImage {
     return BackgroundImage(url: "")
+}
+
+/// One counter a counter-reset, -increment or -set names, and its number.
+public struct CounterChange: Equatable {
+    public var Name: string
+    public var Value: int
+
+    public init(_ name: string, _ value: int) {
+        Name = name
+        Value = value
+    }
 }

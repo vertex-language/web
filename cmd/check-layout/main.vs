@@ -357,6 +357,46 @@ func testPseudoElements() {
     check(l.rect("c")!.Height == 35 && l.rect("after")!.Y == l.rect("c")!.Y + 35, "a clearing ::after block contains the float (got \(l.rect("c")!.Height))")
 }
 
+func testCounters() {
+    print("Counters and quotes")
+    guard let l = layoutOf("""
+    <style>
+    body { margin: 0; counter-reset: sec } h2, h3, p, li { margin: 0; font-size: 10px }
+    h2 { counter-reset: sub } h2::before { counter-increment: sec; content: counter(sec) ". " }
+    h3::before { counter-increment: sub; content: counter(sec) "." counter(sub, lower-alpha) " " }
+    ol.n { list-style: none } ol.n li::before { content: counters(list-item, ".") " " }
+    .r::before { content: counter(r, upper-roman) } .r { counter-set: r 4 }
+    #s { counter-reset: n 5 } .n6::before { counter-increment: n; content: counter(n) }
+    .fr q { quotes: "«" "»" "‹" "›" }
+    ol.m li::marker { content: counter(list-item) ") " }
+    </style>
+    <h2 id=h1>A</h2><h3 id=a1>x</h3><h3 id=a2>y</h3><h2 id=h2>B</h2><h3 id=b1>z</h3>
+    <ol class=n><li id=i1>A<ol class=n><li id=i2>B</li><li id=i3>C</li></ol></li><li id=i4>D</li></ol>
+    <p class=r id=r>!</p>
+    <div id=s></div><p class=n6 id=n6>!</p>
+    <p id=q>say <q>a <q>b</q> c</q></p><p class=fr id=fq><q>a <q>b</q></q></p>
+    <ol class=m><li id=m1>x</li><li id=m2>y</li></ol>
+    """) else { check(false, "layout"); return }
+    func text(_ id: string) -> string {
+        var out = ""
+        // The first line, in the box or its first block.
+        guard var b = l.box(id) else { return out }
+        while b.Lines.isEmpty && !b.Children.isEmpty { b = b.Children[0] }
+        if !b.Lines.isEmpty { for f in b.Lines[0].Fragments { out += f.Text } }
+        return out
+    }
+    check(text("h1") == "1. A" && text("h2") == "2. B", "counter-increment on ::before numbers headings (got '\(text("h1"))' '\(text("h2"))')")
+    check(text("a1") == "1.a x" && text("a2") == "1.b y" && text("b1") == "2.a z",
+          "a counter reset by each heading numbers what follows it, in its style (got '\(text("a1"))' '\(text("a2"))' '\(text("b1"))')")
+    check(text("i1") == "1 A" && text("i2") == "1.1 B" && text("i3") == "1.2 C" && text("i4") == "2 D",
+          "counters() joins the nested list-item counters (got '\(text("i1"))' '\(text("i2"))' '\(text("i3"))' '\(text("i4"))')")
+    check(text("r") == "IV!", "counter-set sets a counter (got '\(text("r"))')")
+    check(text("n6") == "6!", "a counter reset on an element reaches its later siblings (got '\(text("n6"))')")
+    check(text("q") == "say \u{201C}a \u{2018}b\u{2019} c\u{201D}", "<q> quotes, nested ones in the inner pair (got '\(text("q"))')")
+    check(text("fq") == "«a ‹b›»", "quotes sets the pairs (got '\(text("fq"))')")
+    check(l.box("m1")!.Marker == "1) " && l.box("m2")!.Marker == "2) ", "::marker content reads list-item (got '\(l.box("m1")!.Marker)' '\(l.box("m2")!.Marker)')")
+}
+
 func testGrid() {
     print("Grid")
     guard let l = layoutOf("<body style='margin:0'><div id=g style='display:grid;grid-template-columns:100px 1fr 2fr;gap:10px;width:600px'><div id=a style='height:20px'></div><div id=b style='height:30px'></div><div id=c></div><div id=d style='height:15px'></div></div></body>") else { check(false, "layout"); return }
@@ -656,6 +696,7 @@ func main() -> int32 {
     testTables()
     testWrapping()
     testPseudoElements()
+    testCounters()
     testGrid()
     testPositioning()
     testColumns()
