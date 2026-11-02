@@ -81,6 +81,9 @@ public enum PaintKind: Equatable {
     /// viewport: drawn where it is whatever the page's scroll.
     case fixed
     case unfix
+    /// Outline, in CSS pixels, filled with Color: a rounded box's dashed,
+    /// dotted or double side.
+    case path
 }
 
 /// One thing to paint, in CSS pixels on the page: a filled rectangle, a
@@ -144,6 +147,8 @@ public struct PaintItem {
 
     /// For a mark: the element's node id.
     public var Node: int64 = 0
+    /// What a path item fills.
+    public var Outline: draw.Path = draw.Path()
 
     init(_ kind: PaintKind) {
         Kind = kind
@@ -241,6 +246,9 @@ enum PaintPhase: Equatable {
     case blockBackgrounds
     case floats
     case inlineContent
+    /// The outlines of in-flow boxes, over everything else in their
+    /// stacking context. A box painted whole draws its own.
+    case outlines
 }
 
 /// Builds the list of what to paint from a laid-out box tree, in the
@@ -540,6 +548,7 @@ final class DisplayListBuilder {
         for st in list {
             paintBox(st.box, x: st.x, y: st.y, skipBackground: skipBackground)
         }
+        paintPhase(box, .outlines, x: parentX, y: parentY, skipBackground: skipBackground, isRoot: true)
         if clips {
             items.append(PaintItem.unclip)
             // A scroll container whose content overflows shows a thin bar
@@ -561,17 +570,7 @@ final class DisplayListBuilder {
                 items.append(.fill(bar, color(s.ScrollbarThumb ?? draw.Color(0, 0, 0, 80)), draw.Radii(all: barWidth / 2)))
             }
         }
-        if s.Visibility == .visible && s.OutlineWidth > 0 && s.OutlineStyle != "none" && s.OutlineStyle != "hidden" {
-            let w = s.OutlineWidth
-            let o = s.OutlineOffset
-            let ring = draw.Rect(x - w - o, y - w - o, box.Width + 2 * (w + o), box.Height + 2 * (w + o))
-            let c = color(s.OutlineColor ?? draw.Color(0, 95, 204))
-            // auto follows the box's corners; the rest are square
-            // unless the box is round, as browsers draw them.
-            let radii = !s.HasBorderRadius ? draw.Radii.zero : draw.Radii(all: s.Radii(width: box.Width, height: box.Height).TopLeft + w + o)
-            let style = s.OutlineStyle == "auto" ? "solid" : s.OutlineStyle
-            styledRing(ring, draw.Edges(all: w), [c, c, c, c], radii, [style, style, style, style])
-        }
+        paintOutline(box, x: x, y: y)
         if blurred { items.append(PaintItem(.unlayer)) }
         if box.FixedToViewport { items.append(PaintItem(.unfix)) }
         opacity = savedOpacity
@@ -603,6 +602,7 @@ final class DisplayListBuilder {
         if phase == .blockBackgrounds && !isRoot {
             paintBackgroundAndBorderIfVisible(box, x: x, y: y, skipBackground: skipBackground)
         }
+        if phase == .outlines && !isRoot { paintOutline(box, x: x, y: y) }
         let sx = x - box.ScrollX
         let sy = y - box.ScrollY
         if box.Kind == .replaced {
@@ -646,6 +646,21 @@ final class DisplayListBuilder {
                 continue
             }
             paintPhase(child, phase, x: sx, y: sy, skipBackground: skipBackground, isRoot: false)
+        }
+    }
+
+    func paintOutline(_ box: layout.Box, x: float32, y: float32) {
+        let s = box.Style
+        if s.Visibility == .visible && s.OutlineWidth > 0 && s.OutlineStyle != "none" && s.OutlineStyle != "hidden" {
+            let w = s.OutlineWidth
+            let o = s.OutlineOffset
+            let ring = draw.Rect(x - w - o, y - w - o, box.Width + 2 * (w + o), box.Height + 2 * (w + o))
+            let c = color(s.OutlineColor ?? draw.Color(0, 95, 204))
+            // auto follows the box's corners; the rest are square
+            // unless the box is round, as browsers draw them.
+            let radii = !s.HasBorderRadius ? draw.Radii.zero : draw.Radii(all: s.Radii(width: box.Width, height: box.Height).TopLeft + w + o)
+            let style = s.OutlineStyle == "auto" ? "solid" : s.OutlineStyle
+            styledRing(ring, draw.Edges(all: w), [c, c, c, c], radii, [style, style, style, style])
         }
     }
 
@@ -921,13 +936,16 @@ final class DisplayListBuilder {
     }
 
     /// A border or outline whose sides may be dashed, dotted or double:
-    /// the solid sides as one ring, the others drawn side by side. On a
-    /// rounded box every side is drawn solid.
+    /// the solid sides as one ring, the others drawn side by side.
     func styledRing(_ rect: draw.Rect, _ widths: draw.Edges, _ colors: [draw.Color], _ radii: draw.Radii, _ styles: [string]) {
         var plain = true
         for st in styles where st != "solid" { plain = false }
-        if plain || !radii.IsZero {
+        if plain {
             items.append(.border(rect, widths, colors, radii))
+            return
+        }
+        if !radii.IsZero {
+            roundedStyledRing(rect, widths, colors, radii, styles)
             return
         }
         let w = [widths.Top, widths.Right, widths.Bottom, widths.Left]
@@ -979,6 +997,127 @@ final class DisplayListBuilder {
                 let r = horizontal ? draw.Rect(strip.X + at, strip.Y, mark, t) : draw.Rect(strip.X, strip.Y + at, t, mark)
                 items.append(.fill(r, c, st == "dotted" ? draw.Radii(all: t / 2) : draw.Radii.zero))
                 k += 1
+            }
+            side += 1
+        }
+    }
+
+    /// styledRing on a rounded box: each side drawn along its own line,
+    /// from the middle of the corner before it to the middle of the corner
+    /// after, so dashes and dots follow the curve. Dashes are three widths
+    /// long and dots one, spaced so that one sits on each corner's middle.
+    func roundedStyledRing(_ rect: draw.Rect, _ widths: draw.Edges, _ colors: [draw.Color], _ radii: draw.Radii, _ styles: [string]) {
+        let w = [widths.Top, widths.Right, widths.Bottom, widths.Left]
+        // Corners too big for the box shrink to fit, as a solid ring's do.
+        let fit = radii.Fitted(rect.Width, rect.Height)
+        let corner = [fit.TopLeft, fit.TopRight, fit.BottomRight, fit.BottomLeft]
+        // A side's line, `inset` in from the box's edge.
+        func sideLine(_ side: int, _ inset: float32) -> [draw.Point] {
+            var pts: [draw.Point] = []
+            var half = 0
+            while half < 2 {
+                let k = (side + half) % 4
+                let reach = math.Max(corner[k], inset)
+                let r = reach - inset
+                let cx = k == 0 || k == 3 ? rect.X + reach : rect.Right - reach
+                let cy = k < 2 ? rect.Y + reach : rect.Bottom - reach
+                // Corner k runs from 180 + 90k degrees to 270 + 90k; the
+                // side takes the second half of the first and the first
+                // half of the second.
+                let from = float32(math.Pi) * (float32(k) / 2 + (half == 0 ? 1.25 : 1.0))
+                var steps = int(math.Ceil(r * 0.8)) + 1
+                if steps > 32 { steps = 32 }
+                var i = 0
+                while i <= steps {
+                    let a = from + float32(math.Pi) / 4 * float32(i) / float32(steps)
+                    pts.append(draw.Point(cx + r * math.Cos(a), cy + r * math.Sin(a)))
+                    i += 1
+                }
+                half += 1
+            }
+            return pts
+        }
+        func lengths(_ pts: [draw.Point]) -> [float32] {
+            var out: [float32] = [0]
+            var i = 1
+            while i < pts.count {
+                let dx = pts[i].X - pts[i - 1].X
+                let dy = pts[i].Y - pts[i - 1].Y
+                out.append(out[i - 1] + math.Sqrt(dx * dx + dy * dy))
+                i += 1
+            }
+            return out
+        }
+        // The point `at` along the line.
+        func pointAt(_ pts: [draw.Point], _ len: [float32], _ at: float32) -> draw.Point {
+            var i = 1
+            while i < pts.count - 1 && len[i] < at { i += 1 }
+            let span = len[i] - len[i - 1]
+            let f = span > 0 ? (at - len[i - 1]) / span : 0
+            return draw.Point(pts[i - 1].X + (pts[i].X - pts[i - 1].X) * f, pts[i - 1].Y + (pts[i].Y - pts[i - 1].Y) * f)
+        }
+        // The stretch of the line from `a` to `b`, stroked `width` wide.
+        func stroke(_ pts: [draw.Point], _ len: [float32], _ a: float32, _ b: float32, _ width: float32, _ c: draw.Color) {
+            var line = draw.Path()
+            let p0 = pointAt(pts, len, a)
+            line.MoveTo(p0.X, p0.Y)
+            var i = 0
+            while i < pts.count {
+                if len[i] > a && len[i] < b { line.LineTo(pts[i].X, pts[i].Y) }
+                i += 1
+            }
+            let p1 = pointAt(pts, len, b)
+            line.LineTo(p1.X, p1.Y)
+            var it = PaintItem(.path)
+            it.Outline = line.Stroked(draw.Stroke(width: width))
+            it.Color = c
+            items.append(it)
+        }
+        var side = 0
+        while side < 4 {
+            let st = styles[side]
+            let t = w[side]
+            let c = colors[side]
+            if t <= 0 { side += 1; continue }
+            // An opaque side runs half a pixel into the next, so no seam
+            // shows where their smoothed ends meet.
+            let over: float32 = c.A == 255 ? 0.5 : 0
+            switch st {
+            case "double":
+                for inset in [t / 6, t * 5 / 6] {
+                    let pts = sideLine(side, inset)
+                    let len = lengths(pts)
+                    stroke(pts, len, -over, len[len.count - 1] + over, t / 3, c)
+                }
+            case "dashed", "dotted":
+                let pts = sideLine(side, t / 2)
+                let len = lengths(pts)
+                let total = len[len.count - 1]
+                let dotted = st == "dotted"
+                let mark = dotted ? t : t * 3
+                var n = int(math.Round(total / (2 * mark)))
+                if n < 1 { n = 1 }
+                let period = total / float32(n)
+                // The mark on the corner after belongs to the next side
+                // when it is drawn the same way.
+                let last = styles[(side + 1) % 4] == st && w[(side + 1) % 4] > 0 ? n - 1 : n
+                var k = 0
+                while k <= last {
+                    let at = float32(k) * period
+                    if dotted {
+                        let p = pointAt(pts, len, at)
+                        items.append(.fill(draw.Rect(p.X - t / 2, p.Y - t / 2, t, t), c, draw.Radii(all: t / 2)))
+                    } else {
+                        let a = math.Max(at - mark / 2, -over)
+                        let b = math.Min(at + mark / 2, total + over)
+                        if b > a { stroke(pts, len, a, b, t, c) }
+                    }
+                    k += 1
+                }
+            default:
+                let pts = sideLine(side, t / 2)
+                let len = lengths(pts)
+                stroke(pts, len, -over, len[len.count - 1] + over, t, c)
             }
             side += 1
         }
@@ -1757,6 +1896,14 @@ public func Rasterize(_ items: [PaintItem], on base: draw.Canvas, scale: float32
             if let saved = clips.popLast() {
                 canvas.Clip = saved
             }
+        case .path:
+            var outline = item.Outline
+            var i = 0
+            while i < outline.Points.count {
+                outline.Points[i] = draw.Point(outline.Points[i].X * scale + dx, outline.Points[i].Y * scale + dy)
+                i += 1
+            }
+            canvas.FillPath(outline, item.Color)
         case .vector:
             guard let v = item.Vector else { continue }
             let r = item.Rect

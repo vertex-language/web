@@ -808,8 +808,52 @@ func testDecorations() {
     // the first quarter turn: green all over.
     check(at(245, 5) == draw.Color(0, 255, 0) && at(155, 95) == draw.Color(0, 255, 0) && at(200, 50) == draw.Color(0, 255, 0),
           "from and at move its start and centre (got \(at(245, 5)) \(at(155, 95)))")
+
     check(at(5, 200) == draw.Color(255, 0, 0) && at(15, 200) == draw.Color(0, 0, 255) && at(45, 200) == draw.Color(255, 0, 0) && at(95, 200) == draw.Color(0, 0, 255),
           "repeating-linear-gradient repeats its stops (got \(at(45, 200)) \(at(95, 200)))")
+
+    // Rounded dashed, dotted and double borders follow the corner.
+    view.LoadHTML("""
+    <style>body { margin: 0; background: white } div { position: absolute; top: 0; width: 88px; height: 88px; border-radius: 30px }</style>
+    <div style="left: 0; border: 6px dashed rgb(0, 0, 0)"></div>
+    <div style="left: 120px; border: 6px dotted rgb(0, 0, 0)"></div>
+    <div style="left: 240px; border: 9px double rgb(0, 0, 0)"></div>
+    """)
+    view.Draw(into: &px, width: 400, height: 300, scale: 1)
+    // Points on the top-left corner's arc, `inset` in from the edge.
+    func arc(_ left: float32, _ inset: float32, _ degrees: float32) -> draw.Color {
+        let a = degrees * float32(math.Pi) / 180
+        return at(int32(left + 30 + (30 - inset) * math.Cos(a)), int32(30 + (30 - inset) * math.Sin(a)))
+    }
+    // Black, or nearly: the curve's edges are smoothed.
+    func dark(_ c: draw.Color) -> bool { return c.R < 60 && c.G < 60 && c.B < 60 }
+    func marked(_ left: float32, _ inset: float32) -> (ink: int, paper: int) {
+        var ink = 0
+        var paper = 0
+        var d: float32 = 182
+        while d < 268 {
+            let c = arc(left, inset, d)
+            if dark(c) { ink += 1 } else if c == draw.Color(255, 255, 255) { paper += 1 }
+            d += 2
+        }
+        return (ink, paper)
+    }
+    let dashed = marked(0, 3)
+    check(dark(arc(0, 3, 225)) && dashed.ink > 5 && dashed.paper > 5, "a rounded dashed border has a dash on the corner and gaps round it (\(dashed))")
+    let dots = marked(120, 3)
+    check(dark(arc(120, 3, 225)) && dots.ink > 3 && dots.paper > 5, "a rounded dotted border has dots round the corner (\(dots))")
+    check(count(black, 150, 1, 210, 2) < 50, "and along its sides")
+    check(dark(arc(240, 1.5, 225)) && dark(arc(240, 7.5, 225)) && arc(240, 4.5, 225) == draw.Color(255, 255, 255),
+          "a rounded double border is two lines round the corner (got \(arc(240, 1.5, 225)) \(arc(240, 4.5, 225)) \(arc(240, 7.5, 225)))")
+
+    // Outlines on boxes in the flow, not only on boxes painted whole.
+    view.LoadHTML("""
+    <style>body { margin: 20px; background: white } div { width: 60px; height: 20px; outline: 3px solid rgb(255, 0, 0) }
+    section { display: flex; margin-top: 20px }</style>
+    <div></div><section><div></div></section>
+    """)
+    view.Draw(into: &px, width: 400, height: 300, scale: 1)
+    check(at(18, 30) == draw.Color(255, 0, 0) && at(18, 70) == draw.Color(255, 0, 0), "an in-flow block and a flex item draw their outlines (got \(at(18, 30)) \(at(18, 70)))")
 }
 
 @MainActor

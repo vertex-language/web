@@ -316,9 +316,12 @@ func testMediaQueries() {
     // styleOf's viewport is 800 by 600.
     let yes = ["(width >= 768px)", "(width>=48rem)", "(min-width: 40em)", "screen and (width <= calc(64rem - .02px))",
                "(400px <= width < 900px)", "(height > 500px)", "(hover: hover)", "(prefers-reduced-motion: no-preference)",
-               "(forced-colors: none)", "not print", "(max-width: 400px), (min-width: 700px)", "(aspect-ratio > 1)"]
+               "(forced-colors: none)", "not print", "(max-width: 400px), (min-width: 700px)", "(aspect-ratio > 1)",
+               "(dynamic-range: standard)", "(scripting: none)", "(prefers-reduced-transparency: no-preference)",
+               "(inverted-colors: none)", "(update: fast)", "(update)", "(color-gamut: srgb)"]
     let no = ["(width >= 1012px)", "(width<768px)", "(forced-colors: active)", "(prefers-color-scheme: dark)",
-              "(prefers-reduced-motion: reduce)", "(prefers-reduced-motion)", "print", "(900px <= width)", "(prefers-contrast: more)", "(scripting: enabled)"]
+              "(prefers-reduced-motion: reduce)", "(prefers-reduced-motion)", "print", "(900px <= width)", "(prefers-contrast: more)", "(scripting: enabled)",
+              "(dynamic-range: high)", "(prefers-reduced-transparency: reduce)", "(inverted-colors: inverted)", "(update: slow)"]
     for q in yes { check(width(q) == Length.px(2), "@media \(q) holds") }
     for q in no { check(width(q) == Length.px(1), "@media \(q) doesn't") }
 }
