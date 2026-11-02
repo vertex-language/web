@@ -33,10 +33,10 @@ let unappliedNames: [string] = [
     "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
     "hyphens",
     "writing-mode",
-    "caption-side", "empty-cells", "speak", "font-display",
+    "speak", "font-display",
     "text-size-adjust", "-webkit-text-size-adjust",
     "-webkit-tap-highlight-color",
-    "list-style-image", "font-kerning", "text-align-last", "text-justify",
+    "font-kerning", "text-align-last", "text-justify",
     "font-variant-numeric", "font-variant-ligatures", "font-optical-sizing",
 ]
 

@@ -1027,10 +1027,18 @@ extension Layout {
         if isFirst && !box.Marker.isEmpty {
             var m = Fragment(kind: .marker, box: box, owner: box)
             m.Text = box.Marker
-            m.Run = (box.MarkerStyle?.Face ?? strutFace).Shape(box.Marker)
-            m.Width = m.Run.Width
-            m.Ascent = strutAscent + strutHalf
-            m.Height = strutLH
+            if box.MarkerImage != nil || box.MarkerVector != nil {
+                // An image marker sits on the baseline, a space from the
+                // text.
+                m.Width = box.MarkerImageSize.Width + strutFace.SpaceWidth
+                m.Ascent = box.MarkerImageSize.Height
+                m.Height = box.MarkerImageSize.Height
+            } else {
+                m.Run = (box.MarkerStyle?.Face ?? strutFace).Shape(box.Marker)
+                m.Width = m.Run.Width
+                m.Ascent = strutAscent + strutHalf
+                m.Height = strutLH
+            }
             m.Y = line.Y + baseline - m.Ascent
             if rtl {
                 // Right to left, the marker is at the right: outside,

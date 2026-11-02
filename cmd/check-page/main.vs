@@ -846,6 +846,25 @@ func testDecorations() {
     check(dark(arc(240, 1.5, 225)) && dark(arc(240, 7.5, 225)) && arc(240, 4.5, 225) == draw.Color(255, 255, 255),
           "a rounded double border is two lines round the corner (got \(arc(240, 1.5, 225)) \(arc(240, 4.5, 225)) \(arc(240, 7.5, 225)))")
 
+    // list-style-image: a blue 4px PNG, and an SVG red square.
+    view.LoadHTML("""
+    <style>body { margin: 0; background: white; font: 16px Helvetica; color: white } ul { margin: 0; padding-left: 40px }</style>
+    <ul style="list-style-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR4nGNgYPiPhIjiAACOsw/xs6MvMwAAAABJRU5ErkJggg==)"><li>a</li></ul>
+    <ul style="list: none; list-style: square outside url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%226%22 height=%226%22><rect width=%226%22 height=%226%22 fill=%22rgb(255,0,0)%22/></svg>')"><li>b</li></ul>
+    """)
+    view.Draw(into: &px, width: 400, height: 300, scale: 1)
+    check(count(draw.Color(0, 0, 255), 20, 0, 40, 20) == 16, "list-style-image draws the image as the marker (got \(count(draw.Color(0, 0, 255), 20, 0, 40, 20)) pixels)")
+    check(count(draw.Color(255, 0, 0), 20, 18, 40, 40) >= 20, "an SVG list image, from the list-style shorthand (got \(count(draw.Color(255, 0, 0), 20, 18, 40, 40)))")
+
+    // empty-cells: hide leaves an empty cell undrawn.
+    view.LoadHTML("""
+    <style>body { margin: 0; background: white } table { empty-cells: hide; border-spacing: 0 } td { width: 20px; height: 20px; padding: 0; background: rgb(0, 0, 255) }</style>
+    <table><tr><td>x</td><td> </td><td style="empty-cells: show"></td></tr></table>
+    """)
+    view.Draw(into: &px, width: 400, height: 300, scale: 1)
+    check(at(2, 2) == draw.Color(0, 0, 255) && at(30, 10) == draw.Color(255, 255, 255) && at(50, 10) == draw.Color(0, 0, 255),
+          "empty-cells: hide leaves an empty cell's background undrawn (got \(at(2, 2)) \(at(30, 10)) \(at(50, 10)))")
+
     // Outlines on boxes in the flow, not only on boxes painted whole.
     view.LoadHTML("""
     <style>body { margin: 20px; background: white } div { width: 60px; height: 20px; outline: 3px solid rgb(255, 0, 0) }

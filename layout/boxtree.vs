@@ -376,6 +376,7 @@ public final class BoxTreeBuilder {
                 for c in style.CounterIncrement + style.CounterSet where c.Name == "list-item" { counted = true }
                 if counted { listIndex = counterValue("list-item") } else { setCounter("list-item", listIndex) }
                 box.Marker = markerText(style.ListStyleType, listIndex, node: node)
+                if !style.ListStyleImage.isEmpty { markerImage(box, style.ListStyleImage) }
                 if resolver.HasPseudo("marker"), let ms = resolver.ResolvePseudo(node, "marker", parent: style, context: context) {
                     box.MarkerStyle = ms
                     if let content = ms.Content { box.Marker = contentText(node, content, quotes: ms.Quotes) }
@@ -408,6 +409,21 @@ public final class BoxTreeBuilder {
         }
         byNode[node.Id] = box
         return box
+    }
+
+    /// A list item's marker image, where the page has it; until then the
+    /// list-style-type marker stands in.
+    func markerImage(_ box: Box, _ src: string) {
+        if let img = Images[src], img.Width > 0 {
+            box.MarkerImage = img
+            box.MarkerImageSize = draw.Size(float32(img.Width), float32(img.Height))
+        } else if let doc = Vectors[src] {
+            box.MarkerVector = doc.Drawing
+            box.MarkerImageSize = draw.Size(doc.Width > 0 ? doc.Width : 8, doc.Height > 0 ? doc.Height : 8)
+        } else {
+            return
+        }
+        box.Marker = "\u{FFFC}"
     }
 
     /// Puts an image the page has for src in a replaced box, an SVG as

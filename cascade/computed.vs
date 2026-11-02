@@ -306,6 +306,14 @@ public final class ComputedStyle {
     /// quotes: open and close strings by nesting depth. Inherited; auto
     /// is English's curly quotes.
     public var Quotes: [string] = ["\u{201C}", "\u{201D}", "\u{2018}", "\u{2019}"]
+    /// caption-side: bottom puts a table's captions under its rows.
+    /// Inherited.
+    public var CaptionBelow = false
+    /// list-style-image's URL, empty for none. Inherited.
+    public var ListStyleImage: string = ""
+    /// empty-cells: hide leaves a cell with nothing in it undrawn, in
+    /// separated borders. Inherited.
+    public var HideEmptyCells = false
     /// SVG's fill, which inherits: a color, the element's color
     /// (currentColor, kept as that), or none.
     public var Fill: draw.Color = draw.Color(0, 0, 0)
@@ -345,6 +353,9 @@ public final class ComputedStyle {
         BorderSpacing = parent.BorderSpacing
         TabSize = parent.TabSize
         Quotes = parent.Quotes
+        CaptionBelow = parent.CaptionBelow
+        ListStyleImage = parent.ListStyleImage
+        HideEmptyCells = parent.HideEmptyCells
         TextShadows = parent.TextShadows
         TextWrapStyle = parent.TextWrapStyle
         ScrollbarThumb = parent.ScrollbarThumb

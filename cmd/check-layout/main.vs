@@ -357,6 +357,16 @@ func testPseudoElements() {
     check(l.rect("c")!.Height == 35 && l.rect("after")!.Y == l.rect("c")!.Y + 35, "a clearing ::after block contains the float (got \(l.rect("c")!.Height))")
 }
 
+func testCaptionSide() {
+    print("caption-side")
+    guard let l = layoutOf("<body style='margin:0'><table id=t style='border-spacing:0'><caption id=top style='height:10px'></caption><caption id=bot style='caption-side:bottom;height:15px'></caption><tr><td id=c style='height:20px;padding:0'></td></tr></table></body>") else { check(false, "layout"); return }
+    let top = l.rect("top")!
+    let bot = l.rect("bot")!
+    let c = l.rect("c")!
+    check(top.Y == 0 && near(c.Y, 10) && near(bot.Y, 30), "caption-side: bottom puts a caption under the rows (got \(top.Y) \(c.Y) \(bot.Y))")
+    check(near(l.rect("t")!.Height, 45), "and the table holds it (got \(l.rect("t")!.Height))")
+}
+
 func testCounters() {
     print("Counters and quotes")
     guard let l = layoutOf("""
@@ -697,6 +707,7 @@ func main() -> int32 {
     testWrapping()
     testPseudoElements()
     testCounters()
+    testCaptionSide()
     testGrid()
     testPositioning()
     testColumns()

@@ -576,8 +576,28 @@ final class DisplayListBuilder {
         opacity = savedOpacity
     }
 
-    func paintBackgroundAndBorderIfVisible(_ box: layout.Box, x: float32, y: float32, skipBackground: Int) {
-        if box.Style.Visibility == .visible && box.Id != skipBackground {
+    /// empty-cells: hide on a cell with nothing in it, borders separate.
+    func isHiddenEmptyCell(_ box: layout.Box) -> bool {
+        let s = box.Style
+        if !s.HideEmptyCells || s.Display != .tableCell || s.BorderCollapse == .collapse { return false }
+        return isEmptyContent(box)
+    }
+
+    func isEmptyContent(_ box: layout.Box) -> bool {
+        for c in box.Children {
+            if c.Kind == .text {
+                if !layout.IsBlank(c.Text) { return false }
+            } else if c.IsAnonymous && (c.Kind == .block || c.Kind == .inline) {
+                if !isEmptyContent(c) { return false }
+            } else {
+                return false
+            }
+        }
+        return true
+    }
+
+        func paintBackgroundAndBorderIfVisible(_ box: layout.Box, x: float32, y: float32, skipBackground: Int) {
+        if box.Style.Visibility == .visible && box.Id != skipBackground && !isHiddenEmptyCell(box) {
             paintBackgroundAndBorder(box, x: x, y: y)
         }
         // A box a program draws into itself (ui/viewport): what the page
@@ -1215,6 +1235,20 @@ final class DisplayListBuilder {
             switch f.Kind {
             case .text, .marker:
                 if f.Owner.Style.Visibility != .visible { continue }
+                if f.Kind == .marker && (f.Box.MarkerImage != nil || f.Box.MarkerVector != nil) {
+                    let size = f.Box.MarkerImageSize
+                    let r = draw.Rect(x + f.X, y + f.Y, size.Width, size.Height)
+                    if let img = f.Box.MarkerImage {
+                        items.append(.image(r, img, opacity))
+                    } else {
+                        var item = PaintItem(.vector)
+                        item.Rect = r
+                        item.Vector = f.Box.MarkerVector
+                        item.Color = color(f.Owner.Style.Color)
+                        items.append(item)
+                    }
+                    continue
+                }
                 var ownColor = f.Owner.Style.Color
                 if f.Kind == .marker, let ms = f.Box.MarkerStyle { ownColor = ms.Color }
                 // ::first-line recolors what of the line inherits the

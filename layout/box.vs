@@ -84,6 +84,11 @@ public final class Box {
     public var Replaced: ReplacedKind = .none
     /// The marker text of a list item: "•", "3.", "iv.".
     public var Marker: string = ""
+    /// list-style-image: the marker is this image (or SVG drawing),
+    /// MarkerImageSize big, in place of Marker's text.
+    public var MarkerImage: draw.Image? = nil
+    public var MarkerVector: svg.Drawing? = nil
+    public var MarkerImageSize: draw.Size = draw.Size(0, 0)
     /// A replaced box's own size, before CSS: an image's pixels, a
     /// control's default.
     /// An <svg> box's shapes.

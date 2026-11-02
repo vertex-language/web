@@ -1707,6 +1707,9 @@ func apply(_ given: css.Longhand, _ s: ComputedStyle, _ ctx: ApplyContext) {
     case .tabSize: if case .number(let n) = v { s.TabSize = int32(n) }
     case .content:
         if case .families(let parts) = v { s.Content = parts } else { s.Content = nil }
+    case .captionSide: if let k = keywordOf(v) { s.CaptionBelow = k == "bottom" }
+    case .listStyleImage: if case .url(let u) = v { s.ListStyleImage = u } else { s.ListStyleImage = "" }
+    case .emptyCells: if let k = keywordOf(v) { s.HideEmptyCells = k == "hide" }
     case .counterReset: s.CounterReset = counterChanges(v)
     case .counterIncrement: s.CounterIncrement = counterChanges(v)
     case .counterSet: s.CounterSet = counterChanges(v)
@@ -2311,6 +2314,9 @@ func copyProperty(_ p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .counterIncrement: b.CounterIncrement = a.CounterIncrement
     case .counterSet: b.CounterSet = a.CounterSet
     case .quotes: b.Quotes = a.Quotes
+    case .captionSide: b.CaptionBelow = a.CaptionBelow
+    case .listStyleImage: b.ListStyleImage = a.ListStyleImage
+    case .emptyCells: b.HideEmptyCells = a.HideEmptyCells
     case .fill:
         b.Fill = a.Fill
         b.FillCurrent = a.FillCurrent

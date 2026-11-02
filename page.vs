@@ -790,7 +790,13 @@ public final class Page {
             containerPasses = 0
         }
         if needsPaint {
-            if let r = root { loadStyleImages(r) }
+            // A list item's marker image is laid out: one that has just
+            // loaded builds the boxes again.
+            if let r = root, loadStyleImages(r) {
+                needsStyle = true
+                update()
+                return
+            }
             if let r = root {
                 var state = paint.State()
                 state.Focused = focused?.Id ?? 0
@@ -1294,23 +1300,29 @@ func drawable(_ img: image.RGBA) -> draw.Image {
 
 extension Page {
     /// Loads the images laid-out boxes' styles name and the page hasn't
-    /// tried yet: a background, mask or border image in an inline style,
-    /// or one a .vsx component's style gives after the page loaded.
-    func loadStyleImages(_ box: layout.Box) {
+    /// tried yet: a background, mask, border or list image in an inline
+    /// style, or one a .vsx component's style gives after the page
+    /// loaded. Answers whether a list image loaded, which layout needs.
+    func loadStyleImages(_ box: layout.Box) -> bool {
         var wanted: [string] = []
+        var markers: [string] = []
         func visit(_ b: layout.Box) {
             let s = b.Style
             if let bg = s.BackgroundImage, !bg.URL.isEmpty { wanted.append(bg.URL) }
             if !s.MaskURL.isEmpty { wanted.append(s.MaskURL) }
             if !s.BorderImageURL.isEmpty { wanted.append(s.BorderImageURL) }
+            if !s.ListStyleImage.isEmpty && s.Display == .listItem { wanted.append(s.ListStyleImage); markers.append(s.ListStyleImage) }
             for c in b.Children { visit(c) }
             for p in b.Positioned where p.Parent?.Id != b.Id { visit(p) }
         }
         visit(box)
+        var relayout = false
         for src in wanted where triedImages[src] == nil && images[src] == nil && vectors[src] == nil {
             triedImages[src] = true
             loadImage(src)
+            if markers.contains(src) && (images[src] != nil || vectors[src] != nil) { relayout = true }
         }
+        return relayout
     }
 
     /// Loads an image: a data: URL here and now (an SVG one as a

@@ -137,14 +137,14 @@ extension Layout {
         var y: float32 = 0
         let cb = ContainingBlock(width: contentWidth, height: definiteInnerHeight(table))
 
-        // Captions come first, as blocks.
-        for caption in grid.captions {
+        // Captions come first, as blocks, but for caption-side: bottom.
+        for caption in grid.captions where !caption.Style.CaptionBelow {
             layoutBlock(caption, cb: cb, flow: flow.root(caption))
             caption.X = table.ContentX + caption.Margin.Left
             caption.Y = table.ContentY + y + caption.Margin.Top
             y += caption.OuterHeight
         }
-        if grid.columns == 0 { return y }
+        if grid.columns == 0 { return captionsBelow(table, grid, y, cb: cb, flow: flow) }
 
         // Column widths: the limits stretched or squeezed into the width.
         let limits = columnLimits(grid, cbWidth: contentWidth)
@@ -289,6 +289,19 @@ extension Layout {
             g.ContentHeight = g.Height
         }
         table.ContentWidth = contentWidth
+        return captionsBelow(table, grid, y, cb: cb, flow: flow)
+    }
+
+    /// Lays out the captions that go under the rows, from y; answers
+    /// where they end.
+    func captionsBelow(_ table: Box, _ grid: TableGrid, _ top: float32, cb: ContainingBlock, flow: Flow) -> float32 {
+        var y = top
+        for caption in grid.captions where caption.Style.CaptionBelow {
+            layoutBlock(caption, cb: cb, flow: flow.root(caption))
+            caption.X = table.ContentX + caption.Margin.Left
+            caption.Y = table.ContentY + y + caption.Margin.Top
+            y += caption.OuterHeight
+        }
         return y
     }
 

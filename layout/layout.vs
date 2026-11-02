@@ -321,6 +321,9 @@ public final class Layout {
             // marker to that block's first line.
             if first && !box.Marker.isEmpty && child.Marker.isEmpty {
                 child.Marker = box.Marker
+                child.MarkerImage = box.MarkerImage
+                child.MarkerVector = box.MarkerVector
+                child.MarkerImageSize = box.MarkerImageSize
             }
             if child.Style.Clear != .none {
                 // Move down past the floats cleared, margins and all.

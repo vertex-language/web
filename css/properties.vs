@@ -134,6 +134,7 @@ public enum Prop: int32 {
     case wordBreak
     case textOverflow
     case listStyleType
+    case listStyleImage
     case listStylePosition
     case cursor
     case pointerEvents
@@ -148,6 +149,8 @@ public enum Prop: int32 {
     case counterIncrement
     case counterSet
     case quotes
+    case captionSide
+    case emptyCells
     case fill
     case transform
     case transformOrigin
@@ -392,12 +395,12 @@ let propNames: [string: Prop] = [
     "color": .color, "font-family": .fontFamily, "font-size": .fontSize, "font-weight": .fontWeight,
     "font-style": .fontStyle, "line-height": .lineHeight, "text-align": .textAlign,
     "text-transform": .textTransform, "text-indent": .textIndent, "letter-spacing": .letterSpacing,
-    "word-spacing": .wordSpacing, "white-space": .whiteSpace, "list-style-type": .listStyleType,
+    "word-spacing": .wordSpacing, "white-space": .whiteSpace, "list-style-type": .listStyleType, "list-style-image": .listStyleImage,
     "overflow-wrap": .overflowWrap, "word-wrap": .overflowWrap, "word-break": .wordBreak, "text-overflow": .textOverflow,
     "list-style-position": .listStylePosition, "cursor": .cursor, "pointer-events": .pointerEvents, "user-select": .userSelect, "-webkit-user-select": .userSelect, "visibility": .visibility, "scrollbar-width": .scrollbarWidth,
     "border-collapse": .borderCollapse, "border-spacing": .borderSpacing, "tab-size": .tabSize,
     "content": .content, "counter-reset": .counterReset, "counter-increment": .counterIncrement,
-    "counter-set": .counterSet, "quotes": .quotes, "fill": .fill,
+    "counter-set": .counterSet, "quotes": .quotes, "caption-side": .captionSide, "empty-cells": .emptyCells, "fill": .fill,
 ]
 
 /// Parses a declaration from a stylesheet into the longhands it sets.
@@ -653,9 +656,18 @@ func longhands(_ d: Declaration) -> [Longhand] {
         set(.rowGap, first)
         set(.columnGap, tokens.count > 1 ? (parseLengthValue(tokens[1], allowAuto: false) ?? first) : first)
     case "list-style":
-        for t in tokens {
+        var i = 0
+        while i < tokens.count {
+            let t = tokens[i]
+            if t.Kind == .url || (t.Kind == .function && lower(t.Value) == "url") {
+                let end = t.Kind == .url ? i : closeParen(tokens, from: i + 1)
+                if let img = parseValue(.listStyleImage, Array(tokens[i...end])) { set(.listStyleImage, img) }
+                i = end + 1
+                continue
+            }
             if let ty = parseValue(.listStyleType, [t]) { set(.listStyleType, ty) }
             else if let pos = parseValue(.listStylePosition, [t]) { set(.listStylePosition, pos) }
+            i += 1
         }
     case "text-decoration":
         var i = 0
@@ -756,11 +768,11 @@ func longhands(_ d: Declaration) -> [Longhand] {
          "font-variant", "font-stretch", "font-feature-settings", "src", "unicode-range",
          "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
          "hyphens",
-         "writing-mode", "caption-side",
-         "empty-cells", "speak",
+         "writing-mode",
+         "speak",
          "font-display",
          "text-size-adjust", "-webkit-text-size-adjust", "-webkit-tap-highlight-color",
-         "list-style-image", "font-kerning",
+         "font-kerning",
          "text-align-last", "text-justify", "font-variant-numeric", "font-variant-ligatures",
          "font-optical-sizing",
          "unused-placeholder-property":
@@ -940,7 +952,7 @@ func longhandsOf(_ name: string) -> [Prop] {
     case "grid": return [.gridTemplateRows, .gridTemplateColumns, .gridTemplateAreas, .gridAutoRows, .gridAutoColumns, .gridAutoFlow]
     case "place-self": return [.alignSelf, .justifySelf]
     case "place-content": return [.alignContent, .justifyContent]
-    case "list-style": return [.listStyleType, .listStylePosition]
+    case "list-style": return [.listStyleType, .listStylePosition, .listStyleImage]
     case "text-decoration": return [.textDecorationLine, .textDecorationColor, .textDecorationStyle, .textDecorationThickness]
     case "margin-inline", "margin-block", "padding-inline", "padding-block", "inset-inline", "inset-block":
         return logicalPair(name)
@@ -2193,6 +2205,11 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
     case .listStylePosition:
         if kw == "inside" || kw == "outside" { return .keyword(kw) }
         return nil
+    case .listStyleImage:
+        if kw == "none" { return .none }
+        if t.Kind == .url { return .url(t.Value) }
+        if t.Kind == .function && lower(t.Value) == "url" && tokens.count > 1 && tokens[1].Kind == .string { return .url(tokens[1].Value) }
+        return nil
     case .cursor:
         // `url(hand.png) 4 4, pointer`: the keyword the list falls back to.
         // (Images as cursors are not drawn yet: the fallback is.)
@@ -2251,6 +2268,15 @@ func parseValue(_ prop: Prop, _ tokens: [Token]) -> Value? {
             k += 1
         }
         return parts.isEmpty ? nil : .families(parts)
+    case .captionSide:
+        switch kw {
+        case "top", "block-start": return .keyword("top")
+        case "bottom", "block-end": return .keyword("bottom")
+        default: return nil
+        }
+    case .emptyCells:
+        if kw == "show" || kw == "hide" { return .keyword(kw) }
+        return nil
     case .quotes:
         // Pairs of strings; auto is the language's, none none.
         if kw == "none" { return .none }
