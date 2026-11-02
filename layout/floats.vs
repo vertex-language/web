@@ -4,6 +4,25 @@ import "web/cascade"
 
 /// A float placed in a block formatting context: its margin box, in the
 /// context root's coordinates.
+/// A gradient drawn at a size, no more than 256 pixels a side (scaled down
+/// to that), for its alpha.
+func gradientImage(gradient: draw.LinearGradient?, width: float32, height: float32) -> draw.Image? {
+    guard var g = gradient, width > 0 && height > 0 else { return nil }
+    let most = width > height ? width : height
+    let k: float32 = most > 256 ? 256 / most : 1
+    if g.Unresolved { g = g.ResolvedFor(most) }
+    if k < 1 { g = g.Scaled(k) }
+    var w = int32(width * k)
+    var h = int32(height * k)
+    if w < 1 { w = 1 }
+    if h < 1 { h = 1 }
+    var pixels = [uint8](repeating: 0, count: int(w) * int(h) * 4)
+    draw.WithCanvas(&pixels, width: w, height: h) { c in
+        c.FillGradient(draw.IRect(x: 0, y: 0, width: w, height: h), radii: draw.Radii.zero, gradient: g)
+    }
+    return draw.Image(width: w, height: h, pixels: pixels)
+}
+
 struct PlacedFloat {
     var box: Box
     var left: bool
@@ -124,12 +143,15 @@ final class FloatContext {
                 if let shape = box.Style.ShapeOutside {
                     placed.shape = ClipRegionOf(box, x: x + box.Margin.Left, y: y + box.Margin.Top, shape: shape)
                     placed.shapeMargin = box.Style.ShapeMargin
-                } else if let img = box.ShapeImage, img.Width > 0 && img.Height > 0 {
+                } else if box.ShapeImage != nil || box.Style.ShapeOutsideGradient != nil {
                     // An image's shape: where its alpha is over the threshold,
-                    // the image stretched over the content box.
+                    // the image stretched over the content box. A gradient is
+                    // drawn there to be one.
                     let content = draw.Rect(x + box.Margin.Left + box.ContentX, y + box.Margin.Top + box.ContentY, box.InnerWidth, box.Height - box.Border.Vertical - box.Padding.Vertical)
-                    placed.shape = AlphaRegion(img, over: content, threshold: box.Style.ShapeImageThreshold)
-                    placed.shapeMargin = box.Style.ShapeMargin
+                    if let img = box.ShapeImage ?? gradientImage(box.Style.ShapeOutsideGradient, content.Width, content.Height), img.Width > 0 && img.Height > 0 {
+                        placed.shape = AlphaRegion(img, over: content, threshold: box.Style.ShapeImageThreshold)
+                        placed.shapeMargin = box.Style.ShapeMargin
+                    }
                 }
                 floats.append(placed)
                 return placed

@@ -182,6 +182,9 @@ public final class Box {
     /// shows in, relative to its border box's corner, where its
     /// background and border are drawn. Empty where it is whole.
     public var ColumnFragments: [draw.Rect] = []
+    /// A grid's one-row items, by row, and how tall each is laid out: what a
+    /// subgrid asks of its parent's rows.
+    public var GridRowNeeds: [(row: int, height: float32)] = []
     /// text-box-trim from a block above whose first or last formatted line
     /// is in this box, and that block's text-box-edge.
     public var TrimFromAbove: (start: bool, end: bool, edge: string) = (start: false, end: false, edge: "")

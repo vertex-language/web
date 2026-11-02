@@ -2534,6 +2534,10 @@ func parseValue(prop: Prop, tokens: [Token]) -> Value? {
         return parseColorAt(tokens, 0)?.0
     case .shapeOutside:
         if kw == "none" { return Value.none }
+        if t.Kind == .function && isGradientName(lower(t.Value)) {
+            if let g = parseGradient(tokens, 1, closeParen(tokens, from: 1)) { return .gradient(g) }
+            return nil
+        }
         return parseValue(.clipPath, tokens)
     case .shapeMargin:
         return parseLengthValue(t, allowAuto: false)

@@ -476,6 +476,7 @@ extension Layout {
         // Row heights: given tracks, else the tallest item in the row
         // once laid out at its column width.
         var heights = [float32](repeating: 0, count: rowCount)
+        var needs: [(row: int, height: float32)] = []
         var r = 0
         while r < rowCount {
             let track: css.GridTrack = r < s.GridRows.count ? s.GridRows[r] : s.GridAutoRows
@@ -517,8 +518,23 @@ extension Layout {
                     if !child.Style.ClipsOverflow && child.OuterHeight > heights[it.row] { heights[it.row] = child.OuterHeight }
                 }
                 if !fixedRow && child.OuterHeight > heights[it.row] { heights[it.row] = child.OuterHeight }
+                needs.append((row: it.row, height: child.OuterHeight))
+            }
+            // A subgrid on rows: its items ask of the rows they're in, its own
+            // edges on its first and last.
+            if child.Style.SubgridRows {
+                for n in child.GridRowNeeds where n.row < it.rowSpan {
+                    let row = it.row + n.row
+                    let track: css.GridTrack = row < s.GridRows.count ? s.GridRows[row] : s.GridAutoRows
+                    if case .length = track { continue }
+                    var h = n.height
+                    if n.row == 0 { h += child.Margin.Top + child.Border.Top + child.Padding.Top }
+                    if n.row == it.rowSpan - 1 { h += child.Margin.Bottom + child.Border.Bottom + child.Padding.Bottom }
+                    if h > heights[row] { heights[row] = h }
+                }
             }
         }
+        box.GridRowNeeds = needs
         var rowY = [float32](repeating: 0, count: rowCount + 1)
         var rowEnd = [float32](repeating: 0, count: rowCount)
         var y: float32 = 0

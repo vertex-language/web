@@ -130,6 +130,8 @@ public final class ComputedStyle {
     /// shape-outside: url(): the image whose alpha is the shape, and
     /// shape-image-threshold, the alpha above which it's in.
     public var ShapeOutsideURL: string = ""
+    /// shape-outside: a gradient, whose alpha is the shape as an image's is.
+    public var ShapeOutsideGradient: draw.LinearGradient? = nil
     public var ShapeImageThreshold: float32 = 0
     /// corner-shape, per corner from the top left: superellipse exponents as
     /// text, or "notch" or "square". Empty for all round.
@@ -516,6 +518,16 @@ public final class ComputedStyle {
         let f = font.Load(spec)
         face = f
         return f
+    }
+
+    /// The face with vertical forms (vert), for what stands upright in
+    /// vertical text: its punctuation and brackets as they go down a line.
+    public var VerticalFace: font.Face {
+        var spec = font.Spec(families: FontFamilies, size: FontSize, weight: FontWeight, italic: FontStyle != .normal)
+        let features = FontFeatureSpec
+        spec.Features = features.isEmpty ? "vert=1" : features + ",vert=1"
+        spec.Variations = FontVariationSpec
+        return font.Load(spec)
     }
 
     /// The line height in pixels: the face's for `normal`, a number

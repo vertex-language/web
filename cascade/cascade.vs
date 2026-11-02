@@ -1555,7 +1555,9 @@ func apply(given: css.Longhand, s: ComputedStyle, ctx: ApplyContext) {
         // or an image, whose alpha is the shape.
         s.ShapeOutside = nil
         s.ShapeOutsideURL = ""
+        s.ShapeOutsideGradient = nil
         if case .url(let u) = v { s.ShapeOutsideURL = u }
+        if case .gradient(let g) = v { s.ShapeOutsideGradient = g }
         if case .clipShape = v {
             let held = s.ClipPath
             var asClip = d
@@ -2617,6 +2619,7 @@ func copyProperty(p: css.Prop, from a: ComputedStyle, to b: ComputedStyle) {
     case .shapeOutside:
         b.ShapeOutside = a.ShapeOutside
         b.ShapeOutsideURL = a.ShapeOutsideURL
+        b.ShapeOutsideGradient = a.ShapeOutsideGradient
     case .shapeImageThreshold: b.ShapeImageThreshold = a.ShapeImageThreshold
     case .shapeMargin: b.ShapeMargin = a.ShapeMargin
     case .cornerShape: b.CornerShapes = a.CornerShapes

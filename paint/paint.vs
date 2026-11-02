@@ -798,14 +798,26 @@ final class DisplayListBuilder {
             return
         }
         let face = style.Face
+        // A bracket that took a vertical form stands upright; one that
+        // didn't turns with the line, to open along it.
+        var vertical = [bool](repeating: false, count: cps.count)
+        var v = 0
+        while v < cps.count {
+            if !standsUpright(cps[v]) && cps[v] >= 0x3000 {
+                let plain = face.Shape(string(Character(Unicode.Scalar(cps[v])!)))
+                vertical[v] = plain.Glyphs.count == 1 && plain.Glyphs[0] != f.Run.Glyphs[v]
+            }
+            v += 1
+        }
+        func uprightAt(k: int) -> bool { return style.TextOrientation == "upright" || standsUpright(cps[k]) || vertical[k] }
         var pen = x
         var i = 0
         while i < cps.count {
             var run = font.Run()
-            let upright = style.TextOrientation == "upright" || standsUpright(cps[i])
+            let upright = uprightAt(i)
             let start = pen
             var j = i
-            while j < cps.count && (upright ? j == i : !(style.TextOrientation == "upright" || standsUpright(cps[j]))) {
+            while j < cps.count && (upright ? j == i : !uprightAt(j)) {
                 run.Glyphs.append(f.Run.Glyphs[j])
                 run.Faces.append(f.Run.Faces[j])
                 run.Advances.append(f.Run.Advances[j])

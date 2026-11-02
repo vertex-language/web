@@ -890,7 +890,11 @@ extension Layout {
                 let text = stringOf(bytes, start, end)
                 var item = Item(kind: .word, box: box, owner: owner)
                 item.text = text
-                item.run = face.Shape(text)
+                // CJK going down a vertical line takes its vertical forms;
+                // what turns with the line keeps its own.
+                var upright = style.IsVertical && !style.WritingMode.hasPrefix("sideways") && style.TextOrientation != "sideways"
+                for u in text.unicodeScalars where !isCJK(u.value) { upright = false }
+                item.run = upright ? style.VerticalFace.Shape(text) : face.Shape(text)
                 item.width = item.run.Width + style.LetterSpacing * float32(item.run.Count)
                 item.offset = start
                 item.length = end - start

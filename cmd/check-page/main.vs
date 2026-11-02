@@ -1827,6 +1827,23 @@ func testCompositing() {
     check(combinedWidths("a") == [20], "text-combine-upright: all takes one em of the line (got \(combinedWidths("a")))")
     check(combinedWidths("d") == [20], "digits 2 combines two digits but not three (got \(combinedWidths("d")))")
 
+    // Vertical text takes its CJK punctuation's vertical forms; Latin
+    // keeps its own, to turn with the line.
+    let vfm = web.Page()
+    vfm.SetViewportSize(draw.Size(200, 300))
+    vfm.LoadHTML("<style>body { margin: 0; font: 20px serif } p { writing-mode: vertical-rl; height: 280px; margin: 0 }</style><p id=p>「本」Ab</p>")
+    var vfmp = [uint8](repeating: 0, count: 200 * 300 * 4)
+    vfm.Draw(into: &vfmp, width: 200, height: 300, scale: 1)
+    var vfmBox = vfm.BoxFor(vfm.QuerySelector("#p")!)!
+    if let inner = vfmBox.VerticalContent { vfmBox = inner }
+    var vfmGlyphs: [uint32] = []
+    for line in vfmBox.Lines {
+        for f in line.Fragments where f.Kind == .text { vfmGlyphs += f.Run.Glyphs }
+    }
+    let vfmFace = vfmBox.Style.Face
+    check(vfmGlyphs.count == 5 && vfmGlyphs[0] != vfmFace.Shape("「").Glyphs[0] && vfmGlyphs[3] == vfmFace.Shape("A").Glyphs[0],
+          "vertical text takes a bracket's vertical form, and Latin its own (got \(vfmGlyphs), horizontal 「 \(vfmFace.Shape("「").Glyphs))")
+
     // shape-outside: url(): text wraps round the image's opaque part.
     let so = web.Page()
     so.SetViewportSize(draw.Size(300, 200))
@@ -1837,6 +1854,14 @@ func testCompositing() {
     let soLines = so.BoxFor(so.QuerySelector("#wrap")!)!.Lines
     let soX = soLines.isEmpty ? -1 : soLines[0].X
     check(soX >= 50 && soX < 60, "shape-outside with an image wraps text round its opaque half (first line at \(soX))")
+    let sg = web.Page()
+    sg.SetViewportSize(draw.Size(300, 200))
+    sg.LoadHTML("<style>body { margin: 0; font-size: 10px; line-height: 10px } #fl { float: left; width: 100px; height: 40px; shape-outside: linear-gradient(to right, black 50%, transparent 50%) }</style><div id=fl></div><p id=wrap style='margin: 0'>word word word word word word word word word word word word word word word word word word word word</p>")
+    var sgp = [uint8](repeating: 0, count: 300 * 200 * 4)
+    sg.Draw(into: &sgp, width: 300, height: 200, scale: 1)
+    let sgLines = sg.BoxFor(sg.QuerySelector("#wrap")!)!.Lines
+    let sgX = sgLines.isEmpty ? -1 : sgLines[0].X
+    check(sgX >= 50 && sgX < 60, "and with a gradient, round where it's opaque (first line at \(sgX))")
 
     // @page :first, :left and :right.
     let pf = web.Page()

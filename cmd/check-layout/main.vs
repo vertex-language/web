@@ -676,6 +676,15 @@ func testColumns() {
     """) else { check(false, "layout"); return }
     check(sg.rect("c1")!.Width - sg.rect("c2")!.Width == 130, "a subgrid's items size the parent's auto columns (got \(sg.rect("c1")!.Width) \(sg.rect("c2")!.Width))")
 
+    guard let sr = layoutOf("""
+    <body style='margin:0'><div style='display:grid;grid-template-columns:100px 100px;grid-template-rows:auto auto'>
+    <div style='grid-column:1;grid-row:1 / 3;display:grid;grid-template-rows:subgrid;padding-top:5px'><div style='height:30px'></div><div style='height:50px'></div></div>
+    <div id=r1 style='grid-column:2;grid-row:1'></div><div id=r2 style='grid-column:2;grid-row:2'></div>
+    </div></body>
+    """) else { check(false, "layout"); return }
+    check(sr.rect("r1")!.Height == 35 && sr.rect("r2")!.Y == 35 && sr.rect("r2")!.Height == 50,
+          "a subgrid's items size the parent's rows, its padding on the first (got \(sr.rect("r1")!) \(sr.rect("r2")!))")
+
     guard let ms = layoutOf("""
     <body style='margin:0'><div style='display:masonry;grid-template-columns:50px 50px 50px;width:150px;column-gap:0;row-gap:0'>
     <div style='height:30px'></div><div style='height:10px'></div><div style='height:20px'></div>
